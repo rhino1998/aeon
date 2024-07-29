@@ -44,8 +44,11 @@ func main() {
 							return fmt.Errorf("failed to find aeon files in directory: %w", err)
 						}
 
+						for _, file := range files {
+							config.Files = append(config.Files, filepath.Base(file))
+						}
+
 						config.Src = os.DirFS(path)
-						config.Files = files
 					} else {
 						config.Src = os.DirFS(filepath.Dir(path))
 						config.Files = []string{filepath.Base(path)}

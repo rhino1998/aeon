@@ -1,37 +1,161 @@
 {
-package compiler
+package parser
+
+func anySliceToSlice[T any](s []any) []T {
+  var ret []T
+  for _, s := range s {
+    if s == nil {
+      continue
+    }
+    ret = append(ret, s.(T))
+  }
+
+  return ret
+}
 
 }
 
-Program <- pkg:Package EOF {
+Program <- pkg:Package _ decls:(Declaration)* EOF {
   return Program {
-    Package: pkg,
+    Package: pkg.(Package),
+
+    Declarations: anySliceToSlice[Declaration](decls.([]any)),
   }, nil
 }
 
-Package <- "package" name:Identifier '\n'
-
-Type <- ident:Identifier {
-  return ident, nil
-} / pointer:PointerType {
-  return pointer
+Package <- "package" _ name:Identifier {
+  return Package{
+    Name: name.(Identifier),
+  }, nil
 }
+
+Declaration <- FunctionDeclaration
+
+Type <- Identifier / PointerType
 
 PointerType <- '*' pointee:Type {
-  return pointee, nil
+  return PointerType{Pointee: pointee.(Type)}, nil
 }
 
-Function <- "func" _ name:Ident '(' args:(name:Identifer _ type_:Type )?')' {
-  return string(c.text)
+Statement <- VarStatement / ExprStatement
+
+VarStatement <- _ "var" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
+  var v VarStatement
+  v.Name = name.(Identifier)
+  if typ != nil {
+    typePtr := typ.(Type)
+    v.Type = &typePtr
+  }
+
+  if exp != nil {
+    expPtr := exp.(Expr)
+    v.Expr = &expPtr
+  }
+
+  if typ == nil && exp == nil {
+    return nil, fmt.Errorf("var statement must have a type or an expression")
+  }
+
+  return v, nil
 }
 
-Identifier <- [_a-zA-Z][_0-9a-zA-Z] {
-  return Identifier(c.text)
+VarStatementExpr <- '=' _ exp:Expr _ {
+  return exp.(Expr), nil
 }
 
-Number <- '-' ? [.0-9]+ {
-  return strconv.ParseFloat(string(c.text), 64)
+ExprStatement <- _ exp:Expr _ {
+  return ExprStatement{Expr: exp.(Expr)}, nil
 }
+
+FunctionDeclaration <- _ "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:(Statement)* '}' _ {
+  f := FunctionDeclaration{
+    Name: name.(Identifier),
+    Body: anySliceToSlice[Statement](body.([]any)),
+  }
+
+  if params != nil {
+    paramsPtr := params.([]Parameter)
+    f.Parameters = paramsPtr
+  }
+
+  if ret != nil {
+    retPtr := ret.(Type)
+    f.Return = &retPtr
+  }
+
+  return f, nil
+}
+
+ParameterList <- _ name:Identifier _ typ:Type _ rest:ParameterListComma? {
+  p := Parameter {
+    Name: name.(Identifier),
+    Type: typ.(Type),
+  }
+
+  if rest == nil {
+    return []Parameter{p}, nil
+  }
+
+  return append([]Parameter{p}, rest.([]Parameter)...), nil
+}
+
+ParameterListComma <- ',' rest:ParameterList {
+  return rest, nil
+}
+
+Identifier <- [_a-zA-Z][_a-zA-Z0-9]* {
+  return Identifier(c.text), nil
+}
+
+Expr <- CallExpr / DotExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
+
+NumberLiteral <- '-' ? ( [0-9]+ / [0-9]+.[0-9]+) {
+  f, err := strconv.ParseFloat(string(c.text), 64)
+  if err != nil {
+    return 0, err
+  }
+
+  return NumberLiteral(f), nil
+}
+
+StringLiteral <- '"' ( !EscapedChar . / '\\' EscapeSequence )* '"' {
+    c.text = bytes.Replace(c.text, []byte(`\/`), []byte(`/`), -1)
+    str, err := strconv.Unquote(string(c.text))
+    if err != nil {
+      return nil, err
+    }
+
+    return StringLiteral(str), nil
+}
+
+BooleanLiteral <- ("true" / "false") {
+  return BooleanLiteral(string(c.text)=="true"), nil
+}
+
+IdentifierExpr <- ident:Identifier {
+  return IdentifierExpr{Identifier: ident.(Identifier)}, nil
+}
+
+CallExpr <- exp:Expr '(' ')' {
+  call := CallExpr{
+
+  }
+
+  return call, nil
+}
+
+DotExpr <- exp:Expr '.' ident:Identifier {
+  return DotExpr{
+    Expr:exp.(Expr),
+    Key:ident.(Identifier),
+  }, nil
+}
+
+EscapedChar <- [\x00-\x1f"\\]
+
+EscapeSequence <- SingleCharEscape / UnicodeEscape
+
+SingleCharEscape <- ["\\/bfnrt]
 
 _ "whitespace" <- [ \n\t\r]*
 
