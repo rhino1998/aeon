@@ -1,0 +1,38 @@
+{
+package compiler
+
+}
+
+Program <- pkg:Package EOF {
+  return Program {
+    Package: pkg,
+  }, nil
+}
+
+Package <- "package" name:Identifier '\n'
+
+Type <- ident:Identifier {
+  return ident, nil
+} / pointer:PointerType {
+  return pointer
+}
+
+PointerType <- '*' pointee:Type {
+  return pointee, nil
+}
+
+Function <- "func" _ name:Ident '(' args:(name:Identifer _ type_:Type )?')' {
+  return string(c.text)
+}
+
+Identifier <- [_a-zA-Z][_0-9a-zA-Z] {
+  return Identifier(c.text)
+}
+
+Number <- '-' ? [.0-9]+ {
+  return strconv.ParseFloat(string(c.text), 64)
+}
+
+_ "whitespace" <- [ \n\t\r]*
+
+EOF <- !.
