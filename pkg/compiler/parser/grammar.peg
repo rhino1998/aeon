@@ -1,13 +1,13 @@
 {
 package parser
 
-func anySliceToSlice[T any](s []any) []T {
+func anyToSlice[T any](s any) []T {
   var ret []T
-  for _, s := range s {
-    if s == nil {
+  for _, e := range s.([]any) {
+    if e == nil {
       continue
     }
-    ret = append(ret, s.(T))
+    ret = append(ret, e.(T))
   }
 
   return ret
@@ -19,7 +19,7 @@ Program <- pkg:Package _ decls:(Declaration)* EOF {
   return Program {
     Package: pkg.(Package),
 
-    Declarations: anySliceToSlice[Declaration](decls.([]any)),
+    Declarations: anyToSlice[Declaration](decls),
   }, nil
 }
 
@@ -70,12 +70,11 @@ ExprStatement <- _ exp:Expr _ {
 FunctionDeclaration <- _ "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:(Statement)* '}' _ {
   f := FunctionDeclaration{
     Name: name.(Identifier),
-    Body: anySliceToSlice[Statement](body.([]any)),
+    Body: anyToSlice[Statement](body),
   }
 
   if params != nil {
-    paramsPtr := params.([]Parameter)
-    f.Parameters = paramsPtr
+    f.Parameters = params.([]Parameter)
   }
 
   if ret != nil {
@@ -107,7 +106,7 @@ Identifier <- [_a-zA-Z][_a-zA-Z0-9]* {
   return Identifier(c.text), nil
 }
 
-Expr <- CallExpr / DotExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
+Expr <- CallExpr / DotExpr / BinaryExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
 
 NumberLiteral <- '-' ? ( [0-9]+ / [0-9]+.[0-9]+) {
   f, err := strconv.ParseFloat(string(c.text), 64)
@@ -136,18 +135,72 @@ IdentifierExpr <- ident:Identifier {
   return IdentifierExpr{Identifier: ident.(Identifier)}, nil
 }
 
-CallExpr <- exp:Expr '(' ')' {
+CallExpr <- exp:Expr '(' args:CallArgumentList? ')' {
   call := CallExpr{
+    Expr: exp.(Expr),
+  }
 
+  if args != nil {
+    call.Args = args.([]Expr)
   }
 
   return call, nil
+}
+
+CallArgumentList <- _ exp:Expr _ rest:CallArgumentListComma? {
+  if rest != nil {
+    return append([]Expr{exp.(Expr)}, rest.([]Expr)...), nil
+  }
+
+  return []Expr{exp.(Expr)}, nil
+}
+
+CallArgumentListComma <- ',' rest:CallArgumentList {
+  return rest, nil
 }
 
 DotExpr <- exp:Expr '.' ident:Identifier {
   return DotExpr{
     Expr:exp.(Expr),
     Key:ident.(Identifier),
+  }, nil
+}
+
+BinaryExpr <- left:Expr _ op:("**") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("+" / "-" / "|" / "^") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("==" / "!=" / "<" / ">" / ">=" / "<=") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("&&") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("||") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
   }, nil
 }
 

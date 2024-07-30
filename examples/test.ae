@@ -5,7 +5,7 @@ func main() {
   var y = "hello"
   var z = true
 
-  x.y.z()
+  x.y.z() ** 3
 }
 
 func main() {}

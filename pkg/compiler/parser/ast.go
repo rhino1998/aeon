@@ -82,6 +82,8 @@ type BooleanLiteral bool
 func (BooleanLiteral) expr() {}
 
 type CallExpr struct {
+	Expr Expr
+	Args []Expr
 }
 
 func (CallExpr) expr() {}
@@ -98,3 +100,45 @@ type DotExpr struct {
 }
 
 func (DotExpr) expr() {}
+
+type Operator string
+
+const (
+	OperatorPower Operator = "**"
+
+	OperatorMultiplication Operator = "*"
+	OperatorDivision       Operator = "/"
+	OperatorModulo         Operator = "%"
+	OperatorLeftShift      Operator = "<<"
+	OperatorRightShift     Operator = ">>"
+	OperatorBitwiseAnd     Operator = "&"
+
+	OperatorAddition    Operator = "+"
+	OperatorSubtraction Operator = "-"
+	OperatorBitwiseOr   Operator = "|"
+	OperatorBitwiseXor  Operator = "^"
+
+	OperatorEqual              Operator = "=="
+	OperatorNotEqual           Operator = "!="
+	OperatorLessThan           Operator = "<"
+	OperatorGreaterThan        Operator = ">"
+	OperatorLessThanOrEqual    Operator = "<="
+	OperatorGreaterThanOrEqual Operator = ">="
+
+	OperatorLogicalAnd Operator = "&&"
+
+	OperatorLogicalOr Operator = "||"
+)
+
+type BinaryExpr struct {
+	Left     Expr
+	Operator Operator
+	Right    Expr
+}
+
+func (BinaryExpr) expr() {}
+
+type UnaryExpr struct {
+	Operator Operator
+	Expr     Expr
+}
