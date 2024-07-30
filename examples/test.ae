@@ -6,6 +6,10 @@ func main() {
   var z = true
 
   x.y.z() ** 3
+  x++
+  y--
+
+  y+3 ** 5
 }
 
 func main() {}

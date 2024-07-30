@@ -61,6 +61,13 @@ type ExprStatement struct {
 
 func (ExprStatement) statement() {}
 
+type PostfixStatement struct {
+	Expr     Expr
+	Operator Operator
+}
+
+func (PostfixStatement) statement() {}
+
 type Expr interface {
 	expr()
 }
@@ -128,6 +135,9 @@ const (
 	OperatorLogicalAnd Operator = "&&"
 
 	OperatorLogicalOr Operator = "||"
+
+	OperatorIncrement Operator = "++"
+	OperatorDecrement Operator = "--"
 )
 
 type BinaryExpr struct {

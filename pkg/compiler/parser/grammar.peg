@@ -37,7 +37,7 @@ PointerType <- '*' pointee:Type {
   return PointerType{Pointee: pointee.(Type)}, nil
 }
 
-Statement <- VarStatement / ExprStatement
+Statement <- VarStatement / PostfixStatement / ExprStatement
 
 VarStatement <- _ "var" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
   var v VarStatement
@@ -65,6 +65,10 @@ VarStatementExpr <- '=' _ exp:Expr _ {
 
 ExprStatement <- _ exp:Expr _ {
   return ExprStatement{Expr: exp.(Expr)}, nil
+}
+
+PostfixStatement <- _ exp:Expr op:("++" / "--") _ {
+  return PostfixStatement{Expr: exp.(Expr), Operator: Operator(op.([]byte))}, nil
 }
 
 FunctionDeclaration <- _ "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:(Statement)* '}' _ {
