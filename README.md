@@ -1,3 +1,3 @@
 # Aeon
 
-A small Go-like language that runs on top of XenonCode
+A small language with Go-like syntax that runs on top of XenonCode
