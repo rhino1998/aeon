@@ -68,6 +68,34 @@ type PostfixStatement struct {
 
 func (PostfixStatement) statement() {}
 
+type IfStatement struct {
+	Condition Expr
+	Body      []Statement
+	Else      ElseIfElseStatement
+}
+
+func (IfStatement) statement() {}
+
+type ElseIfElseStatement interface {
+	elseIfElseStatement()
+}
+
+type ElseIfStatement struct {
+	Condition Expr
+	Body      []Statement
+	Else      ElseIfElseStatement
+}
+
+func (ElseIfStatement) statement()           {}
+func (ElseIfStatement) elseIfElseStatement() {}
+
+type ElseStatement struct {
+	Body []Statement
+}
+
+func (ElseStatement) statement()           {}
+func (ElseStatement) elseIfElseStatement() {}
+
 type Expr interface {
 	expr()
 }

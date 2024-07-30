@@ -37,7 +37,7 @@ PointerType <- '*' pointee:Type {
   return PointerType{Pointee: pointee.(Type)}, nil
 }
 
-Statement <- VarStatement / PostfixStatement / ExprStatement
+Statement <- VarStatement / IfStatement / PostfixStatement / ExprStatement
 
 VarStatement <- _ "var" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
   var v VarStatement
@@ -69,6 +69,38 @@ ExprStatement <- _ exp:Expr _ {
 
 PostfixStatement <- _ exp:Expr op:("++" / "--") _ {
   return PostfixStatement{Expr: exp.(Expr), Operator: Operator(op.([]byte))}, nil
+}
+
+IfStatement <- _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
+  s := IfStatement{
+    Condition: exp.(Expr),
+    Body: anyToSlice[Statement](body),
+  }
+
+  if rest != nil {
+    s.Else = rest.(ElseIfElseStatement)
+  }
+
+  return s, nil
+}
+
+ElseIfStatement <- _ "else" _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
+  s := ElseIfStatement{
+    Condition: exp.(Expr),
+    Body: anyToSlice[Statement](body),
+  }
+
+  if rest != nil {
+    s.Else = rest.(ElseIfElseStatement)
+  }
+
+  return s, nil
+}
+
+ElseStatement <- _ "else" _ '{' body:(Statement)* _ '}' _ {
+  return ElseStatement{
+    Body: anyToSlice[Statement](body),
+  }, nil
 }
 
 FunctionDeclaration <- _ "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:(Statement)* '}' _ {

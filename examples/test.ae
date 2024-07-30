@@ -10,6 +10,15 @@ func main() {
   y--
 
   y+3 ** 5
+
+  if true {
+    var l L = 8
+
+  } else if y == 10 {
+    j++
+  } else {
+    g++
+  }
 }
 
 func main() {}
