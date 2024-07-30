@@ -1,5 +1,17 @@
 package parser
 
+type Keyword string
+
+const (
+	KeywordFor     Keyword = "for"
+	KeywordIf      Keyword = "if"
+	KeywordElse    Keyword = "else"
+	KeywordPackage Keyword = "package"
+	KeywordFunc    Keyword = "func"
+	KeywordMap     Keyword = "map"
+	KeywordReturn  Keyword = "return"
+)
+
 type Identifier string
 
 type Program struct {
@@ -16,6 +28,13 @@ type Declaration interface {
 	declaration()
 }
 
+type TypeDeclaration struct {
+	Name Identifier
+	Type Type
+}
+
+func (TypeDeclaration) declaration() {}
+
 type Type interface {
 	typ()
 }
@@ -26,20 +45,47 @@ type PointerType struct {
 
 func (PointerType) typ() {}
 
+type SliceType struct {
+	Element Type
+}
+
+func (SliceType) typ() {}
+
+type TupleType struct {
+	Elements []Type
+}
+
+func (TupleType) typ() {}
+
+type MapType struct {
+	Key   Type
+	Value Type
+}
+
+func (MapType) typ() {}
+
 func (Identifier) typ() {}
 
 type FunctionDeclaration struct {
 	Name       Identifier
 	Parameters []Parameter
-	Return     *Type
+	Return     Type
 
 	Body []Statement
 }
 
 func (FunctionDeclaration) declaration() {}
 
-type Parameter struct {
+type VarDeclaration struct {
 	Name Identifier
+	Type *Type
+	Expr *Expr
+}
+
+func (VarDeclaration) declaration() {}
+
+type Parameter struct {
+	Name *Identifier
 	Type Type
 }
 
@@ -54,6 +100,28 @@ type VarStatement struct {
 }
 
 func (VarStatement) statement() {}
+
+type DeclarationStatement struct {
+	Name Identifier
+	Expr Expr
+}
+
+func (DeclarationStatement) statement() {}
+
+type AssignmentStatement struct {
+	Left  Expr
+	Right Expr
+}
+
+func (AssignmentStatement) statement() {}
+
+type AssignmentOperatorStatement struct {
+	Left     Expr
+	Operator Operator
+	Right    Expr
+}
+
+func (AssignmentOperatorStatement) statement() {}
 
 type ExprStatement struct {
 	Expr Expr
@@ -71,7 +139,7 @@ func (PostfixStatement) statement() {}
 type IfStatement struct {
 	Condition Expr
 	Body      []Statement
-	Else      ElseIfElseStatement
+	Else      *ElseIfElseStatement
 }
 
 func (IfStatement) statement() {}
@@ -83,7 +151,7 @@ type ElseIfElseStatement interface {
 type ElseIfStatement struct {
 	Condition Expr
 	Body      []Statement
-	Else      ElseIfElseStatement
+	Else      *ElseIfElseStatement
 }
 
 func (ElseIfStatement) statement()           {}
@@ -95,6 +163,17 @@ type ElseStatement struct {
 
 func (ElseStatement) statement()           {}
 func (ElseStatement) elseIfElseStatement() {}
+
+type ForStatement struct {
+	Init      *Statement
+	Condition *Expr
+	Step      *Statement
+
+	Body []Statement
+}
+
+type ForRangeStatement struct {
+}
 
 type Expr interface {
 	expr()
@@ -138,36 +217,6 @@ func (DotExpr) expr() {}
 
 type Operator string
 
-const (
-	OperatorPower Operator = "**"
-
-	OperatorMultiplication Operator = "*"
-	OperatorDivision       Operator = "/"
-	OperatorModulo         Operator = "%"
-	OperatorLeftShift      Operator = "<<"
-	OperatorRightShift     Operator = ">>"
-	OperatorBitwiseAnd     Operator = "&"
-
-	OperatorAddition    Operator = "+"
-	OperatorSubtraction Operator = "-"
-	OperatorBitwiseOr   Operator = "|"
-	OperatorBitwiseXor  Operator = "^"
-
-	OperatorEqual              Operator = "=="
-	OperatorNotEqual           Operator = "!="
-	OperatorLessThan           Operator = "<"
-	OperatorGreaterThan        Operator = ">"
-	OperatorLessThanOrEqual    Operator = "<="
-	OperatorGreaterThanOrEqual Operator = ">="
-
-	OperatorLogicalAnd Operator = "&&"
-
-	OperatorLogicalOr Operator = "||"
-
-	OperatorIncrement Operator = "++"
-	OperatorDecrement Operator = "--"
-)
-
 type BinaryExpr struct {
 	Left     Expr
 	Operator Operator
@@ -180,3 +229,5 @@ type UnaryExpr struct {
 	Operator Operator
 	Expr     Expr
 }
+
+func (UnaryExpr) expr() {}

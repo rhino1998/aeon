@@ -1,4 +1,4 @@
-module github.com/rhino1998/aeonvm
+module github.com/rhino1998/aeon
 
 go 1.22.5
 

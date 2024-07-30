@@ -7,7 +7,7 @@ import (
 	"log"
 	"log/slog"
 
-	"github.com/rhino1998/aeonvm/pkg/compiler/parser"
+	"github.com/rhino1998/aeon/pkg/parser"
 )
 
 type Config struct {
@@ -50,7 +50,12 @@ func (c *Compiler) Compile(ctx context.Context) error {
 			return fmt.Errorf("failed to parse file %q: %w", file, err)
 		}
 
-		log.Printf("%#v", ast)
+		prog, err := c.compileProgram(ast.(parser.Program))
+		if err != nil {
+			return fmt.Errorf("failed to compile file %q: %w", file, err)
+		}
+
+		log.Printf("%#v", prog)
 	}
 
 	return nil

@@ -1,0 +1,356 @@
+{
+  package parser
+
+  import "log"
+
+  func anyToSlice[T any](s any) []T {
+    var ret []T
+    for _, e := range s.([]any) {
+      if e == nil {
+        continue
+      }
+      ret = append(ret, e.(T))
+    }
+
+    return ret
+  }
+
+  func toPtr[T any](v T) *T {
+    return &v
+  }
+
+  func maybe[T any](v any) T {
+    if v == nil {
+      var t T
+      return t
+    }
+
+    return v.(T)
+  }
+
+  func maybePtr[T any](v any) *T {
+    if v == nil {
+      return nil
+    }
+
+    return toPtr(v.(T))
+  }
+
+  func maybeSlice[T any](v any) []T {
+    if v == nil {
+      return nil
+    }
+
+    return v.([]T)
+  }
+}
+
+Program <- pkg:Package _ decls:(Declaration)* EOF {
+  return Program {
+    Package: pkg.(Package),
+
+    Declarations: anyToSlice[Declaration](decls),
+  }, nil
+}
+
+Keyword <- "map" / "func" / "if" / "else" / "for" / "package" / "var"
+
+Package <- "package" _ name:Identifier {
+  return Package{
+    Name: name.(Identifier),
+  }, nil
+}
+
+Declaration <- FunctionDeclaration / TypeDeclaration / VarDeclaration
+
+TypeDeclaration <- _ "type" _ name:Identifier _ typ:Type _ {
+  return TypeDeclaration{
+    Name: name.(Identifier),
+    Type: typ.(Type),
+  }, nil
+}
+
+Type <- Identifier / PointerType / MapType / SliceType / TupleType
+
+PointerType <- '*' pointee:Type {
+  return PointerType{Pointee: pointee.(Type)}, nil
+}
+
+SliceType <- '[' _ ']' element:Type {
+  return SliceType{Element: element.(Type)}, nil
+}
+
+TupleType <- '(' elems:TupleTypeList? ')' {
+  return TupleType{Elements: maybeSlice[Type](elems)}, nil
+}
+
+TupleTypeList <- _ elem:Type _ rest:TupleTypeListComma? {
+  return append([]Type{elem.(Type)}, maybeSlice[Type](rest)...), nil
+}
+
+TupleTypeListComma <- ',' rest:TupleTypeList {
+  return rest, nil
+}
+
+MapType <- "map" _ '[' _ key:Type _ ']' _ value:Type {
+  return MapType{Key: key.(Type), Value:value.(Type)}, nil
+}
+
+Statement <- VarStatement / DeclarationStatement / AssignmentOperatorStatement / AssignmentStatement / IfStatement / PostfixStatement / ExprStatement
+
+VarStatement <- _ "var" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
+  if typ == nil && exp == nil {
+    return nil, fmt.Errorf("var statement must have a type or an expression")
+  }
+
+  return &VarStatement{
+    Name: name.(Identifier),
+    Expr: maybePtr[Expr](exp),
+    Type: maybePtr[Type](typ),
+  }, nil
+}
+
+VarStatementExpr <- '=' _ exp:Expr _ {
+  return exp.(Expr), nil
+}
+
+VarDeclaration <- _ "var" _ name:Identifier _ typ:Type? _ exp:VarDeclarationExpr? {
+  if typ == nil && exp == nil {
+    return nil, fmt.Errorf("var statement must have a type or an expression")
+  }
+
+  return &VarDeclaration{
+    Name: name.(Identifier),
+    Expr: maybePtr[Expr](exp),
+    Type: maybePtr[Type](typ),
+  }, nil
+}
+
+VarDeclarationExpr <- '=' _ exp:Expr _ {
+  return exp.(Expr), nil
+}
+
+DeclarationStatement <- _ ident:Identifier _ ":=" _ exp:Expr _ {
+  return DeclarationStatement{
+    Name:ident.(Identifier),
+    Expr:exp.(Expr),
+  }, nil
+}
+
+AssignmentStatement <- _ left:Expr _ '=' _ right:Expr _ {
+  return AssignmentStatement{
+    Left:left.(Expr),
+    Right:right.(Expr),
+  }, nil
+}
+
+AssignmentOperatorStatement <- _ left:Expr _ op:("+=" / "-=" / "*=" / "/=" / "%=" / "**=") _ right:Expr _ {
+  return AssignmentOperatorStatement{
+    Left:left.(Expr),
+    Operator:Operator(op.([]byte)),
+    Right:right.(Expr),
+  }, nil
+}
+
+ExprStatement <- _ exp:Expr _ {
+  return ExprStatement{Expr: exp.(Expr)}, nil
+}
+
+PostfixStatement <- _ exp:Expr op:("++" / "--") _ {
+  return PostfixStatement{Expr: exp.(Expr), Operator: Operator(op.([]byte))}, nil
+}
+
+IfStatement <- _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
+  return IfStatement{
+    Condition: exp.(Expr),
+    Body: anyToSlice[Statement](body),
+    Else: maybePtr[ElseIfElseStatement](rest),
+  }, nil
+}
+
+ElseIfStatement <- _ "else" _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
+  return ElseIfStatement{
+    Condition: exp.(Expr),
+    Body: anyToSlice[Statement](body),
+    Else: maybePtr[ElseIfElseStatement](rest),
+  }, nil
+}
+
+ElseStatement <- _ "else" _ '{' body:(Statement)* _ '}' _ {
+  return ElseStatement{
+    Body: anyToSlice[Statement](body),
+  }, nil
+}
+
+ForStatement <- _ "for" _ init:(ForStatementInitStatement)? _ cond:(ForStatementConditionExpr)? _ step:(ForStatementStepStatement)? '{' body:(Statement)* _ '}' _ {
+  return ForStatement{
+    Body: anyToSlice[Statement](body),
+    Init: maybePtr[Statement](init),
+    Condition: maybePtr[Expr](cond),
+    Step: maybePtr[Statement](step),
+  }, nil
+}
+
+ForStatementInitStatement <- init:(VarStatement) _ ';' {
+  return init.(Statement), nil
+}
+
+ForStatementConditionExpr <- exp:Expr _ ';' {
+  return exp.(Expr), nil
+}
+
+ForStatementStepStatement <- step:(PostfixStatement) {
+  return step.(Statement), nil
+}
+
+FunctionDeclaration <- _ "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:(Statement)* '}' _ {
+  return FunctionDeclaration{
+    Name: name.(Identifier),
+    Parameters: maybeSlice[Parameter](params),
+    Return: maybe[Type](ret),
+    Body: anyToSlice[Statement](body),
+  }, nil
+}
+
+Parameter <- ParameterNamed / ParameterUnnamed
+
+ParameterUnnamed <- typ:Type {
+  return Parameter{
+    Type: typ.(Type),
+  }, nil
+}
+
+ParameterNamed <- name:Identifier? _ typ:Type {
+  return Parameter{
+    Name: maybePtr[Identifier](name),
+    Type: typ.(Type),
+  }, nil
+}
+
+ParameterList <- _ param:Parameter _ rest:ParameterListComma? {
+log.Printf("%v %T", param, rest)
+  return append([]Parameter{param.(Parameter)}, maybeSlice[Parameter](rest)...), nil
+}
+
+ParameterListComma <- ',' rest:ParameterList {
+  return rest, nil
+}
+
+Identifier <- !Keyword [_a-zA-Z][_a-zA-Z0-9]* {
+  return Identifier(c.text), nil
+}
+
+Expr <- UnaryExpr / DotExpr / CallExpr / BinaryExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
+
+NumberLiteral <- '-' ? ( [0-9]+ / [0-9]+.[0-9]+) {
+  f, err := strconv.ParseFloat(string(c.text), 64)
+  if err != nil {
+    return 0, err
+  }
+
+  return NumberLiteral(f), nil
+}
+
+StringLiteral <- '"' ( !EscapedChar . / '\\' EscapeSequence )* '"' {
+    c.text = bytes.Replace(c.text, []byte(`\/`), []byte(`/`), -1)
+    str, err := strconv.Unquote(string(c.text))
+    if err != nil {
+      return nil, err
+    }
+
+    return StringLiteral(str), nil
+}
+
+BooleanLiteral <- ("true" / "false") {
+  return BooleanLiteral(string(c.text)=="true"), nil
+}
+
+IdentifierExpr <- ident:Identifier {
+  return IdentifierExpr{Identifier: ident.(Identifier)}, nil
+}
+
+CallExpr <- exp:Expr '(' args:CallArgumentList? ')' {
+  call := CallExpr{
+    Expr: exp.(Expr),
+  }
+
+  if args != nil {
+    call.Args = args.([]Expr)
+  }
+
+  return call, nil
+}
+
+CallArgumentList <- _ exp:Expr _ rest:CallArgumentListComma? {
+  if rest != nil {
+    return append([]Expr{exp.(Expr)}, rest.([]Expr)...), nil
+  }
+
+  return []Expr{exp.(Expr)}, nil
+}
+
+CallArgumentListComma <- ',' rest:CallArgumentList {
+  return rest, nil
+}
+
+DotExpr <- exp:Expr '.' ident:Identifier {
+  return DotExpr{
+    Expr:exp.(Expr),
+    Key:ident.(Identifier),
+  }, nil
+}
+
+BinaryExpr <- left:Expr _ op:("**") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("+" / "-" / "|" / "^") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("==" / "!=" / "<" / ">" / ">=" / "<=") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("&&") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+} / left:Expr _ op:("||") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+  }, nil
+}
+
+UnaryExpr <- op:("-" / "+" / "!" / "^" / "*" / "&") _ exp:Expr {
+  return UnaryExpr{
+    Operator: Operator(op.([]byte)),
+    Expr: exp.(Expr),
+  }, nil
+}
+
+EscapedChar <- [\x00-\x1f"\\]
+
+EscapeSequence <- SingleCharEscape / UnicodeEscape
+
+SingleCharEscape <- ["\\/bfnrt]
+
+_ "whitespace" <- [ \n\t\r]*
+
+EOF <- !.

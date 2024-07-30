@@ -1,25 +1,30 @@
 package main
 
+type intIntMap map[int]int
+
+type A *B
+
+type B int
+
+var x = 5
+
 func main() {
   var x T = 5
   var y = "hello"
   var z = true
 
-  x.y.z() ** 3
-  x++
-  y--
+  w := 7
+  w += 9
+  w = 10
 
-  y+3 ** 5
-
-  if true {
-    var l L = 8
-
-  } else if y == 10 {
-    j++
-  } else {
-    g++
-  }
+  var q map[int]int
 }
 
-func main() {}
 
+func f(a ()) int {}
+
+func g() (int, int) {}
+
+func j() () {}
+
+func k() []map[string]string {}

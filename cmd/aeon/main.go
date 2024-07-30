@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"github.com/rhino1998/aeonvm/pkg/compiler"
+	"github.com/rhino1998/aeon/pkg/compiler"
 	"github.com/urfave/cli/v3"
 )
 
