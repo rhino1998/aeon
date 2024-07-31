@@ -3,7 +3,6 @@ package interpreter
 import (
 	"errors"
 	"fmt"
-	"log"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
 )
@@ -229,7 +228,6 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 
 			for _, stmt := range stmt.Body() {
 				err := s.executeStatement(scope, stmt, ret)
-				log.Printf("%T %v %v", stmt, err, ret)
 				if err != nil {
 					return err
 				}
