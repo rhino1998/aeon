@@ -167,7 +167,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 		return settableLHS.Set(rhs)
 	case *compiler.ReturnStatement:
 		if stmt.Expression == nil {
-			return nil
+			return ErrReturn
 		}
 
 		val, err := s.executeExpression(scope, stmt.Expression)
@@ -219,9 +219,29 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 			return err
 		}
 
-		log.Printf("cond", cond)
+		b, err := s.boolOrFail(cond)
+		if err != nil {
+			return stmt.WrapError(err)
+		}
 
-		return nil
+		if b {
+			scope := newScope(scope, "if")
+
+			for _, stmt := range stmt.Body() {
+				err := s.executeStatement(scope, stmt, ret)
+				log.Printf("%T %v %v", stmt, err, ret)
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		} else if stmt.Else() != nil {
+			return s.executeStatement(scope, stmt.Else(), ret)
+		} else {
+			return nil
+		}
+
 	default:
 		return stmt.WrapError(fmt.Errorf("unhandled statement type: %T", stmt))
 	}
@@ -246,6 +266,29 @@ func (s *State) executeExpression(scope *Scope, expr compiler.Expression) (Value
 		return val, nil
 	case *compiler.ParenthesizedExpression:
 		return s.executeExpression(scope, expr.Expression)
+	case *compiler.BinaryExpression:
+		switch expr.Operator() {
+		case compiler.OperatorLogicalAnd:
+		case compiler.OperatorLogicalOr:
+		default:
+		}
+
+		lhs, err := s.executeExpression(scope, expr.Left())
+		if err != nil {
+			return nil, err
+		}
+
+		rhs, err := s.executeExpression(scope, expr.Right())
+		if err != nil {
+			return nil, err
+		}
+
+		result, err := s.binaryOperate(lhs, rhs, expr.Operator())
+		if err != nil {
+			return nil, expr.WrapError(err)
+		}
+
+		return result, nil
 	default:
 		return nil, expr.WrapError(fmt.Errorf("unhandled expression type: %T", expr))
 	}
@@ -303,6 +346,10 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 		default:
 			return nil, fmt.Errorf("unsupported binary operation: %s + %s", lhs.Type(), rhs.Type())
 		}
+	case compiler.OperatorEqual:
+		b := s.valuesEqual(lhs, rhs)
+
+		return NewConstant(compiler.BoolType, b), nil
 	default:
 		return nil, fmt.Errorf("unsupported binary operation: %s", op)
 	}
@@ -330,4 +377,20 @@ func (s *State) stringOrFail(val Value) (string, error) {
 	}
 
 	return val.Raw().(string), nil
+}
+
+func (s *State) boolOrFail(val Value) (bool, error) {
+	if val.Type().Kind() != compiler.KindBoolean {
+		return false, fmt.Errorf("expected bool value, got %T", val)
+	}
+
+	return val.Raw().(bool), nil
+}
+
+func (s *State) valuesEqual(a, b Value) bool {
+	if !compiler.TypesEqual(a.Type(), b.Type()) {
+		return false
+	}
+
+	return a.Raw() == b.Raw() // TODO: handle complex types
 }

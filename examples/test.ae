@@ -20,13 +20,13 @@ func main() {
 
   var q map[int]int
 
-  if (x == 5) {
+  if (x == 6) {
     return
   }
 
   // test comment
 
-  return
+  return "a"
 }
 
 

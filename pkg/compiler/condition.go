@@ -15,3 +15,11 @@ type IfStatement struct {
 func (s *IfStatement) Condition() Expression {
 	return s.condition
 }
+
+func (s *IfStatement) Body() []Statement {
+	return s.body
+}
+
+func (s *IfStatement) Else() Statement {
+	return s.els
+}

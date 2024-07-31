@@ -15,6 +15,8 @@ type Scope struct {
 	parent *Scope
 	name   string
 	scope  map[string]Symbol
+
+	function *Function
 }
 
 func newScope(parent *Scope, name string) *Scope {
@@ -27,6 +29,16 @@ func newScope(parent *Scope, name string) *Scope {
 
 func (s *Scope) Name() string {
 	return s.name
+}
+
+func (s *Scope) Function() *Function {
+	if s.function != nil {
+		return s.function
+	} else if s.parent == nil {
+		return nil
+	}
+
+	return s.parent.Function()
 }
 
 func (s *Scope) get(name string) (Symbol, bool) {

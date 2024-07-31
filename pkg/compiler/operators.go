@@ -176,6 +176,18 @@ func (e *BinaryExpression) Type() Type {
 	return e.typ
 }
 
+func (e *BinaryExpression) Operator() Operator {
+	return e.operator
+}
+
+func (e *BinaryExpression) Left() Expression {
+	return e.left
+}
+
+func (e *BinaryExpression) Right() Expression {
+	return e.right
+}
+
 type AssignmentOperatorStatement struct {
 	left     Expression
 	operator Operator

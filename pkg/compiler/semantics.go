@@ -155,6 +155,7 @@ func (c *Compiler) compileFunction(p *Program, scope *Scope, decl parser.Functio
 		name:  string(decl.Name),
 		scope: newScope(scope, qualifiedName),
 	}
+	scope.function = f
 
 	for _, param := range decl.Parameters {
 		var paramName string
@@ -319,6 +320,11 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 			if err != nil {
 				return nil, err
 			}
+		}
+
+		function := scope.Function()
+		if function == nil {
+			return nil, stmt.WrapError(fmt.Errorf("return statement outside function"))
 		}
 
 		return &ReturnStatement{
