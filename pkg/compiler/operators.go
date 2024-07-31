@@ -98,7 +98,11 @@ var binaryOperatorKinds = map[Operator]map[[2]Kind]Kind{
 	OperatorDivision:       binaryOperatorNumericKinds,
 	OperatorModulo:         binaryOperatorNumericKinds,
 
-	OperatorPlusEquals:     binaryOperatorNumericKinds,
+	OperatorPlusEquals: {
+		{KindFloat, KindFloat}:     KindFloat,
+		{KindInteger, KindInteger}: KindInteger,
+		{KindString, KindString}:   KindString,
+	},
 	OperatorMinusEquals:    binaryOperatorNumericKinds,
 	OperatorMultiplyEquals: binaryOperatorNumericKinds,
 	OperatorDivideEquals:   binaryOperatorNumericKinds,

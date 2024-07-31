@@ -95,7 +95,7 @@ func (c *Compiler) compileTypeDeclaration(p *Program, scope *Scope, decl parser.
 func (c *Compiler) compileTypeReference(scope *Scope, typ parser.Type) (Type, error) {
 	switch typ := typ.(type) {
 	case parser.Identifier:
-		return ReferencedType{s: scope, name: string(typ)}, nil
+		return &ReferencedType{s: scope, name: string(typ)}, nil
 	case parser.PointerType:
 		pointee, err := c.compileTypeReference(scope, typ.Pointee)
 		if err != nil {
@@ -338,9 +338,49 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 
 			Position: stmt.Position,
 		}, nil
+	case parser.IfStatement:
+		condition, err := c.compileExpression(scope, stmt.Condition)
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := c.compileStatements(scope, stmt.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		var rest Statement
+		if stmt.Else != nil {
+			rest, err = c.compileStatement(scope, stmt)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &IfStatement{
+			condition: condition,
+			body:      body,
+			els:       rest,
+
+			Position: stmt.Position,
+		}, nil
 	default:
 		return nil, stmt.WrapError(fmt.Errorf("unhandled statement %T", stmt))
 	}
+}
+
+func (c *Compiler) compileStatements(scope *Scope, stmts []parser.Statement) ([]Statement, error) {
+	var ret []Statement
+	for _, stmt := range stmts {
+		retStmt, err := c.compileStatement(scope, stmt)
+		if err != nil {
+			return nil, err
+		}
+
+		ret = append(ret, retStmt)
+	}
+
+	return ret, nil
 }
 
 func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression, error) {
@@ -461,6 +501,17 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 			operator: Operator(expr.Operator),
 
 			typ: typ,
+
+			Position: expr.Position,
+		}, nil
+	case parser.ParenthesizedExpr:
+		exp, err := c.compileExpression(scope, expr.Expr)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ParenthesizedExpression{
+			Expression: exp,
 
 			Position: expr.Position,
 		}, nil

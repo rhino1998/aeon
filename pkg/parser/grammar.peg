@@ -175,25 +175,31 @@ PostfixStatement <- exp:Expr op:("++" / "--") {
   }, nil
 }
 
-IfStatement <- "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
+IfStatement <- "if" _ exp:Expr _ '{' body:StatementList? '}' _ rest:(ElseIfStatement / ElseStatement)? {
   return IfStatement{
     Condition: exp.(Expr),
-    Body: anyToSlice[Statement](body),
+    Body: maybeSlice[Statement](body),
     Else: maybe[ElseIfElseStatement](rest),
+
+    Position: pos(c),
   }, nil
 }
 
-ElseIfStatement <- "else" _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
+ElseIfStatement <- "else" _ "if" _ exp:Expr _ '{' body:StatementList? '}' _ rest:(ElseIfStatement / ElseStatement)? {
   return ElseIfStatement{
     Condition: exp.(Expr),
-    Body: anyToSlice[Statement](body),
+    Body: maybeSlice[Statement](body),
     Else: maybe[ElseIfElseStatement](rest),
+
+    Position: pos(c),
   }, nil
 }
 
-ElseStatement <- "else" _ '{' body:(Statement)* _ '}' {
+ElseStatement <- "else" _ '{' body:StatementList? _ '}' {
   return ElseStatement{
-    Body: anyToSlice[Statement](body),
+    Body: maybeSlice[Statement](body),
+
+    Position: pos(c),
   }, nil
 }
 
@@ -261,7 +267,6 @@ ParameterNamed <- name:Identifier? _ typ:Type {
 }
 
 ParameterList <- _ param:Parameter _ rest:ParameterListComma? {
-log.Printf("%v %T", param, rest)
   return append([]Parameter{param.(Parameter)}, maybeSlice[Parameter](rest)...), nil
 }
 
@@ -273,7 +278,15 @@ Identifier <- !Keyword [_a-zA-Z][_a-zA-Z0-9]* {
   return Identifier(c.text), nil
 }
 
-Expr <- UnaryExpr / DotExpr / CallExpr / BinaryExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
+Expr <- ParenthesizedExpr / UnaryExpr / DotExpr / CallExpr / BinaryExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
+
+ParenthesizedExpr <- '(' _ expr:Expr _ ')' {
+  return ParenthesizedExpr{
+    Expr: expr.(Expr),
+
+    Position: pos(c),
+  }, nil
+}
 
 NumberLiteral <- '-' ? ( [0-9]+ / [0-9]+.[0-9]+) {
   f, err := strconv.ParseFloat(string(c.text), 64)

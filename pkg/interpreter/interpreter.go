@@ -3,6 +3,7 @@ package interpreter
 import (
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
 )
@@ -212,6 +213,15 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 		}
 
 		return nil
+	case *compiler.IfStatement:
+		cond, err := s.executeExpression(scope, stmt.Condition())
+		if err != nil {
+			return err
+		}
+
+		log.Printf("cond", cond)
+
+		return nil
 	default:
 		return stmt.WrapError(fmt.Errorf("unhandled statement type: %T", stmt))
 	}
@@ -234,6 +244,8 @@ func (s *State) executeExpression(scope *Scope, expr compiler.Expression) (Value
 		}
 
 		return val, nil
+	case *compiler.ParenthesizedExpression:
+		return s.executeExpression(scope, expr.Expression)
 	default:
 		return nil, expr.WrapError(fmt.Errorf("unhandled expression type: %T", expr))
 	}

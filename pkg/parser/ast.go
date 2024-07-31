@@ -14,6 +14,22 @@ const (
 	KeywordReturn  Keyword = "return"
 )
 
+type baseType struct{}
+
+func (baseType) typ() {}
+
+type baseExpr struct{}
+
+func (baseExpr) expr() {}
+
+type baseStatement struct{}
+
+func (baseStatement) statement() {}
+
+type baseDeclaration struct{}
+
+func (baseDeclaration) declaration() {}
+
 type Position struct {
 	File   string
 	Line   int
@@ -47,6 +63,8 @@ func pos(c *current) Position {
 
 type Identifier string
 
+func (Identifier) typ() {}
+
 type Program struct {
 	Package Package
 
@@ -64,54 +82,54 @@ type Declaration interface {
 }
 
 type TypeDeclaration struct {
+	baseDeclaration
+
 	Name Identifier
 	Type Type
 
 	Position
 }
 
-func (TypeDeclaration) declaration() {}
-
 type Type interface {
 	typ()
 }
 
 type PointerType struct {
+	baseType
+
 	Pointee Type
 
 	Position
 }
 
-func (PointerType) typ() {}
-
 type SliceType struct {
+	baseType
+
 	Element Type
 
 	Position
 }
 
-func (SliceType) typ() {}
-
 type TupleType struct {
+	baseType
+
 	Elements []Type
 
 	Position
 }
 
-func (TupleType) typ() {}
-
 type MapType struct {
+	baseType
+
 	Key   Type
 	Value Type
 
 	Position
 }
 
-func (MapType) typ() {}
-
-func (Identifier) typ() {}
-
 type FunctionDeclaration struct {
+	baseDeclaration
+
 	Name       Identifier
 	Parameters []Parameter
 	Return     Type
@@ -121,17 +139,15 @@ type FunctionDeclaration struct {
 	Position
 }
 
-func (FunctionDeclaration) declaration() {}
-
 type VarDeclaration struct {
+	baseDeclaration
+
 	Name Identifier
 	Type *Type
 	Expr *Expr
 
 	Position
 }
-
-func (VarDeclaration) declaration() {}
 
 type Parameter struct {
 	Name *Identifier
@@ -147,6 +163,8 @@ type Statement interface {
 }
 
 type VarStatement struct {
+	baseStatement
+
 	Name Identifier
 	Type *Type
 	Expr *Expr
@@ -154,27 +172,27 @@ type VarStatement struct {
 	Position
 }
 
-func (VarStatement) statement() {}
-
 type DeclarationStatement struct {
+	baseStatement
+
 	Name Identifier
 	Expr Expr
 
 	Position
 }
 
-func (DeclarationStatement) statement() {}
-
 type AssignmentStatement struct {
+	baseStatement
+
 	Left  Expr
 	Right Expr
 
 	Position
 }
 
-func (AssignmentStatement) statement() {}
-
 type AssignmentOperatorStatement struct {
+	baseStatement
+
 	Left     Expr
 	Operator Operator
 	Right    Expr
@@ -182,26 +200,26 @@ type AssignmentOperatorStatement struct {
 	Position
 }
 
-func (AssignmentOperatorStatement) statement() {}
-
 type ExprStatement struct {
+	baseStatement
+
 	Expr Expr
 
 	Position
 }
 
-func (ExprStatement) statement() {}
-
 type PostfixStatement struct {
+	baseStatement
+
 	Expr     Expr
 	Operator Operator
 
 	Position
 }
 
-func (PostfixStatement) statement() {}
-
 type IfStatement struct {
+	baseStatement
+
 	Condition Expr
 	Body      []Statement
 	Else      ElseIfElseStatement
@@ -209,13 +227,21 @@ type IfStatement struct {
 	Position
 }
 
-func (IfStatement) statement() {}
-
 type ElseIfElseStatement interface {
+	Statement
+
 	elseIfElseStatement()
 }
 
+type baseElseIfElseStatement struct {
+	baseStatement
+}
+
+func (baseElseIfElseStatement) ElseIfElseStatement() {}
+
 type ElseIfStatement struct {
+	baseElseIfElseStatement
+
 	Condition Expr
 	Body      []Statement
 	Else      ElseIfElseStatement
@@ -223,19 +249,17 @@ type ElseIfStatement struct {
 	Position
 }
 
-func (ElseIfStatement) statement()           {}
-func (ElseIfStatement) elseIfElseStatement() {}
-
 type ElseStatement struct {
+	baseElseIfElseStatement
+
 	Body []Statement
 
 	Position
 }
 
-func (ElseStatement) statement()           {}
-func (ElseStatement) elseIfElseStatement() {}
-
 type ForStatement struct {
+	baseStatement
+
 	Init      Statement
 	Condition Expr
 	Step      Statement
@@ -249,6 +273,8 @@ type ForRangeStatement struct {
 }
 
 type ReturnStatement struct {
+	baseStatement
+
 	Expr Expr
 
 	Position
@@ -263,62 +289,72 @@ type Expr interface {
 }
 
 type NumberLiteral struct {
+	baseExpr
+
 	Value float64
 
 	Position
 }
-
-func (NumberLiteral) expr() {}
 
 func (l NumberLiteral) IsInteger() bool {
 	return float64(int64(l.Value)) == float64(l.Value)
 }
 
 type StringLiteral struct {
+	baseExpr
+
 	Value string
 
 	Position
 }
 
-func (StringLiteral) expr() {}
-
 type BooleanLiteral struct {
+	baseExpr
+
 	Value bool
 
 	Position
 }
 
-func (BooleanLiteral) expr() {}
+type ParenthesesExpr struct {
+	baseExpr
+
+	Expr Expr
+
+	Position
+}
 
 type CallExpr struct {
+	baseExpr
+
 	Expr Expr
 	Args []Expr
 
 	Position
 }
 
-func (CallExpr) expr() {}
-
 type IdentifierExpr struct {
+	baseExpr
+
 	Identifier Identifier
 
 	Position
 }
 
-func (IdentifierExpr) expr() {}
-
 type DotExpr struct {
+	baseExpr
+
 	Expr Expr
 	Key  Identifier
 
 	Position
 }
 
-func (DotExpr) expr() {}
-
 type Operator string
 
 type BinaryExpr struct {
+	baseExpr
+
 	Left     Expr
 	Operator Operator
 	Right    Expr
@@ -326,13 +362,19 @@ type BinaryExpr struct {
 	Position
 }
 
-func (BinaryExpr) expr() {}
-
 type UnaryExpr struct {
+	baseExpr
+
 	Operator Operator
 	Expr     Expr
 
 	Position
 }
 
-func (UnaryExpr) expr() {}
+type ParenthesizedExpr struct {
+	baseExpr
+
+	Expr Expr
+
+	Position
+}

@@ -16,9 +16,13 @@ func main() {
   w = 10
 
   x++
-  y+=-5
+  y+="a"
 
   var q map[int]int
+
+  if (x == 5) {
+    return
+  }
 
   // test comment
 

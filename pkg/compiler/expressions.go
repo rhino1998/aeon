@@ -25,3 +25,13 @@ func (e *DotExpression) Type() Type {
 		return UnknownType
 	}
 }
+
+type ParenthesizedExpression struct {
+	Expression Expression
+
+	parser.Position
+}
+
+func (e *ParenthesizedExpression) Type() Type {
+	return e.Expression.Type()
+}
