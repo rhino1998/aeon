@@ -57,3 +57,9 @@ type CallExpression struct {
 func (e *CallExpression) Type() Type {
 	return e.function.Type()
 }
+
+type ReturnStatement struct {
+	Expression Expression
+
+	parser.Position
+}

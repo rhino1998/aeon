@@ -1,3 +1,5 @@
 package compiler
 
-type Statement interface{}
+type Statement interface {
+	WrapError(err error) error
+}

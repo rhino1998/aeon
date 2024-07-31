@@ -52,7 +52,7 @@ type Program struct {
 
 	Declarations []Declaration
 
-	Position Position
+	Position
 }
 
 type Package struct {
@@ -67,7 +67,7 @@ type TypeDeclaration struct {
 	Name Identifier
 	Type Type
 
-	Position Position
+	Position
 }
 
 func (TypeDeclaration) declaration() {}
@@ -79,7 +79,7 @@ type Type interface {
 type PointerType struct {
 	Pointee Type
 
-	Position Position
+	Position
 }
 
 func (PointerType) typ() {}
@@ -87,7 +87,7 @@ func (PointerType) typ() {}
 type SliceType struct {
 	Element Type
 
-	Position Position
+	Position
 }
 
 func (SliceType) typ() {}
@@ -95,7 +95,7 @@ func (SliceType) typ() {}
 type TupleType struct {
 	Elements []Type
 
-	Position Position
+	Position
 }
 
 func (TupleType) typ() {}
@@ -104,7 +104,7 @@ type MapType struct {
 	Key   Type
 	Value Type
 
-	Position Position
+	Position
 }
 
 func (MapType) typ() {}
@@ -118,7 +118,7 @@ type FunctionDeclaration struct {
 
 	Body []Statement
 
-	Position Position
+	Position
 }
 
 func (FunctionDeclaration) declaration() {}
@@ -128,7 +128,7 @@ type VarDeclaration struct {
 	Type *Type
 	Expr *Expr
 
-	Position Position
+	Position
 }
 
 func (VarDeclaration) declaration() {}
@@ -137,11 +137,13 @@ type Parameter struct {
 	Name *Identifier
 	Type Type
 
-	Position Position
+	Position
 }
 
 type Statement interface {
 	statement()
+
+	WrapError(err error) error
 }
 
 type VarStatement struct {
@@ -149,7 +151,7 @@ type VarStatement struct {
 	Type *Type
 	Expr *Expr
 
-	Position Position
+	Position
 }
 
 func (VarStatement) statement() {}
@@ -158,7 +160,7 @@ type DeclarationStatement struct {
 	Name Identifier
 	Expr Expr
 
-	Position Position
+	Position
 }
 
 func (DeclarationStatement) statement() {}
@@ -167,7 +169,7 @@ type AssignmentStatement struct {
 	Left  Expr
 	Right Expr
 
-	Position Position
+	Position
 }
 
 func (AssignmentStatement) statement() {}
@@ -176,6 +178,8 @@ type AssignmentOperatorStatement struct {
 	Left     Expr
 	Operator Operator
 	Right    Expr
+
+	Position
 }
 
 func (AssignmentOperatorStatement) statement() {}
@@ -183,7 +187,7 @@ func (AssignmentOperatorStatement) statement() {}
 type ExprStatement struct {
 	Expr Expr
 
-	Position Position
+	Position
 }
 
 func (ExprStatement) statement() {}
@@ -192,7 +196,7 @@ type PostfixStatement struct {
 	Expr     Expr
 	Operator Operator
 
-	Position Position
+	Position
 }
 
 func (PostfixStatement) statement() {}
@@ -202,7 +206,7 @@ type IfStatement struct {
 	Body      []Statement
 	Else      ElseIfElseStatement
 
-	Position Position
+	Position
 }
 
 func (IfStatement) statement() {}
@@ -216,7 +220,7 @@ type ElseIfStatement struct {
 	Body      []Statement
 	Else      ElseIfElseStatement
 
-	Position Position
+	Position
 }
 
 func (ElseIfStatement) statement()           {}
@@ -225,7 +229,7 @@ func (ElseIfStatement) elseIfElseStatement() {}
 type ElseStatement struct {
 	Body []Statement
 
-	Position Position
+	Position
 }
 
 func (ElseStatement) statement()           {}
@@ -238,7 +242,7 @@ type ForStatement struct {
 
 	Body []Statement
 
-	Position Position
+	Position
 }
 
 type ForRangeStatement struct {
@@ -247,19 +251,21 @@ type ForRangeStatement struct {
 type ReturnStatement struct {
 	Expr Expr
 
-	Position Position
+	Position
 }
 
 func (ReturnStatement) statement() {}
 
 type Expr interface {
 	expr()
+
+	WrapError(err error) error
 }
 
 type NumberLiteral struct {
 	Value float64
 
-	Position Position
+	Position
 }
 
 func (NumberLiteral) expr() {}
@@ -271,7 +277,7 @@ func (l NumberLiteral) IsInteger() bool {
 type StringLiteral struct {
 	Value string
 
-	Position Position
+	Position
 }
 
 func (StringLiteral) expr() {}
@@ -279,7 +285,7 @@ func (StringLiteral) expr() {}
 type BooleanLiteral struct {
 	Value bool
 
-	Position Position
+	Position
 }
 
 func (BooleanLiteral) expr() {}
@@ -288,7 +294,7 @@ type CallExpr struct {
 	Expr Expr
 	Args []Expr
 
-	Position Position
+	Position
 }
 
 func (CallExpr) expr() {}
@@ -296,7 +302,7 @@ func (CallExpr) expr() {}
 type IdentifierExpr struct {
 	Identifier Identifier
 
-	Position Position
+	Position
 }
 
 func (IdentifierExpr) expr() {}
@@ -305,7 +311,7 @@ type DotExpr struct {
 	Expr Expr
 	Key  Identifier
 
-	Position Position
+	Position
 }
 
 func (DotExpr) expr() {}
@@ -317,7 +323,7 @@ type BinaryExpr struct {
 	Operator Operator
 	Right    Expr
 
-	Position Position
+	Position
 }
 
 func (BinaryExpr) expr() {}
@@ -326,7 +332,7 @@ type UnaryExpr struct {
 	Operator Operator
 	Expr     Expr
 
-	Position Position
+	Position
 }
 
 func (UnaryExpr) expr() {}

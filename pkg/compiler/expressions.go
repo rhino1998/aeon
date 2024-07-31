@@ -4,6 +4,8 @@ import "github.com/rhino1998/aeon/pkg/parser"
 
 type Expression interface {
 	Type() Type
+
+	WrapError(error) error
 }
 
 type DotExpression struct {

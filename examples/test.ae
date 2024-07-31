@@ -7,7 +7,7 @@ type A *B
 type B int
 
 func main() {
-  var x T = 5
+  var x int = 5
   var y = "hello"
   var z = true
 
@@ -15,11 +15,14 @@ func main() {
   w += 9
   w = 10
 
+  x++
+  y+=-5
+
   var q map[int]int
 
   // test comment
 
-  return 3
+  return
 }
 
 

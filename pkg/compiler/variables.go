@@ -23,6 +23,10 @@ type SymbolReferenceExpression struct {
 	parser.Position
 }
 
+func (e *SymbolReferenceExpression) Name() string {
+	return e.name
+}
+
 func (e *SymbolReferenceExpression) Type() Type {
 	v, ok := e.scope.getTypedSymbol(e.name)
 	if !ok {
@@ -35,14 +39,35 @@ func (e *SymbolReferenceExpression) Type() Type {
 type AssignmentStatement struct {
 	left  Expression
 	right Expression
+
+	parser.Position
+}
+
+func (s *AssignmentStatement) Left() Expression {
+	return s.left
+}
+
+func (s *AssignmentStatement) Right() Expression {
+	return s.right
 }
 
 type VariableStatement struct {
-	Variable
-	expression Expression
+	Variable   Variable
+	Expression Expression
+
+	parser.Position
 }
 
 type DeclarationStatement struct {
-	Variable
-	expression Expression
+	Variable   Variable
+	Expression Expression
+
+	parser.Position
+}
+
+type PostfixStatement struct {
+	Expression Expression
+	Operator   Operator
+
+	parser.Position
 }

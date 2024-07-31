@@ -2,35 +2,17 @@ package compiler
 
 import "github.com/rhino1998/aeon/pkg/parser"
 
-type BooleanLiteral struct {
-	value bool
+type Literal[T any] struct {
+	value T
 	typ   Type
 
 	parser.Position
 }
 
-func (l BooleanLiteral) Type() Type {
-	return l.typ
+func (l Literal[T]) Value() T {
+	return l.value
 }
 
-type NumericLiteral struct {
-	value float64
-	typ   Type
-
-	parser.Position
-}
-
-func (l NumericLiteral) Type() Type {
-	return l.typ
-}
-
-type StringLiteral struct {
-	value string
-	typ   Type
-
-	parser.Position
-}
-
-func (l StringLiteral) Type() Type {
+func (l Literal[T]) Type() Type {
 	return l.typ
 }

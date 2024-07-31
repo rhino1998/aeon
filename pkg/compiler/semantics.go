@@ -238,7 +238,9 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 
 		return &VariableStatement{
 			Variable:   *v,
-			expression: expr,
+			Expression: expr,
+
+			Position: stmt.Position,
 		}, nil
 	case parser.DeclarationStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
@@ -255,7 +257,9 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 
 		return &DeclarationStatement{
 			Variable:   *v,
-			expression: expr,
+			Expression: expr,
+
+			Position: stmt.Position,
 		}, nil
 	case parser.AssignmentOperatorStatement:
 		left, err := c.compileExpression(scope, stmt.Left)
@@ -270,13 +274,15 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 
 		_, err = validateBinaryExpression(left.Type(), Operator(stmt.Operator), right.Type())
 		if err != nil {
-			return nil, fmt.Errorf("invalid assignment %q: %w", stmt.Operator, err)
+			return nil, stmt.WrapError(err)
 		}
 
 		return &AssignmentOperatorStatement{
 			left:     left,
 			operator: Operator(stmt.Operator),
 			right:    right,
+
+			Position: stmt.Position,
 		}, nil
 	case parser.AssignmentStatement:
 		left, err := c.compileExpression(scope, stmt.Left)
@@ -296,6 +302,8 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 		return &AssignmentStatement{
 			left:  left,
 			right: right,
+
+			Position: stmt.Position,
 		}, nil
 	case parser.ExprStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
@@ -304,8 +312,34 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 		}
 
 		return expr, nil
+	case parser.ReturnStatement:
+		var expr Expression
+		if stmt.Expr != nil {
+			expr, err = c.compileExpression(scope, stmt.Expr)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &ReturnStatement{
+			Expression: expr,
+
+			Position: stmt.Position,
+		}, nil
+	case parser.PostfixStatement:
+		expr, err := c.compileExpression(scope, stmt.Expr)
+		if err != nil {
+			return nil, err
+		}
+
+		return &PostfixStatement{
+			Expression: expr,
+			Operator:   Operator(stmt.Operator),
+
+			Position: stmt.Position,
+		}, nil
 	default:
-		return nil, fmt.Errorf("unhandled statement %T", stmt)
+		return nil, stmt.WrapError(fmt.Errorf("unhandled statement %T", stmt))
 	}
 }
 
@@ -313,19 +347,23 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 	switch expr := expr.(type) {
 	case parser.NumberLiteral:
 		if expr.IsInteger() {
-			return &NumericLiteral{
-				value: expr.Value,
+			return &Literal[int64]{
+				value: int64(expr.Value),
 				typ:   IntType,
+
+				Position: expr.Position,
 			}, nil
 		} else {
-			return &NumericLiteral{
+			return &Literal[float64]{
 				value: expr.Value,
 
 				typ: FloatType,
+
+				Position: expr.Position,
 			}, nil
 		}
 	case parser.StringLiteral:
-		return &StringLiteral{
+		return &Literal[string]{
 			value: expr.Value,
 
 			typ: StringType,
@@ -333,7 +371,7 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 			Position: expr.Position,
 		}, nil
 	case parser.BooleanLiteral:
-		return &BooleanLiteral{
+		return &Literal[bool]{
 			value: expr.Value,
 
 			typ: BoolType,
@@ -407,7 +445,26 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 
 			Position: expr.Position,
 		}, nil
+	case parser.UnaryExpr:
+		exp, err := c.compileExpression(scope, expr.Expr)
+		if err != nil {
+			return nil, err
+		}
+
+		typ, err := validateUnaryExpression(exp.Type(), Operator(expr.Operator))
+		if err != nil {
+			return nil, expr.Position.WrapError(err)
+		}
+
+		return &UnaryExpression{
+			expr:     exp,
+			operator: Operator(expr.Operator),
+
+			typ: typ,
+
+			Position: expr.Position,
+		}, nil
 	default:
-		return nil, fmt.Errorf("unhandled expresion %T", expr)
+		return nil, expr.WrapError(fmt.Errorf("unhandled expression %T", expr))
 	}
 }

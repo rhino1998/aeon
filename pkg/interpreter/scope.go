@@ -1,8 +1,20 @@
 package interpreter
 
-import "fmt"
+import (
+	"fmt"
 
-type Value interface{}
+	"github.com/rhino1998/aeon/pkg/compiler"
+)
+
+type Value interface {
+	Type() compiler.Type
+	Raw() any
+}
+
+type SettableValue interface {
+	Value
+	Set(Value) error
+}
 
 type Scope struct {
 	parent *Scope

@@ -45,7 +45,7 @@
   }
 }
 
-Program <- pkg:Package _ decls:(Declaration)* EOF {
+Program <- pkg:Package __ decls:(Declaration)* EOF {
   return Program {
     Package: pkg.(Package),
 
@@ -61,9 +61,11 @@ Package <- "package" _ name:Identifier {
   }, nil
 }
 
-Declaration <- FunctionDeclaration / TypeDeclaration / VarDeclaration
+Declaration <- _ decl:(FunctionDeclaration / TypeDeclaration / VarDeclaration) __ {
+  return decl, nil
+}
 
-TypeDeclaration <- _ "type" _ name:Identifier _ typ:Type _ {
+TypeDeclaration <- "type" _ name:Identifier _ typ:Type {
   return TypeDeclaration{
     Name: name.(Identifier),
     Type: typ.(Type),
@@ -96,9 +98,11 @@ MapType <- "map" _ '[' _ key:Type _ ']' _ value:Type {
   return MapType{Key: key.(Type), Value:value.(Type)}, nil
 }
 
-Statement <- comment / VarStatement / DeclarationStatement / AssignmentOperatorStatement / AssignmentStatement / IfStatement / PostfixStatement / ExprStatement
+Statement <- stmt:(comment / VarStatement / ReturnStatement / DeclarationStatement / AssignmentOperatorStatement / AssignmentStatement / IfStatement / PostfixStatement / ExprStatement) {
+  return stmt, nil
+}
 
-VarStatement <- _ "var" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
+VarStatement <- "var" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
   if typ == nil && exp == nil {
     return nil, fmt.Errorf("var statement must have a type or an expression")
   }
@@ -114,7 +118,7 @@ VarStatementExpr <- '=' _ exp:Expr _ {
   return exp.(Expr), nil
 }
 
-VarDeclaration <- _ "var" _ name:Identifier _ typ:Type? _ exp:VarDeclarationExpr? {
+VarDeclaration <- "var" _ name:Identifier _ typ:Type? _ exp:VarDeclarationExpr? {
   if typ == nil && exp == nil {
     return nil, fmt.Errorf("var statement must have a type or an expression")
   }
@@ -130,37 +134,48 @@ VarDeclarationExpr <- '=' _ exp:Expr _ {
   return exp.(Expr), nil
 }
 
-DeclarationStatement <- _ ident:Identifier _ ":=" _ exp:Expr _ {
+DeclarationStatement <- ident:Identifier _ ":=" _ exp:Expr {
   return DeclarationStatement{
     Name:ident.(Identifier),
     Expr:exp.(Expr),
   }, nil
 }
 
-AssignmentStatement <- _ left:Expr _ '=' _ right:Expr _ {
+AssignmentStatement <- left:Expr _ '=' _ right:Expr {
   return AssignmentStatement{
     Left:left.(Expr),
     Right:right.(Expr),
   }, nil
 }
 
-AssignmentOperatorStatement <- _ left:Expr _ op:("+=" / "-=" / "*=" / "/=" / "%=" / "**=") _ right:Expr _ {
+AssignmentOperatorStatement <- left:Expr _ op:("+=" / "-=" / "*=" / "/=" / "%=" / "**=") _ right:Expr {
   return AssignmentOperatorStatement{
     Left:left.(Expr),
     Operator:Operator(op.([]byte)),
     Right:right.(Expr),
+
+    Position: pos(c),
   }, nil
 }
 
-ExprStatement <- _ exp:Expr _ {
-  return ExprStatement{Expr: exp.(Expr)}, nil
+ExprStatement <- exp:Expr {
+  return ExprStatement{
+    Expr: exp.(Expr),
+
+    Position: pos(c),
+  }, nil
 }
 
-PostfixStatement <- _ exp:Expr op:("++" / "--") _ {
-  return PostfixStatement{Expr: exp.(Expr), Operator: Operator(op.([]byte))}, nil
+PostfixStatement <- exp:Expr op:("++" / "--") {
+  return PostfixStatement{
+    Expr: exp.(Expr),
+    Operator: Operator(op.([]byte)),
+
+    Position: pos(c),
+  }, nil
 }
 
-IfStatement <- _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
+IfStatement <- "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
   return IfStatement{
     Condition: exp.(Expr),
     Body: anyToSlice[Statement](body),
@@ -168,7 +183,7 @@ IfStatement <- _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfSta
   }, nil
 }
 
-ElseIfStatement <- _ "else" _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
+ElseIfStatement <- "else" _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ rest:(ElseIfStatement / ElseStatement)? {
   return ElseIfStatement{
     Condition: exp.(Expr),
     Body: anyToSlice[Statement](body),
@@ -176,13 +191,13 @@ ElseIfStatement <- _ "else" _ "if" _ exp:Expr _ '{' body:(Statement)* _ '}' _ re
   }, nil
 }
 
-ElseStatement <- _ "else" _ '{' body:(Statement)* _ '}' _ {
+ElseStatement <- "else" _ '{' body:(Statement)* _ '}' {
   return ElseStatement{
     Body: anyToSlice[Statement](body),
   }, nil
 }
 
-ForStatement <- _ "for" _ init:(ForStatementInitStatement)? _ cond:(ForStatementConditionExpr)? _ step:(ForStatementStepStatement)? '{' body:(Statement)* _ '}' _ {
+ForStatement <- "for" _ init:(ForStatementInitStatement)? _ cond:(ForStatementConditionExpr)? _ step:(ForStatementStepStatement)? '{' body:(Statement)* _ '}' {
   return ForStatement{
     Body: anyToSlice[Statement](body),
     Init: maybe[Statement](init),
@@ -203,19 +218,31 @@ ForStatementStepStatement <- step:(PostfixStatement) {
   return step.(Statement), nil
 }
 
-ReturnStatement <- _ "return" _ expr:Expr? _ {
+ReturnStatement <- "return" _ expr:Expr? {
   return ReturnStatement{
     Expr: maybe[Expr](expr),
+
+    Position: pos(c),
   }, nil
 }
 
-FunctionDeclaration <- _ "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:(Statement)* '}' _ {
+FunctionDeclaration <- "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:StatementList? '}' {
   return FunctionDeclaration{
     Name: name.(Identifier),
     Parameters: maybeSlice[Parameter](params),
     Return: maybe[Type](ret),
-    Body: anyToSlice[Statement](body),
+    Body: maybeSlice[Statement](body),
   }, nil
+}
+
+StatementList <- __ stmt:Statement __ rest:StatementList? __ {
+  if stmt == nil {
+    return rest, nil
+  }
+  return append(
+    []Statement{stmt.(Statement)},
+    maybeSlice[Statement](rest)...,
+  ), nil
 }
 
 Parameter <- ParameterNamed / ParameterUnnamed
@@ -284,7 +311,10 @@ BooleanLiteral <- ("true" / "false") {
 }
 
 IdentifierExpr <- ident:Identifier {
-  return IdentifierExpr{Identifier: ident.(Identifier)}, nil
+  return IdentifierExpr{
+    Identifier: ident.(Identifier),
+    Position: pos(c),
+  }, nil
 }
 
 CallExpr <- exp:Expr '(' args:CallArgumentList? ')' {
@@ -302,11 +332,7 @@ CallExpr <- exp:Expr '(' args:CallArgumentList? ')' {
 }
 
 CallArgumentList <- _ exp:Expr _ rest:CallArgumentListComma? {
-  if rest != nil {
-    return append([]Expr{exp.(Expr)}, rest.([]Expr)...), nil
-  }
-
-  return []Expr{exp.(Expr)}, nil
+  return append([]Expr{exp.(Expr)}, maybeSlice[Expr](rest)...), nil
 }
 
 CallArgumentListComma <- ',' rest:CallArgumentList {
@@ -387,7 +413,8 @@ EscapeSequence <- SingleCharEscape / UnicodeEscape
 
 SingleCharEscape <- ["\\/bfnrt]
 
-_ "whitespace" <- [ \n\t\r]*
+__ "whitespace" <- [ \n\t\r]*
+_ "spaces" <- [ \t]*
 
 comment <- "//" [^\n]* '\n' {
   return nil, nil

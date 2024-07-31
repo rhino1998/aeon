@@ -134,6 +134,19 @@ var unaryOperatorBooleanKinds = map[Kind]Kind{
 	KindBoolean: KindBoolean,
 }
 
+func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
+	kind := unaryOperatorKinds[operator][expr.Kind()]
+	if kind == KindUnknown {
+		return nil, fmt.Errorf("invalid unary operator %q for kind %q", operator, expr.Kind())
+	}
+
+	if expr.Kind() != kind {
+		return UnspecifiedKindType{kind: kind}, nil
+	}
+
+	return expr, nil
+}
+
 var unaryOperatorKinds = map[Operator]map[Kind]Kind{
 	OperatorNegate:    unaryOperatorNumericKinds,
 	OperatorPositive:  unaryOperatorNumericKinds,
@@ -165,4 +178,29 @@ type AssignmentOperatorStatement struct {
 	right    Expression
 
 	parser.Position
+}
+
+func (s *AssignmentOperatorStatement) Operator() Operator {
+	return s.operator
+}
+
+func (s *AssignmentOperatorStatement) Left() Expression {
+	return s.left
+}
+
+func (s *AssignmentOperatorStatement) Right() Expression {
+	return s.right
+}
+
+type UnaryExpression struct {
+	expr     Expression
+	operator Operator
+
+	typ Type
+
+	parser.Position
+}
+
+func (e *UnaryExpression) Type() Type {
+	return e.typ
 }
