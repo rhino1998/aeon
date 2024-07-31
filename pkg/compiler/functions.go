@@ -1,5 +1,7 @@
 package compiler
 
+import "github.com/rhino1998/aeon/pkg/parser"
+
 type Function struct {
 	name string
 
@@ -33,9 +35,23 @@ func (f *Function) Type() Type {
 	}
 }
 
+func (f *Function) Parameters() []*Variable {
+	return f.parameters
+}
+
+func (f *Function) Return() Type {
+	return f.ret
+}
+
+func (f *Function) Body() []Statement {
+	return f.body
+}
+
 type CallExpression struct {
 	function Expression
 	args     []Expression
+
+	parser.Position
 }
 
 func (e *CallExpression) Type() Type {

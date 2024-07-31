@@ -1,6 +1,10 @@
 package compiler
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rhino1998/aeon/pkg/parser"
+)
 
 type Operator string
 
@@ -147,6 +151,8 @@ type BinaryExpression struct {
 	right    Expression
 
 	typ Type
+
+	parser.Position
 }
 
 func (e *BinaryExpression) Type() Type {
@@ -157,4 +163,6 @@ type AssignmentOperatorStatement struct {
 	left     Expression
 	operator Operator
 	right    Expression
+
+	parser.Position
 }

@@ -6,8 +6,6 @@ type A *B
 
 type B int
 
-var x = 5
-
 func main() {
   var x T = 5
   var y = "hello"
@@ -18,6 +16,10 @@ func main() {
   w = 10
 
   var q map[int]int
+
+  // test comment
+
+  return 3
 }
 
 

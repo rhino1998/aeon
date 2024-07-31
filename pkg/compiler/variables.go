@@ -1,5 +1,7 @@
 package compiler
 
+import "github.com/rhino1998/aeon/pkg/parser"
+
 type Variable struct {
 	name string
 	typ  Type
@@ -14,12 +16,14 @@ func (v *Variable) Type() Type {
 	return v.typ
 }
 
-type VariableReferenceExpression struct {
+type SymbolReferenceExpression struct {
 	scope *Scope
 	name  string
+
+	parser.Position
 }
 
-func (e *VariableReferenceExpression) Type() Type {
+func (e *SymbolReferenceExpression) Type() Type {
 	v, ok := e.scope.getTypedSymbol(e.name)
 	if !ok {
 		return UnknownType

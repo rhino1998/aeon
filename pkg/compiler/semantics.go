@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rhino1998/aeon/pkg/parser"
 )
@@ -18,6 +19,41 @@ func newProgram() *Program {
 	return p
 }
 
+func (p *Program) Function(qualifiedName string) (*Function, error) {
+	scope := p.root
+	var currentScope string
+	parts := strings.Split(qualifiedName, ".")
+
+	for len(parts) > 1 {
+		sym, ok := scope.get(parts[0])
+		if !ok {
+			return nil, fmt.Errorf("no such package %q", qualifiedName)
+		}
+
+		switch sym := sym.(type) {
+		case *Scope:
+			scope = sym
+			currentScope += "." + parts[0]
+			parts = parts[1:]
+			continue
+		default:
+			return nil, fmt.Errorf("%q is not a package", qualifiedName)
+		}
+	}
+
+	f, ok := scope.get(parts[0])
+	if !ok {
+		return nil, fmt.Errorf("no such function %q", qualifiedName)
+	}
+
+	switch f := f.(type) {
+	case *Function:
+		return f, nil
+	default:
+		return nil, fmt.Errorf("symbol %q is not a function", qualifiedName)
+	}
+}
+
 func (c *Compiler) compileProgram(entry parser.Program) (*Program, error) {
 	p := newProgram()
 
@@ -29,12 +65,12 @@ func (c *Compiler) compileProgram(entry parser.Program) (*Program, error) {
 		case parser.FunctionDeclaration:
 			err := c.compileFunction(p, packageScope, decl)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compile function %q: %w", decl.Name, err)
+				return nil, err
 			}
 		case parser.TypeDeclaration:
 			err := c.compileTypeDeclaration(p, packageScope, decl)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compile type declaration %q: %w", decl.Name, err)
+				return nil, err
 			}
 		}
 	}
@@ -45,7 +81,7 @@ func (c *Compiler) compileProgram(entry parser.Program) (*Program, error) {
 func (c *Compiler) compileTypeDeclaration(p *Program, scope *Scope, decl parser.TypeDeclaration) error {
 	underlying, err := c.compileTypeReference(scope, decl.Type)
 	if err != nil {
-		return fmt.Errorf("failed to compile type reference: %w", err)
+		return err
 	}
 
 	t := &DerivedType{
@@ -63,7 +99,7 @@ func (c *Compiler) compileTypeReference(scope *Scope, typ parser.Type) (Type, er
 	case parser.PointerType:
 		pointee, err := c.compileTypeReference(scope, typ.Pointee)
 		if err != nil {
-			return nil, fmt.Errorf("invalid pointer type: %w", err)
+			return nil, err
 		}
 
 		return &PointerType{
@@ -72,7 +108,7 @@ func (c *Compiler) compileTypeReference(scope *Scope, typ parser.Type) (Type, er
 	case parser.SliceType:
 		elem, err := c.compileTypeReference(scope, typ.Element)
 		if err != nil {
-			return nil, fmt.Errorf("invalid pointer type: %w", err)
+			return nil, err
 		}
 
 		return &SliceType{
@@ -81,12 +117,12 @@ func (c *Compiler) compileTypeReference(scope *Scope, typ parser.Type) (Type, er
 	case parser.MapType:
 		key, err := c.compileTypeReference(scope, typ.Key)
 		if err != nil {
-			return nil, fmt.Errorf("invalid map key type: %w", err)
+			return nil, err
 		}
 
 		val, err := c.compileTypeReference(scope, typ.Key)
 		if err != nil {
-			return nil, fmt.Errorf("invalid map value type: %w", err)
+			return nil, err
 		}
 
 		return &MapType{
@@ -95,10 +131,10 @@ func (c *Compiler) compileTypeReference(scope *Scope, typ parser.Type) (Type, er
 		}, nil
 	case parser.TupleType:
 		var elems []Type
-		for i, elem := range typ.Elements {
+		for _, elem := range typ.Elements {
 			elemTyp, err := c.compileTypeReference(scope, elem)
 			if err != nil {
-				return nil, fmt.Errorf("invalid tuple element type at index %d: %w", i, err)
+				return nil, err
 			}
 
 			elems = append(elems, elemTyp)
@@ -120,7 +156,7 @@ func (c *Compiler) compileFunction(p *Program, scope *Scope, decl parser.Functio
 		scope: newScope(scope, qualifiedName),
 	}
 
-	for i, param := range decl.Parameters {
+	for _, param := range decl.Parameters {
 		var paramName string
 		if param.Name != nil {
 			paramName = string(*param.Name)
@@ -128,7 +164,7 @@ func (c *Compiler) compileFunction(p *Program, scope *Scope, decl parser.Functio
 
 		typ, err := c.compileTypeReference(scope, param.Type)
 		if err != nil {
-			return fmt.Errorf("invalid type reference in parameter %d %q: %w", i, paramName, err)
+			return err
 		}
 
 		variable := &Variable{
@@ -146,17 +182,17 @@ func (c *Compiler) compileFunction(p *Program, scope *Scope, decl parser.Functio
 	if decl.Return != nil {
 		typ, err := c.compileTypeReference(scope, decl.Return)
 		if err != nil {
-			return fmt.Errorf("invalid type reference in return value: %w", err)
+			return err
 		}
 
 		f.ret = typ
 
 	}
 
-	for i, stmt := range decl.Body {
+	for _, stmt := range decl.Body {
 		compiledStmt, err := c.compileStatement(scope, stmt)
 		if err != nil {
-			return fmt.Errorf("failed to compile statement %d: %w", i, err)
+			return err
 		}
 
 		f.body = append(f.body, compiledStmt)
@@ -174,7 +210,8 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 		if stmt.Expr != nil {
 			expr, err = c.compileExpression(scope, *stmt.Expr)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compile expression: %w", err)
+				return nil, err
+
 			}
 		}
 
@@ -182,7 +219,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 		if stmt.Type != nil {
 			typ, err = c.compileTypeReference(scope, *stmt.Type)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compile type reference: %w", err)
+				return nil, err
 			}
 
 			// TODO: check equality
@@ -206,7 +243,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 	case parser.DeclarationStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile expression: %w", err)
+			return nil, err
 		}
 
 		v := &Variable{
@@ -223,12 +260,12 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 	case parser.AssignmentOperatorStatement:
 		left, err := c.compileExpression(scope, stmt.Left)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile lhs expression: %w", err)
+			return nil, err
 		}
 
 		right, err := c.compileExpression(scope, stmt.Right)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile rhs expression: %w", err)
+			return nil, err
 		}
 
 		_, err = validateBinaryExpression(left.Type(), Operator(stmt.Operator), right.Type())
@@ -244,16 +281,16 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 	case parser.AssignmentStatement:
 		left, err := c.compileExpression(scope, stmt.Left)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile lhs expression: %w", err)
+			return nil, err
 		}
 
 		right, err := c.compileExpression(scope, stmt.Right)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile rhs expression: %w", err)
+			return nil, err
 		}
 
 		if !TypesEqual(left.Type(), right.Type()) {
-			return nil, fmt.Errorf("mismatched types for assignment: %T vs. %T", left.Type(), right.Type())
+			return nil, stmt.Position.WrapError(fmt.Errorf("mismatched types for assignment: %T vs. %T", left.Type(), right.Type()))
 		}
 
 		return &AssignmentStatement{
@@ -263,7 +300,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 	case parser.ExprStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile expression: %w", err)
+			return nil, err
 		}
 
 		return expr, nil
@@ -277,24 +314,31 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 	case parser.NumberLiteral:
 		if expr.IsInteger() {
 			return &NumericLiteral{
-				value: float64(expr),
+				value: expr.Value,
 				typ:   IntType,
 			}, nil
 		} else {
 			return &NumericLiteral{
-				value: float64(expr),
-				typ:   FloatType,
+				value: expr.Value,
+
+				typ: FloatType,
 			}, nil
 		}
 	case parser.StringLiteral:
 		return &StringLiteral{
-			value: string(expr),
-			typ:   StringType,
+			value: expr.Value,
+
+			typ: StringType,
+
+			Position: expr.Position,
 		}, nil
 	case parser.BooleanLiteral:
 		return &BooleanLiteral{
-			value: bool(expr),
-			typ:   BoolType,
+			value: expr.Value,
+
+			typ: BoolType,
+
+			Position: expr.Position,
 		}, nil
 	case parser.BinaryExpr:
 		left, err := c.compileExpression(scope, expr.Left)
@@ -309,7 +353,7 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 
 		typ, err := validateBinaryExpression(left.Type(), Operator(expr.Operator), right.Type())
 		if err != nil {
-			return nil, fmt.Errorf("invalid binary expression: %w", err)
+			return nil, expr.Position.WrapError(err)
 		}
 
 		return &BinaryExpression{
@@ -317,17 +361,20 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 			operator: Operator(expr.Operator),
 			right:    right,
 			typ:      typ,
+
+			Position: expr.Position,
 		}, nil
 	case parser.IdentifierExpr:
-		return &VariableReferenceExpression{
+		return &SymbolReferenceExpression{
 			scope: scope,
 			name:  string(expr.Identifier),
+
+			Position: expr.Position,
 		}, nil
 	case parser.CallExpr:
-
 		funcExpr, err := c.compileExpression(scope, expr.Expr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile function expression: %w", err)
+			return nil, err
 		}
 
 		var exprs []Expression
@@ -345,6 +392,8 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 		return &CallExpression{
 			function: funcExpr,
 			args:     exprs,
+
+			Position: expr.Position,
 		}, nil
 	case parser.DotExpr:
 		receiver, err := c.compileExpression(scope, expr.Expr)
@@ -355,6 +404,8 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 		return &DotExpression{
 			Receiver: receiver,
 			Key:      string(expr.Key),
+
+			Position: expr.Position,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unhandled expresion %T", expr)

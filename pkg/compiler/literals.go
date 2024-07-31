@@ -1,8 +1,12 @@
 package compiler
 
+import "github.com/rhino1998/aeon/pkg/parser"
+
 type BooleanLiteral struct {
 	value bool
 	typ   Type
+
+	parser.Position
 }
 
 func (l BooleanLiteral) Type() Type {
@@ -12,6 +16,8 @@ func (l BooleanLiteral) Type() Type {
 type NumericLiteral struct {
 	value float64
 	typ   Type
+
+	parser.Position
 }
 
 func (l NumericLiteral) Type() Type {
@@ -21,6 +27,8 @@ func (l NumericLiteral) Type() Type {
 type StringLiteral struct {
 	value string
 	typ   Type
+
+	parser.Position
 }
 
 func (l StringLiteral) Type() Type {

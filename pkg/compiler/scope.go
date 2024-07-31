@@ -15,8 +15,6 @@ type Scope struct {
 	parent *Scope
 	name   string
 	scope  map[string]Symbol
-
-	unresolved map[string][]func(Symbol)
 }
 
 func newScope(parent *Scope, name string) *Scope {
@@ -52,10 +50,6 @@ func (s *Scope) put(symbol Symbol) error {
 	}
 
 	s.scope[name] = symbol
-
-	for _, unresolved := range s.unresolved[name] {
-		unresolved(symbol)
-	}
 
 	return nil
 }

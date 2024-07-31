@@ -1,5 +1,7 @@
 package compiler
 
+import "github.com/rhino1998/aeon/pkg/parser"
+
 type Expression interface {
 	Type() Type
 }
@@ -7,6 +9,8 @@ type Expression interface {
 type DotExpression struct {
 	Receiver Expression
 	Key      string
+
+	parser.Position
 }
 
 func (e *DotExpression) Type() Type {

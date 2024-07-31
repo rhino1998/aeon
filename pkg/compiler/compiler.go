@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"log"
 	"log/slog"
 
 	"github.com/rhino1998/aeon/pkg/parser"
@@ -39,24 +38,24 @@ func New(logger *slog.Logger, config Config) (*Compiler, error) {
 	}, nil
 }
 
-func (c *Compiler) Compile(ctx context.Context) error {
+func (c *Compiler) Compile(ctx context.Context) (*Program, error) {
 	for _, file := range c.Config.Files {
 		f, err := c.Config.Src.Open(file)
 		if err != nil {
-			return fmt.Errorf("failed to open file %q: %w", file, err)
+			return nil, fmt.Errorf("failed to open file %q: %w", file, err)
 		}
-		ast, err := parser.ParseReader(file, f)
+		ast, err := parser.ParseReader(file, f, parser.InitState("filename", file))
 		if err != nil {
-			return fmt.Errorf("failed to parse file %q: %w", file, err)
+			return nil, fmt.Errorf("failed to parse file %q: %w", file, err)
 		}
 
 		prog, err := c.compileProgram(ast.(parser.Program))
 		if err != nil {
-			return fmt.Errorf("failed to compile file %q: %w", file, err)
+			return nil, err
 		}
 
-		log.Printf("%#v", prog)
+		return prog, nil
 	}
 
-	return nil
+	return nil, nil
 }
