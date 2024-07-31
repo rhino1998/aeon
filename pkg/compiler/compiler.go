@@ -39,6 +39,7 @@ func New(logger *slog.Logger, config Config) (*Compiler, error) {
 }
 
 func (c *Compiler) Compile(ctx context.Context) (*Program, error) {
+	prog := newProgram()
 	for _, file := range c.Config.Files {
 		f, err := c.Config.Src.Open(file)
 		if err != nil {
@@ -49,17 +50,17 @@ func (c *Compiler) Compile(ctx context.Context) (*Program, error) {
 			return nil, fmt.Errorf("failed to parse file %q: %w", file, err)
 		}
 
-		prog, err := c.compileProgram(ast.(parser.Program))
-		if err != nil {
-			return nil, err
-		}
-
-		err = c.resolveProgramTypes(prog)
+		err = c.compileFile(prog, ast.(parser.File))
 		if err != nil {
 			return nil, err
 		}
 
 		return prog, nil
+	}
+
+	err := c.resolveProgramTypes(prog)
+	if err != nil {
+		return nil, err
 	}
 
 	return nil, nil

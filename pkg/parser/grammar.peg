@@ -45,8 +45,8 @@
   }
 }
 
-Program <- pkg:Package __ decls:(Declaration)* EOF {
-  return Program {
+File <- pkg:Package __ decls:(Declaration)* EOF {
+  return File {
     Package: pkg.(Package),
 
     Declarations: anyToSlice[Declaration](decls),

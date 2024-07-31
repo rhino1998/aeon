@@ -94,6 +94,20 @@ func (s *Scope) getType(name string) (Type, bool) {
 	return t, true
 }
 
+func (s *Scope) getPackage(name string) (*Package, bool) {
+	v, ok := s.get(name)
+	if !ok {
+		return nil, false
+	}
+
+	p, ok := v.(*Package)
+	if !ok {
+		return nil, false
+	}
+
+	return p, true
+}
+
 func (s *Scope) getTypedSymbol(name string) (TypedSymbol, bool) {
 	v, ok := s.get(name)
 	if !ok {

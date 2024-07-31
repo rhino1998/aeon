@@ -65,7 +65,7 @@ type Identifier string
 
 func (Identifier) typ() {}
 
-type Program struct {
+type File struct {
 	Package Package
 
 	Declarations []Declaration

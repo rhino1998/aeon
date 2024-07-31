@@ -6,31 +6,33 @@ import (
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
-func (c *Compiler) compileProgram(entry parser.Program) (*Program, error) {
-	p := newProgram()
+func (c *Compiler) compileFile(prog *Program, entry parser.File) error {
 
-	packageScope := newScope(p.root, string(entry.Package.Name))
-	p.root.put(packageScope)
+	pkg, ok := prog.root.getPackage(string(entry.Package.Name))
+	if !ok {
+		pkg = NewPackage(prog, string(entry.Package.Name))
+		prog.root.put(pkg)
+	}
 
 	for _, decl := range entry.Declarations {
 		switch decl := decl.(type) {
 		case parser.FunctionDeclaration:
-			err := c.compileFunction(p, packageScope, decl)
+			err := c.compileFunction(pkg, pkg.scope, decl)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		case parser.TypeDeclaration:
-			err := c.compileTypeDeclaration(p, packageScope, decl)
+			err := c.compileTypeDeclaration(pkg, pkg.scope, decl)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
 	}
 
-	return p, nil
+	return nil
 }
 
-func (c *Compiler) compileTypeDeclaration(p *Program, scope *Scope, decl parser.TypeDeclaration) error {
+func (c *Compiler) compileTypeDeclaration(p *Package, scope *Scope, decl parser.TypeDeclaration) error {
 	underlying, err := c.compileTypeReference(scope, decl.Type)
 	if err != nil {
 		return err
@@ -100,7 +102,7 @@ func (c *Compiler) compileTypeReference(scope *Scope, typ parser.Type) (Type, er
 	}
 }
 
-func (c *Compiler) compileFunction(p *Program, scope *Scope, decl parser.FunctionDeclaration) error {
+func (c *Compiler) compileFunction(p *Package, scope *Scope, decl parser.FunctionDeclaration) error {
 	qualifiedName := fmt.Sprintf("%s.%s", scope.name, decl.Name)
 
 	f := &Function{
