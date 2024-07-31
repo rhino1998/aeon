@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"fmt"
-	"log"
 	"strings"
 )
 
@@ -23,7 +22,6 @@ func (unknownType) String() string { return "<unknown>" }
 func (unknownType) Kind() Kind     { return KindUnknown }
 
 func resolveType(typ Type) Type {
-	log.Printf("%T", typ)
 	switch typ := typ.(type) {
 	case *ReferencedType:
 		return resolveType(typ.Dereference())
