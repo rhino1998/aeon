@@ -54,6 +54,11 @@ func (c *Compiler) Compile(ctx context.Context) (*Program, error) {
 			return nil, err
 		}
 
+		err = c.resolveProgramTypes(prog)
+		if err != nil {
+			return nil, err
+		}
+
 		return prog, nil
 	}
 

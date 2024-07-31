@@ -237,7 +237,7 @@ type baseElseIfElseStatement struct {
 	baseStatement
 }
 
-func (baseElseIfElseStatement) ElseIfElseStatement() {}
+func (baseElseIfElseStatement) elseIfElseStatement() {}
 
 type ElseIfStatement struct {
 	baseElseIfElseStatement

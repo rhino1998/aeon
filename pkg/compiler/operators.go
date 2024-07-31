@@ -50,23 +50,23 @@ const (
 )
 
 var binaryOperatorNumericKinds = map[[2]Kind]Kind{
-	{KindFloat, KindFloat}:     KindFloat,
-	{KindInteger, KindInteger}: KindInteger,
+	{KindFloat, KindFloat}: KindFloat,
+	{KindInt, KindInt}:     KindInt,
 }
 
 var binaryOperatorComparisonKinds = map[[2]Kind]Kind{
-	{KindFloat, KindFloat}:     KindBoolean,
-	{KindInteger, KindInteger}: KindBoolean,
-	{KindString, KindString}:   KindBoolean,
-	{KindBoolean, KindBoolean}: KindBoolean,
+	{KindFloat, KindFloat}:   KindBool,
+	{KindInt, KindInt}:       KindBool,
+	{KindString, KindString}: KindBool,
+	{KindBool, KindBool}:     KindBool,
 }
 
 var binaryOperatorIntegerKinds = map[[2]Kind]Kind{
-	{KindInteger, KindInteger}: KindInteger,
+	{KindInt, KindInt}: KindInt,
 }
 
 var binaryOperatorBooleanKinds = map[[2]Kind]Kind{
-	{KindBoolean, KindBoolean}: KindBoolean,
+	{KindBool, KindBool}: KindBool,
 }
 
 func validateBinaryExpression(left Type, operator Operator, right Type) (Type, error) {
@@ -80,7 +80,7 @@ func validateBinaryExpression(left Type, operator Operator, right Type) (Type, e
 	}
 
 	if left.Kind() != kind {
-		return UnspecifiedKindType{kind: kind}, nil
+		return KindType(kind), nil
 	}
 
 	return left, nil
@@ -89,9 +89,9 @@ func validateBinaryExpression(left Type, operator Operator, right Type) (Type, e
 var binaryOperatorKinds = map[Operator]map[[2]Kind]Kind{
 	OperatorPower: binaryOperatorNumericKinds,
 	OperatorAddition: {
-		{KindFloat, KindFloat}:     KindFloat,
-		{KindInteger, KindInteger}: KindInteger,
-		{KindString, KindString}:   KindString,
+		{KindFloat, KindFloat}:   KindFloat,
+		{KindInt, KindInt}:       KindInt,
+		{KindString, KindString}: KindString,
 	},
 	OperatorSubtraction:    binaryOperatorNumericKinds,
 	OperatorMultiplication: binaryOperatorNumericKinds,
@@ -99,9 +99,9 @@ var binaryOperatorKinds = map[Operator]map[[2]Kind]Kind{
 	OperatorModulo:         binaryOperatorNumericKinds,
 
 	OperatorPlusEquals: {
-		{KindFloat, KindFloat}:     KindFloat,
-		{KindInteger, KindInteger}: KindInteger,
-		{KindString, KindString}:   KindString,
+		{KindFloat, KindFloat}:   KindFloat,
+		{KindInt, KindInt}:       KindInt,
+		{KindString, KindString}: KindString,
 	},
 	OperatorMinusEquals:    binaryOperatorNumericKinds,
 	OperatorMultiplyEquals: binaryOperatorNumericKinds,
@@ -126,16 +126,16 @@ var binaryOperatorKinds = map[Operator]map[[2]Kind]Kind{
 }
 
 var unaryOperatorNumericKinds = map[Kind]Kind{
-	KindInteger: KindInteger,
-	KindFloat:   KindFloat,
+	KindInt:   KindInt,
+	KindFloat: KindFloat,
 }
 
 var unaryOperatorIntegerKinds = map[Kind]Kind{
-	KindInteger: KindInteger,
+	KindInt: KindInt,
 }
 
 var unaryOperatorBooleanKinds = map[Kind]Kind{
-	KindBoolean: KindBoolean,
+	KindBool: KindBool,
 }
 
 func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
@@ -163,9 +163,9 @@ var unaryOperatorKinds = map[Operator]map[Kind]Kind{
 }
 
 type BinaryExpression struct {
-	left     Expression
-	operator Operator
-	right    Expression
+	Left     Expression
+	Operator Operator
+	Right    Expression
 
 	typ Type
 
@@ -176,36 +176,16 @@ func (e *BinaryExpression) Type() Type {
 	return e.typ
 }
 
-func (e *BinaryExpression) Operator() Operator {
-	return e.operator
-}
-
-func (e *BinaryExpression) Left() Expression {
-	return e.left
-}
-
-func (e *BinaryExpression) Right() Expression {
-	return e.right
+func (e *BinaryExpression) SetType(typ Type) {
+	e.typ = typ
 }
 
 type AssignmentOperatorStatement struct {
-	left     Expression
-	operator Operator
-	right    Expression
+	Left     Expression
+	Operator Operator
+	Right    Expression
 
 	parser.Position
-}
-
-func (s *AssignmentOperatorStatement) Operator() Operator {
-	return s.operator
-}
-
-func (s *AssignmentOperatorStatement) Left() Expression {
-	return s.left
-}
-
-func (s *AssignmentOperatorStatement) Right() Expression {
-	return s.right
 }
 
 type UnaryExpression struct {

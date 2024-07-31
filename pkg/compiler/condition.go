@@ -3,23 +3,30 @@ package compiler
 import "github.com/rhino1998/aeon/pkg/parser"
 
 type IfStatement struct {
-	condition Expression
+	Condition Expression
 
-	body []Statement
+	Scope *Scope
+	Body  []Statement
 
-	els Statement
+	Else Statement
 
 	parser.Position
 }
 
-func (s *IfStatement) Condition() Expression {
-	return s.condition
+type ElseIfStatement struct {
+	Condition Expression
+
+	Scope *Scope
+	Body  []Statement
+
+	Else Statement
+
+	parser.Position
 }
 
-func (s *IfStatement) Body() []Statement {
-	return s.body
-}
+type ElseStatement struct {
+	Scope *Scope
+	Body  []Statement
 
-func (s *IfStatement) Else() Statement {
-	return s.els
+	parser.Position
 }

@@ -2,57 +2,9 @@ package compiler
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/rhino1998/aeon/pkg/parser"
 )
-
-type Program struct {
-	root *Scope
-}
-
-func newProgram() *Program {
-	p := &Program{
-		root: builtins(),
-	}
-
-	return p
-}
-
-func (p *Program) Function(qualifiedName string) (*Function, error) {
-	scope := p.root
-	var currentScope string
-	parts := strings.Split(qualifiedName, ".")
-
-	for len(parts) > 1 {
-		sym, ok := scope.get(parts[0])
-		if !ok {
-			return nil, fmt.Errorf("no such package %q", qualifiedName)
-		}
-
-		switch sym := sym.(type) {
-		case *Scope:
-			scope = sym
-			currentScope += "." + parts[0]
-			parts = parts[1:]
-			continue
-		default:
-			return nil, fmt.Errorf("%q is not a package", qualifiedName)
-		}
-	}
-
-	f, ok := scope.get(parts[0])
-	if !ok {
-		return nil, fmt.Errorf("no such function %q", qualifiedName)
-	}
-
-	switch f := f.(type) {
-	case *Function:
-		return f, nil
-	default:
-		return nil, fmt.Errorf("symbol %q is not a function", qualifiedName)
-	}
-}
 
 func (c *Compiler) compileProgram(entry parser.Program) (*Program, error) {
 	p := newProgram()
@@ -155,7 +107,7 @@ func (c *Compiler) compileFunction(p *Program, scope *Scope, decl parser.Functio
 		name:  string(decl.Name),
 		scope: newScope(scope, qualifiedName),
 	}
-	scope.function = f
+	f.scope.function = f
 
 	for _, param := range decl.Parameters {
 		var paramName string
@@ -191,7 +143,7 @@ func (c *Compiler) compileFunction(p *Program, scope *Scope, decl parser.Functio
 	}
 
 	for _, stmt := range decl.Body {
-		compiledStmt, err := c.compileStatement(scope, stmt)
+		compiledStmt, err := c.compileStatement(f.scope, stmt)
 		if err != nil {
 			return err
 		}
@@ -222,8 +174,6 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 			if err != nil {
 				return nil, err
 			}
-
-			// TODO: check equality
 		} else if stmt.Expr != nil {
 			typ = expr.Type()
 		} else {
@@ -240,6 +190,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 		return &VariableStatement{
 			Variable:   *v,
 			Expression: expr,
+			Type:       typ,
 
 			Position: stmt.Position,
 		}, nil
@@ -273,15 +224,10 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 			return nil, err
 		}
 
-		_, err = validateBinaryExpression(left.Type(), Operator(stmt.Operator), right.Type())
-		if err != nil {
-			return nil, stmt.WrapError(err)
-		}
-
 		return &AssignmentOperatorStatement{
-			left:     left,
-			operator: Operator(stmt.Operator),
-			right:    right,
+			Left:     left,
+			Operator: Operator(stmt.Operator),
+			Right:    right,
 
 			Position: stmt.Position,
 		}, nil
@@ -296,13 +242,9 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 			return nil, err
 		}
 
-		if !TypesEqual(left.Type(), right.Type()) {
-			return nil, stmt.Position.WrapError(fmt.Errorf("mismatched types for assignment: %T vs. %T", left.Type(), right.Type()))
-		}
-
 		return &AssignmentStatement{
-			left:  left,
-			right: right,
+			Left:  left,
+			Right: right,
 
 			Position: stmt.Position,
 		}, nil
@@ -350,23 +292,66 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 			return nil, err
 		}
 
-		body, err := c.compileStatements(scope, stmt.Body)
+		bodyScope := newScope(scope, "if")
+		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
 			return nil, err
 		}
 
 		var rest Statement
 		if stmt.Else != nil {
-			rest, err = c.compileStatement(scope, stmt)
+			rest, err = c.compileStatement(scope, stmt.Else)
 			if err != nil {
 				return nil, err
 			}
 		}
 
 		return &IfStatement{
-			condition: condition,
-			body:      body,
-			els:       rest,
+			Condition: condition,
+			Scope:     bodyScope,
+			Body:      body,
+			Else:      rest,
+
+			Position: stmt.Position,
+		}, nil
+	case parser.ElseIfStatement:
+		condition, err := c.compileExpression(scope, stmt.Condition)
+		if err != nil {
+			return nil, err
+		}
+
+		bodyScope := newScope(scope, "elseif")
+		body, err := c.compileStatements(bodyScope, stmt.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		var rest Statement
+		if stmt.Else != nil {
+			rest, err = c.compileStatement(scope, stmt.Else)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		return &ElseIfStatement{
+			Condition: condition,
+			Scope:     bodyScope,
+			Body:      body,
+			Else:      rest,
+
+			Position: stmt.Position,
+		}, nil
+	case parser.ElseStatement:
+		bodyScope := newScope(scope, "else")
+		body, err := c.compileStatements(bodyScope, stmt.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ElseStatement{
+			Scope: bodyScope,
+			Body:  body,
 
 			Position: stmt.Position,
 		}, nil
@@ -395,7 +380,7 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 		if expr.IsInteger() {
 			return &Literal[int64]{
 				value: int64(expr.Value),
-				typ:   IntType,
+				typ:   KindType(KindInt),
 
 				Position: expr.Position,
 			}, nil
@@ -403,7 +388,7 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 			return &Literal[float64]{
 				value: expr.Value,
 
-				typ: FloatType,
+				typ: KindType(KindFloat),
 
 				Position: expr.Position,
 			}, nil
@@ -412,7 +397,7 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 		return &Literal[string]{
 			value: expr.Value,
 
-			typ: StringType,
+			typ: KindType(KindString),
 
 			Position: expr.Position,
 		}, nil
@@ -420,7 +405,7 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 		return &Literal[bool]{
 			value: expr.Value,
 
-			typ: BoolType,
+			typ: KindType(KindBool),
 
 			Position: expr.Position,
 		}, nil
@@ -435,16 +420,10 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 			return nil, fmt.Errorf("failed to compile lhs of expression: %w", err)
 		}
 
-		typ, err := validateBinaryExpression(left.Type(), Operator(expr.Operator), right.Type())
-		if err != nil {
-			return nil, expr.Position.WrapError(err)
-		}
-
 		return &BinaryExpression{
-			left:     left,
-			operator: Operator(expr.Operator),
-			right:    right,
-			typ:      typ,
+			Left:     left,
+			Operator: Operator(expr.Operator),
+			Right:    right,
 
 			Position: expr.Position,
 		}, nil

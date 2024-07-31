@@ -16,6 +16,10 @@ func (v *Variable) Type() Type {
 	return v.typ
 }
 
+func (v *Variable) SetType(typ Type) {
+	v.typ = typ
+}
+
 type SymbolReferenceExpression struct {
 	scope *Scope
 	name  string
@@ -36,24 +40,26 @@ func (e *SymbolReferenceExpression) Type() Type {
 	return v.Type()
 }
 
+func (e *SymbolReferenceExpression) Dereference() TypedSymbol {
+	v, ok := e.scope.getTypedSymbol(e.name)
+	if !ok {
+		return nil
+	}
+
+	return v
+}
+
 type AssignmentStatement struct {
-	left  Expression
-	right Expression
+	Left  Expression
+	Right Expression
 
 	parser.Position
-}
-
-func (s *AssignmentStatement) Left() Expression {
-	return s.left
-}
-
-func (s *AssignmentStatement) Right() Expression {
-	return s.right
 }
 
 type VariableStatement struct {
 	Variable   Variable
 	Expression Expression
+	Type       Type
 
 	parser.Position
 }
@@ -61,6 +67,7 @@ type VariableStatement struct {
 type DeclarationStatement struct {
 	Variable   Variable
 	Expression Expression
+	Type       Type
 
 	parser.Position
 }

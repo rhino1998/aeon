@@ -31,6 +31,20 @@ func (s *Scope) Name() string {
 	return s.name
 }
 
+func (s *Scope) Functions() []*Function {
+	var funcs []*Function
+	for _, val := range s.scope {
+		switch val := val.(type) {
+		case *Function:
+			funcs = append(funcs, val)
+		case *Scope:
+			funcs = append(funcs, val.Functions()...)
+		}
+	}
+
+	return funcs
+}
+
 func (s *Scope) Function() *Function {
 	if s.function != nil {
 		return s.function

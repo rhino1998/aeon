@@ -116,18 +116,18 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 		scope.Put(stmt.Variable.Name(), NewVariable(stmt.Variable.Type(), val))
 		return nil
 	case *compiler.AssignmentOperatorStatement:
-		lhs, err := s.executeExpression(scope, stmt.Left())
+		lhs, err := s.executeExpression(scope, stmt.Left)
 		if err != nil {
 			return err
 		}
 
-		rhs, err := s.executeExpression(scope, stmt.Right())
+		rhs, err := s.executeExpression(scope, stmt.Right)
 		if err != nil {
 			return err
 		}
 
 		var op compiler.Operator
-		switch stmt.Operator() {
+		switch stmt.Operator {
 		case compiler.OperatorPlusEquals:
 			op = compiler.OperatorAddition
 		case compiler.OperatorMinusEquals:
@@ -148,7 +148,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 
 		return nil
 	case *compiler.AssignmentStatement:
-		lhs, err := s.executeExpression(scope, stmt.Left())
+		lhs, err := s.executeExpression(scope, stmt.Left)
 		if err != nil {
 			return err
 		}
@@ -158,7 +158,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 			return fmt.Errorf("assignment to non-settable value: %T", lhs)
 		}
 
-		rhs, err := s.executeExpression(scope, stmt.Right())
+		rhs, err := s.executeExpression(scope, stmt.Right)
 		if err != nil {
 			return err
 		}
@@ -197,7 +197,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 			return stmt.WrapError(fmt.Errorf("unsupported postfix operator: %s", stmt.Operator))
 		}
 
-		if expr.Type().Kind() != compiler.KindFloat && expr.Type().Kind() != compiler.KindInteger {
+		if expr.Type().Kind() != compiler.KindFloat && expr.Type().Kind() != compiler.KindInt {
 			return stmt.WrapError(fmt.Errorf("postfix operator %q only applies to integer or float values", stmt.Operator))
 		}
 
@@ -213,7 +213,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 
 		return nil
 	case *compiler.IfStatement:
-		cond, err := s.executeExpression(scope, stmt.Condition())
+		cond, err := s.executeExpression(scope, stmt.Condition)
 		if err != nil {
 			return err
 		}
@@ -226,7 +226,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 		if b {
 			scope := newScope(scope, "if")
 
-			for _, stmt := range stmt.Body() {
+			for _, stmt := range stmt.Body {
 				err := s.executeStatement(scope, stmt, ret)
 				if err != nil {
 					return err
@@ -234,12 +234,49 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 			}
 
 			return nil
-		} else if stmt.Else() != nil {
-			return s.executeStatement(scope, stmt.Else(), ret)
+		} else if stmt.Else != nil {
+			return s.executeStatement(scope, stmt.Else, ret)
 		} else {
 			return nil
 		}
+	case *compiler.ElseIfStatement:
+		cond, err := s.executeExpression(scope, stmt.Condition)
+		if err != nil {
+			return err
+		}
 
+		b, err := s.boolOrFail(cond)
+		if err != nil {
+			return stmt.WrapError(err)
+		}
+
+		if b {
+			scope := newScope(scope, "elseif")
+
+			for _, stmt := range stmt.Body {
+				err := s.executeStatement(scope, stmt, ret)
+				if err != nil {
+					return err
+				}
+			}
+
+			return nil
+		} else if stmt.Else != nil {
+			return s.executeStatement(scope, stmt.Else, ret)
+		} else {
+			return nil
+		}
+	case *compiler.ElseStatement:
+		scope := newScope(scope, "else")
+
+		for _, stmt := range stmt.Body {
+			err := s.executeStatement(scope, stmt, ret)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
 	default:
 		return stmt.WrapError(fmt.Errorf("unhandled statement type: %T", stmt))
 	}
@@ -265,23 +302,23 @@ func (s *State) executeExpression(scope *Scope, expr compiler.Expression) (Value
 	case *compiler.ParenthesizedExpression:
 		return s.executeExpression(scope, expr.Expression)
 	case *compiler.BinaryExpression:
-		switch expr.Operator() {
+		switch expr.Operator {
 		case compiler.OperatorLogicalAnd:
 		case compiler.OperatorLogicalOr:
 		default:
 		}
 
-		lhs, err := s.executeExpression(scope, expr.Left())
+		lhs, err := s.executeExpression(scope, expr.Left)
 		if err != nil {
 			return nil, err
 		}
 
-		rhs, err := s.executeExpression(scope, expr.Right())
+		rhs, err := s.executeExpression(scope, expr.Right)
 		if err != nil {
 			return nil, err
 		}
 
-		result, err := s.binaryOperate(lhs, rhs, expr.Operator())
+		result, err := s.binaryOperate(lhs, rhs, expr.Operator)
 		if err != nil {
 			return nil, expr.WrapError(err)
 		}
@@ -317,7 +354,7 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 			}
 
 			return NewConstant(lhs.Type(), float64(lhsVal+rhsVal)), nil
-		case compiler.KindInteger:
+		case compiler.KindInt:
 			lhsVal, err := s.intOrFail(lhs)
 			if err != nil {
 				return nil, err
@@ -354,7 +391,7 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 }
 
 func (s *State) intOrFail(val Value) (int64, error) {
-	if val.Type().Kind() != compiler.KindInteger {
+	if val.Type().Kind() != compiler.KindInt {
 		return 0, fmt.Errorf("expected integer value, got %T", val)
 	}
 
@@ -378,7 +415,7 @@ func (s *State) stringOrFail(val Value) (string, error) {
 }
 
 func (s *State) boolOrFail(val Value) (bool, error) {
-	if val.Type().Kind() != compiler.KindBoolean {
+	if val.Type().Kind() != compiler.KindBool {
 		return false, fmt.Errorf("expected bool value, got %T", val)
 	}
 

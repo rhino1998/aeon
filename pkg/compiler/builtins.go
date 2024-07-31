@@ -2,12 +2,12 @@ package compiler
 
 var (
 	IntType = &BasicType{
-		kind: KindInteger,
+		kind: KindInt,
 		name: "int",
 	}
 
 	BoolType = &BasicType{
-		kind: KindBoolean,
+		kind: KindBool,
 		name: "bool",
 	}
 

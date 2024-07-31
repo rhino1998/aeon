@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -73,25 +74,36 @@ func TypesEqual(t1, t2 Type) bool {
 	return typesEqual(resolveType(t1), resolveType(t2))
 }
 
-func IsTypeSpecified(s *Scope, typ Type) bool {
-	switch typ := typ.(type) {
+func IsUnspecified(typ Type) bool {
+	if typ == nil {
+		return true
+	}
+
+	_, ok := resolveType(typ).(KindType)
+	return ok
+}
+
+func IsTypeResolvable(s *Scope, typ Type) bool {
+	switch typ := resolveType(typ).(type) {
+	case KindType:
+		return false
 	case *BasicType:
 		return IsKnownType(s, typ)
 	case *DerivedType:
-		return IsTypeSpecified(s, typ.Underlying())
+		return IsTypeResolvable(s, typ.Underlying())
 	case *SliceType:
-		return IsTypeSpecified(s, typ.Elem())
+		return IsTypeResolvable(s, typ.Elem())
 	case *MapType:
-		return IsTypeSpecified(s, typ.Key()) && IsTypeSpecified(s, typ.Value())
+		return IsTypeResolvable(s, typ.Key()) && IsTypeResolvable(s, typ.Value())
 	case *FunctionType:
 		for _, param := range typ.Parameters() {
-			if !IsTypeSpecified(s, param) {
+			if !IsTypeResolvable(s, param) {
 				return false
 			}
 		}
 
 		if typ.ret != nil {
-			if !IsTypeSpecified(s, typ.ret) {
+			if !IsTypeResolvable(s, typ.ret) {
 				return false
 			}
 		}
@@ -106,6 +118,7 @@ func IsTypeSpecified(s *Scope, typ Type) bool {
 }
 
 func IsKnownType(s *Scope, typ Type) bool {
+	log.Printf("typ %v", typ)
 	t, ok := s.getType(typ.Name())
 	if !ok {
 		return false
@@ -114,12 +127,26 @@ func IsKnownType(s *Scope, typ Type) bool {
 	return t == typ
 }
 
+type KindType Kind
+
+func (t KindType) String() string {
+	return t.Name()
+}
+
+func (t KindType) Name() string {
+	return fmt.Sprintf("<kind %s>", t.Kind())
+}
+
+func (t KindType) Kind() Kind {
+	return Kind(t)
+}
+
 type Kind int
 
 const (
 	KindUnknown Kind = iota
-	KindBoolean
-	KindInteger
+	KindBool
+	KindInt
 	KindFloat
 	KindString
 	KindPointer
@@ -134,9 +161,9 @@ const (
 
 func (k Kind) String() string {
 	switch k {
-	case KindBoolean:
+	case KindBool:
 		return "bool"
-	case KindInteger:
+	case KindInt:
 		return "int"
 	case KindFloat:
 		return "float"
