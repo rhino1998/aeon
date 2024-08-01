@@ -155,6 +155,15 @@ func (c *Compiler) resolveStatementTypes(scope *Scope, stmt Statement) error {
 		stmt.Expression = expr
 
 		return nil
+	case *ExpressionStatement:
+		expr, err := c.resolveExpressionTypes(scope, stmt.Expression, nil)
+		if err != nil {
+			return err
+		}
+
+		stmt.Expression = expr
+
+		return nil
 	default:
 		return stmt.WrapError(fmt.Errorf("unhandled statement in type checker: %T", stmt))
 	}
@@ -307,6 +316,8 @@ func (c *Compiler) resolveExpressionTypes(scope *Scope, expr Expression, bound T
 
 		return expr, nil
 	case *BinaryExpression:
+		// TODO: operatore-aware bounds
+
 		left, err := c.resolveExpressionTypes(scope, expr.Left, nil)
 		if err != nil {
 			return nil, err
@@ -328,6 +339,17 @@ func (c *Compiler) resolveExpressionTypes(scope *Scope, expr Expression, bound T
 		}
 
 		expr.SetType(typ)
+
+		return expr, nil
+	case *UnaryExpression:
+		// TODO: operatore-aware bounds
+
+		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, bound)
+		if err != nil {
+			return nil, err
+		}
+
+		expr.Expression = subExpr
 
 		return expr, nil
 	default:

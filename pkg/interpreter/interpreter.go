@@ -337,13 +337,12 @@ func (s *State) executeExpression(scope *Scope, expr compiler.Expression) (Value
 			return nil, err
 		}
 
-		var _ = val
-
-		switch expr.Operator {
-
-		default:
-			return nil, expr.WrapError(fmt.Errorf("unhandled unary operator %q", expr.Operator))
+		res, err := s.unaryOperate(val, expr.Operator)
+		if err != nil {
+			return nil, expr.WrapError(err)
 		}
+
+		return res, nil
 	default:
 		return nil, expr.WrapError(fmt.Errorf("unhandled expression type: %T", expr))
 	}
@@ -410,9 +409,38 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 	}
 }
 
+func (s *State) unaryOperate(val Value, op compiler.Operator) (Value, error) {
+	switch op {
+	case compiler.OperatorPositive:
+		switch val.Type().Kind() {
+		case compiler.KindFloat:
+			raw := val.Raw().(float64)
+			return NewConstant(val.Type(), +raw), nil
+		case compiler.KindInt:
+			raw := val.Raw().(int64)
+			return NewConstant(val.Type(), +raw), nil
+		default:
+			return nil, fmt.Errorf("operator %s is not supported on type %v", op, val.Type())
+		}
+	case compiler.OperatorNegate:
+		switch val.Type().Kind() {
+		case compiler.KindFloat:
+			raw := val.Raw().(float64)
+			return NewConstant(val.Type(), -raw), nil
+		case compiler.KindInt:
+			raw := val.Raw().(int64)
+			return NewConstant(val.Type(), -raw), nil
+		default:
+			return nil, fmt.Errorf("operator %s is not supported on type %v", op, val.Type())
+		}
+	default:
+		return nil, fmt.Errorf("operator %s is not supported on type %v", op, val.Type())
+	}
+}
+
 func (s *State) intOrFail(val Value) (int64, error) {
 	if val.Type().Kind() != compiler.KindInt {
-		return 0, fmt.Errorf("expected integer value, got %T", val)
+		return 0, fmt.Errorf("expected integer value, got %T", val.Type())
 	}
 
 	return val.Raw().(int64), nil
@@ -420,7 +448,7 @@ func (s *State) intOrFail(val Value) (int64, error) {
 
 func (s *State) floatOrFail(val Value) (float64, error) {
 	if val.Type().Kind() != compiler.KindFloat {
-		return 0, fmt.Errorf("expected float value, got %T", val)
+		return 0, fmt.Errorf("expected float value, got %T", val.Type())
 	}
 
 	return val.Raw().(float64), nil
@@ -428,7 +456,7 @@ func (s *State) floatOrFail(val Value) (float64, error) {
 
 func (s *State) stringOrFail(val Value) (string, error) {
 	if val.Type().Kind() != compiler.KindString {
-		return "", fmt.Errorf("expected string value, got %T", val)
+		return "", fmt.Errorf("expected string value, got %T", val.Type())
 	}
 
 	return val.Raw().(string), nil
@@ -436,7 +464,7 @@ func (s *State) stringOrFail(val Value) (string, error) {
 
 func (s *State) boolOrFail(val Value) (bool, error) {
 	if val.Type().Kind() != compiler.KindBool {
-		return false, fmt.Errorf("expected bool value, got %T", val)
+		return false, fmt.Errorf("expected bool value, got %T", val.Type())
 	}
 
 	return val.Raw().(bool), nil

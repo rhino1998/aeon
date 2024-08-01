@@ -39,6 +39,8 @@ func (s *Scope) Functions() []*Function {
 			funcs = append(funcs, val)
 		case *Scope:
 			funcs = append(funcs, val.Functions()...)
+		case *Package:
+			funcs = append(funcs, val.Functions()...)
 		}
 	}
 

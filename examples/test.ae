@@ -18,9 +18,7 @@ func main() {
   x++
   y+="a"
 
-  y ++ 5
-
-  var q map[int]int
+  var l (int, int, int)
 
   if (x == 5) {
     return

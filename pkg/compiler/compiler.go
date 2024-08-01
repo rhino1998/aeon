@@ -65,5 +65,5 @@ func (c *Compiler) Compile(ctx context.Context) (*Program, error) {
 		return nil, CompilerError{err}
 	}
 
-	return nil, nil
+	return prog, nil
 }

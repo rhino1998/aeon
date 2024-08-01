@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"fmt"
-	"log"
 	"strings"
 )
 
@@ -95,6 +94,14 @@ func IsTypeResolvable(s *Scope, typ Type) bool {
 		return IsTypeResolvable(s, typ.Elem())
 	case *MapType:
 		return IsTypeResolvable(s, typ.Key()) && IsTypeResolvable(s, typ.Value())
+	case *TupleType:
+		for _, subType := range typ.Elems() {
+			if !IsTypeResolvable(s, subType) {
+				return false
+			}
+		}
+
+		return true
 	case *FunctionType:
 		for _, param := range typ.Parameters() {
 			if !IsTypeResolvable(s, param) {
@@ -118,7 +125,6 @@ func IsTypeResolvable(s *Scope, typ Type) bool {
 }
 
 func IsKnownType(s *Scope, typ Type) bool {
-	log.Printf("typ %v", typ)
 	t, ok := s.getType(typ.Name())
 	if !ok {
 		return false
@@ -366,7 +372,7 @@ func (t FunctionType) String() string {
 		retStr = " " + t.ret.String()
 	}
 
-	return fmt.Sprintf("func(%s)", strings.Join(params, ", "), retStr)
+	return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), retStr)
 }
 
 func (t FunctionType) Parameters() []Type {
