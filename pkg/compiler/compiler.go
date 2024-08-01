@@ -16,7 +16,6 @@ type Config struct {
 
 func (c *Config) Validate(logger *slog.Logger) error {
 	return nil
-
 }
 
 type Compiler struct {
@@ -50,17 +49,20 @@ func (c *Compiler) Compile(ctx context.Context) (*Program, error) {
 			return nil, fmt.Errorf("failed to parse file %q: %w", file, err)
 		}
 
-		err = c.compileFile(prog, ast.(parser.File))
+		err = c.compileFile(prog, file, ast.(parser.File))
 		if err != nil {
-			return nil, err
+			return nil, CompilerError{err}
 		}
-
-		return prog, nil
 	}
 
 	err := c.resolveProgramTypes(prog)
 	if err != nil {
-		return nil, err
+		return nil, CompilerError{err}
+	}
+
+	_, err = prog.Function("main.main")
+	if err != nil {
+		return nil, CompilerError{err}
 	}
 
 	return nil, nil

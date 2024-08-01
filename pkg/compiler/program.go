@@ -81,6 +81,6 @@ func scopedFunction(scope *Scope, qualifiedName string) (*Function, error) {
 	case *Function:
 		return f, nil
 	default:
-		return nil, fmt.Errorf("symbol %q is not a function", qualifiedName)
+		return nil, fmt.Errorf("no such function %q", qualifiedName)
 	}
 }

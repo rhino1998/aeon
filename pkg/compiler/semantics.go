@@ -1,13 +1,13 @@
 package compiler
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
-func (c *Compiler) compileFile(prog *Program, entry parser.File) error {
-
+func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File) error {
 	pkg, ok := prog.root.getPackage(string(entry.Package.Name))
 	if !ok {
 		pkg = NewPackage(prog, string(entry.Package.Name))
@@ -19,11 +19,21 @@ func (c *Compiler) compileFile(prog *Program, entry parser.File) error {
 		case parser.FunctionDeclaration:
 			err := c.compileFunction(pkg, pkg.scope, decl)
 			if err != nil {
+				var posError *parser.PositionError
+				if !errors.As(err, &posError) {
+					return FileError{File: filename, Err: err}
+				}
+
 				return err
 			}
 		case parser.TypeDeclaration:
 			err := c.compileTypeDeclaration(pkg, pkg.scope, decl)
 			if err != nil {
+				var posError *parser.PositionError
+				if !errors.As(err, &posError) {
+					return FileError{File: filename, Err: err}
+				}
+
 				return err
 			}
 		}
