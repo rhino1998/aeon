@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"time"
+	"strings"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
 )
@@ -246,7 +246,8 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(100 * time.Millisecond):
+		// case <-time.After(100 * time.Millisecond):
+		default:
 		}
 
 		code, err := r.fetch(pc)
@@ -254,10 +255,11 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			return err
 		}
 
-		log.Println("--------------")
-		log.Printf("%s", code)
-		log.Printf("fp: 0x%08x", r.fp)
-		r.printStack()
+		// log.Println("--------------")
+		// log.Printf("%s", code)
+		// log.Printf("fp: %v", r.fp)
+		// r.printRegisters()
+		// r.printStack()
 
 		pc++
 
@@ -267,14 +269,35 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		case Nop:
 		case Mov:
 			err = store(code.Dst)(load(code.Src)())
-		case PushI:
-			r.push(code.Src)
-		case StoreI:
-			err = storeM(r.registers[code.Dst].(Addr))(loadI(code.Src)())
-		case StoreR:
-			err = storeM(r.registers[code.Dst].(Addr))(loadR(code.Src)())
-		case LoadR:
-			err = storeR(code.Dst)(loadM(r.registers[code.Src].(Addr))())
+		case Store:
+			addr, err := load(code.Dst)()
+			if err != nil {
+				return err
+			}
+
+			err = storeM(addr.(Addr))(load(code.Src)())
+			if err != nil {
+				return err
+			}
+		case Load:
+			addr, err := load(code.Src)()
+			if err != nil {
+				return err
+			}
+			err = store(code.Dst)(loadM(addr.(Addr))())
+			if err != nil {
+				return err
+			}
+		case Push:
+			val, err := load(code.Src)()
+			if err != nil {
+				return err
+			}
+
+			err = r.push(val)
+			if err != nil {
+				return err
+			}
 		case CallAddr:
 			err := r.push(r.sp)
 			if err != nil {
@@ -300,7 +323,9 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			}
 			r.ret = r.externs[code.Extern](args)
 		case Return:
-			r.ret = r.registers[code.Register]
+			if code.Register != 0 {
+				r.ret = r.registers[code.Register]
+			}
 
 			r.sp, err = loadType[Addr](r, r.fp-2)
 			if err != nil {
@@ -319,17 +344,38 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 
 			r.zeroStack()
 
-			log.Printf("%v %v %v", pc, r.fp, r.sp)
-
 			// exit completely
 			if pc == 0 {
-				r.printStack()
 				return nil
 			}
-		case JumpA:
-			pc = code.Dst
-		case JumpO:
-			pc = pc.Offset(code.Dst)
+		case Jmp:
+			val, err := load(code.Dst)()
+			if err != nil {
+				return err
+			}
+
+			pc = Addr(val.(Int))
+		case JmpR:
+			val, err := load(code.Dst)()
+			if err != nil {
+				return err
+			}
+
+			pc = pc.Offset(AddrOffset(val.(Int)))
+		case JmpRC:
+			cond, err := load(code.Src)()
+			if err != nil {
+				return err
+			}
+
+			if cond.(Bool) != Bool(code.Invert) {
+				val, err := load(code.Dst)()
+				if err != nil {
+					return err
+				}
+
+				pc = pc.Offset(AddrOffset(val.(Int)))
+			}
 		case ConvertIntFloat:
 			r.registers[code.Register] = Float(r.registers[code.Register].(Int))
 		case ConvertFloatInt:
@@ -393,6 +439,9 @@ var binaryOperatorFuncs = map[compiler.BinaryOperatorKinds]binaryOperatorFunc{
 
 	{Operator: compiler.OperatorLessThan, Left: compiler.KindInt, Right: compiler.KindInt}:     opLessThan[Int],
 	{Operator: compiler.OperatorLessThan, Left: compiler.KindFloat, Right: compiler.KindFloat}: opLessThan[Float],
+
+	{Operator: compiler.OperatorGreaterThan, Left: compiler.KindInt, Right: compiler.KindInt}:     opGreaterThan[Int],
+	{Operator: compiler.OperatorGreaterThan, Left: compiler.KindFloat, Right: compiler.KindFloat}: opGreaterThan[Float],
 }
 
 func opAdd[T Int | String | Float](a, b any) any {
@@ -403,8 +452,21 @@ func opLessThan[T Int | Float](a, b any) any {
 	return Bool(a.(T) < b.(T))
 }
 
+func opGreaterThan[T Int | Float](a, b any) any {
+	return Bool(a.(T) > b.(T))
+}
+
 func opSub[T Int | Float](a, b any) any {
 	return a.(T) - b.(T)
+}
+
+func (r *Runtime) printRegisters() {
+	regStrs := make([]string, 0, len(r.registers))
+	for reg, regVal := range r.registers {
+		regStrs = append(regStrs, fmt.Sprintf("%v=%v", Register(reg), regVal))
+	}
+
+	log.Printf("Registers: %s", strings.Join(regStrs, ", "))
 }
 
 func (r *Runtime) printStack() {

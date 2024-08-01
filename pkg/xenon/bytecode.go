@@ -114,33 +114,31 @@ func (m Mov) String() string {
 	return fmt.Sprintf("MOV %v = %v", m.Dst, m.Src)
 }
 
-type Store[Src any] struct {
-	Src Src      `xc:"s"`
-	Dst Register `xc:"d"`
-}
-type StoreI = Store[Immediate]
-type StoreR = Store[Register]
-
-type Load[Dst any] struct {
-	Src Register `xc:"s"`
-	Dst Dst      `xc:"d"`
+type Store struct {
+	Src Operand `xc:"s"`
+	Dst Operand `xc:"d"`
 }
 
-type LoadR = Load[Register]
-type LoadO = Load[AddrOffset]
-
-type Push[Src any] struct {
-	Src Src `xc:"s"`
+func (m Store) String() string {
+	return fmt.Sprintf("Store *%v = %v", m.Dst, m.Src)
 }
 
-func (p Push[Src]) String() string {
+type Load struct {
+	Src Operand `xc:"s"`
+	Dst Operand `xc:"d"`
+}
+
+func (m Load) String() string {
+	return fmt.Sprintf("Load %v = *%v", m.Dst, m.Src)
+}
+
+type Push struct {
+	Src Operand `xc:"s"`
+}
+
+func (p Push) String() string {
 	return fmt.Sprintf("PUSH %v", p.Src)
 }
-
-type PushR = Push[Register]
-type PushM = Push[Addr]
-type PushO = Push[AddrOffset]
-type PushI = Push[Immediate]
 
 type Convert[To, From any] struct {
 	Register
@@ -184,6 +182,11 @@ func (o BinOp) String() string {
 type Return struct {
 	Register Register `xc:"r"`
 }
+
+func (r Return) String() string {
+	return fmt.Sprintf("RET %v", r.Register)
+}
+
 type CallExtern struct {
 	Args   int
 	Extern string
@@ -195,17 +198,35 @@ type Call[Func any] struct {
 type CallAddr = Call[Addr]
 type CallClosure = Call[Closure]
 
-type Jump[Dst any] struct {
-	Dst Dst `xc:"d"`
+type Jmp struct {
+	Dst Operand `xc:"d"`
 }
 
-func (j Jump[Dst]) String() string {
-	return fmt.Sprintf("JUMP %v", j.Dst)
+func (j Jmp) String() string {
+	return fmt.Sprintf("JMP %v", j.Dst)
 }
 
-type JumpA = Jump[Addr]
-type JumpO = Jump[AddrOffset]
-type JumpR = Jump[Register]
+type JmpR struct {
+	Dst Operand `xc:"d"`
+}
+
+func (j JmpR) String() string {
+	return fmt.Sprintf("JMPR %v", j.Dst)
+}
+
+type JmpRC struct {
+	Invert bool
+	Src    Operand `xc:"d"`
+	Dst    Operand `xc:"d"`
+}
+
+func (j JmpRC) String() string {
+	not := ""
+	if j.Invert {
+		not = "not "
+	}
+	return fmt.Sprintf("JMPRC %v if %s%v", j.Dst, not, j.Src)
+}
 
 type Make[T, Dst any] struct {
 	Dst  Dst

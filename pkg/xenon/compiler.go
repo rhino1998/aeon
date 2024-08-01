@@ -133,9 +133,13 @@ type RegisterState struct {
 }
 
 func newRegisterState() *RegisterState {
-	return &RegisterState{
+	regs := &RegisterState{
 		registers: make(map[Register]struct{}),
 	}
+
+	regs.alloc() // discard reg 00
+
+	return regs
 }
 
 func (r *RegisterState) alloc() Register {
@@ -162,8 +166,12 @@ func (cs *compilerState) compileFunction(f *compiler.Function) ([]Bytecode, erro
 
 	scope := newScope()
 
-	bc = append(bc, PushI{
-		Src: String(fmt.Sprintf("#func %s", f.Name())),
+	bc = append(bc, Push{
+		Src: Operand{
+			Kind:   compiler.KindString,
+			Source: ValueSourceImmediate,
+			Value:  String(fmt.Sprintf("#func %s", f.Name())),
+		},
 	})
 	scope.newVar("#funcname")
 
@@ -398,16 +406,6 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			}
 		}
 
-		var condBC []Bytecode
-		var condReg Register
-		if stmt.Condition != nil {
-			condBC, condReg, err = cs.compileExpression(stmt.Condition, scope)
-			if err != nil {
-				return nil, err
-			}
-			defer cs.regs.dealloc(condReg)
-		}
-
 		var stepBC []Bytecode
 		if stmt.Step != nil {
 			// variables defined in the step aren't in any real scope
@@ -429,13 +427,79 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			bodyBC = append(bodyBC, bodyStmtBC...)
 		}
 
+		var condBC []Bytecode
+		if stmt.Condition != nil {
+			var condReg Register
+			condBC, condReg, err = cs.compileExpression(stmt.Condition, scope)
+			if err != nil {
+				return nil, err
+			}
+			defer cs.regs.dealloc(condReg)
+
+			condBC = append(condBC, JmpRC{
+				Invert: true,
+				Src: Operand{
+					Kind:   compiler.KindBool,
+					Source: ValueSourceRegister,
+					Value:  condReg,
+				},
+				Dst: Operand{
+					Kind:   compiler.KindInt,
+					Source: ValueSourceImmediate,
+					Value:  Int(len(stepBC) + len(bodyBC) + 1),
+				},
+			})
+		}
+
 		log.Println(initBC)
 		bc = append(bc, initBC...)
 		bc = append(bc, condBC...)
+		bc = append(bc, bodyBC...)
 		bc = append(bc, stepBC...)
-		bc = append(bc, JumpO{
-			Dst: AddrOffset(-(len(bodyBC) + len(condBC) + len(stepBC))),
+		bc = append(bc, JmpR{
+			Dst: Operand{
+				Kind:   compiler.KindInt,
+				Source: ValueSourceImmediate,
+				Value:  Int(-(len(bodyBC) + len(condBC) + len(stepBC) + 1)),
+			},
 		})
+
+		return bc, nil
+	case *compiler.IfStatement:
+		condBC, condReg, err := cs.compileExpression(stmt.Condition, scope)
+		if err != nil {
+			return nil, err
+		}
+		defer cs.regs.dealloc(condReg)
+
+		bodyScope := scope.sub()
+
+		var bodyBC []Bytecode
+		for _, subStmt := range stmt.Body {
+			bodyStmtBC, err := cs.compileStatement(f, subStmt, bodyScope)
+			if err != nil {
+				return nil, err
+			}
+
+			bodyBC = append(bodyBC, bodyStmtBC...)
+		}
+
+		condBC = append(condBC, JmpRC{
+			Invert: true,
+			Src: Operand{
+				Kind:   compiler.KindBool,
+				Source: ValueSourceRegister,
+				Value:  condReg,
+			},
+			Dst: Operand{
+				Kind:   compiler.KindInt,
+				Source: ValueSourceImmediate,
+				Value:  Int(len(bodyBC)),
+			},
+		})
+
+		bc = append(bc, condBC...)
+		bc = append(bc, bodyBC...)
 
 		return bc, nil
 	default:
