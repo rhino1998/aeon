@@ -70,7 +70,7 @@ var binaryOperatorBooleanKinds = map[[2]Kind]Kind{
 }
 
 func validateBinaryExpression(left Type, operator Operator, right Type) (Type, error) {
-	kind := binaryOperatorKinds[operator][[2]Kind{left.Kind(), right.Kind()}]
+	kind := binaryOperatorKinds[BinaryOperatorKinds{operator, left.Kind(), right.Kind()}]
 	if kind == KindUnknown {
 		return nil, fmt.Errorf("invalid binary operator %q for kinds %q and %q", operator, left.Kind(), right.Kind())
 	}
@@ -86,43 +86,55 @@ func validateBinaryExpression(left Type, operator Operator, right Type) (Type, e
 	return left, nil
 }
 
-var binaryOperatorKinds = map[Operator]map[[2]Kind]Kind{
-	OperatorPower: binaryOperatorNumericKinds,
-	OperatorAddition: {
-		{KindFloat, KindFloat}:   KindFloat,
-		{KindInt, KindInt}:       KindInt,
-		{KindString, KindString}: KindString,
-	},
-	OperatorSubtraction:    binaryOperatorNumericKinds,
-	OperatorMultiplication: binaryOperatorNumericKinds,
-	OperatorDivision:       binaryOperatorNumericKinds,
-	OperatorModulo:         binaryOperatorNumericKinds,
+var binaryOperatorKinds = map[BinaryOperatorKinds]Kind{
+	// +
+	{OperatorAddition, KindInt, KindInt}:       KindInt,
+	{OperatorAddition, KindFloat, KindFloat}:   KindFloat,
+	{OperatorAddition, KindString, KindString}: KindString,
 
-	OperatorPlusEquals: {
-		{KindFloat, KindFloat}:   KindFloat,
-		{KindInt, KindInt}:       KindInt,
-		{KindString, KindString}: KindString,
-	},
-	OperatorMinusEquals:    binaryOperatorNumericKinds,
-	OperatorMultiplyEquals: binaryOperatorNumericKinds,
-	OperatorDivideEquals:   binaryOperatorNumericKinds,
-	OperatorModuloEquals:   binaryOperatorNumericKinds,
+	// -
+	{OperatorSubtraction, KindInt, KindInt}:     KindInt,
+	{OperatorSubtraction, KindFloat, KindFloat}: KindFloat,
 
-	OperatorBitwiseAnd: binaryOperatorIntegerKinds,
-	OperatorBitwiseOr:  binaryOperatorIntegerKinds,
-	OperatorBitwiseXor: binaryOperatorIntegerKinds,
-	OperatorLeftShift:  binaryOperatorIntegerKinds,
-	OperatorRightShift: binaryOperatorIntegerKinds,
+	// *
+	{OperatorMultiplication, KindInt, KindInt}:     KindInt,
+	{OperatorMultiplication, KindFloat, KindFloat}: KindFloat,
 
-	OperatorLogicalOr:  binaryOperatorBooleanKinds,
-	OperatorLogicalAnd: binaryOperatorBooleanKinds,
+	// /
+	{OperatorDivision, KindInt, KindInt}:     KindInt,
+	{OperatorDivision, KindFloat, KindFloat}: KindFloat,
 
-	OperatorGreaterThanOrEqual: binaryOperatorComparisonKinds,
-	OperatorGreaterThan:        binaryOperatorComparisonKinds,
-	OperatorLessThan:           binaryOperatorComparisonKinds,
-	OperatorLessThanOrEqual:    binaryOperatorComparisonKinds,
-	OperatorEqual:              binaryOperatorComparisonKinds,
-	OperatorNotEqual:           binaryOperatorComparisonKinds,
+	// %
+	{OperatorModulo, KindInt, KindInt}:     KindInt,
+	{OperatorModulo, KindFloat, KindFloat}: KindFloat,
+
+	// ==
+	{OperatorEqual, KindInt, KindInt}:       KindBool,
+	{OperatorEqual, KindFloat, KindFloat}:   KindBool,
+	{OperatorEqual, KindString, KindString}: KindBool,
+	{OperatorEqual, KindBool, KindBool}:     KindBool,
+
+	// !=
+	{OperatorNotEqual, KindInt, KindInt}:       KindBool,
+	{OperatorNotEqual, KindFloat, KindFloat}:   KindBool,
+	{OperatorNotEqual, KindString, KindString}: KindBool,
+	{OperatorNotEqual, KindBool, KindBool}:     KindBool,
+
+	// <
+	{OperatorLessThan, KindInt, KindInt}:     KindBool,
+	{OperatorLessThan, KindFloat, KindFloat}: KindBool,
+
+	// <=
+	{OperatorLessThanOrEqual, KindInt, KindInt}:     KindBool,
+	{OperatorLessThanOrEqual, KindFloat, KindFloat}: KindBool,
+
+	// >
+	{OperatorGreaterThan, KindInt, KindInt}:     KindBool,
+	{OperatorGreaterThan, KindFloat, KindFloat}: KindBool,
+
+	// >=
+	{OperatorGreaterThanOrEqual, KindInt, KindInt}:     KindBool,
+	{OperatorGreaterThanOrEqual, KindFloat, KindFloat}: KindBool,
 }
 
 var unaryOperatorNumericKinds = map[Kind]Kind{
@@ -199,4 +211,9 @@ type UnaryExpression struct {
 func (e *UnaryExpression) Type() Type {
 	// TODO: resolve
 	return e.typ
+}
+
+type BinaryOperatorKinds struct {
+	Operator    Operator
+	Left, Right Kind
 }

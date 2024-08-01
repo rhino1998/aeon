@@ -99,7 +99,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 		}
 
 		return nil
-	case *compiler.VariableStatement:
+	case *compiler.VarStatement:
 		var val Value
 		if stmt.Expression != nil {
 			val, err = s.executeExpression(scope, stmt.Expression)

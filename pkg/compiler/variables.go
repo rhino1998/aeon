@@ -56,7 +56,7 @@ type AssignmentStatement struct {
 	parser.Position
 }
 
-type VariableStatement struct {
+type VarStatement struct {
 	Variable   *Variable
 	Expression Expression
 	Type       Type

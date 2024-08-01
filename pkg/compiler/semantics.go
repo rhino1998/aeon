@@ -199,7 +199,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 
 		scope.put(v)
 
-		return &VariableStatement{
+		return &VarStatement{
 			Variable:   v,
 			Expression: expr,
 			Type:       typ,

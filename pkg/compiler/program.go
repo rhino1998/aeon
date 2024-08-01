@@ -21,6 +21,10 @@ func (p *Program) Functions() []*Function {
 	return p.root.Functions()
 }
 
+func (p *Program) Packages() []*Package {
+	return p.root.Packages()
+}
+
 func (p *Program) Function(qualifiedName string) (*Function, error) {
 	return scopedFunction(p.root, qualifiedName)
 }
@@ -32,11 +36,14 @@ type Package struct {
 }
 
 func NewPackage(prog *Program, name string) *Package {
-	return &Package{
+	pkg := &Package{
 		name:  name,
 		prog:  prog,
 		scope: newScope(prog.root, name),
 	}
+	pkg.scope.pkg = pkg
+
+	return pkg
 }
 
 func (p *Package) Name() string {

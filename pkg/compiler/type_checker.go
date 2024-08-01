@@ -28,7 +28,7 @@ func (c *Compiler) resolveFunctionTypes(f *Function) error {
 
 func (c *Compiler) resolveStatementTypes(scope *Scope, stmt Statement) error {
 	switch stmt := stmt.(type) {
-	case *VariableStatement:
+	case *VarStatement:
 		if stmt.Type != nil {
 			typ := resolveType(stmt.Type)
 

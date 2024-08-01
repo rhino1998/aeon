@@ -16,6 +16,7 @@ type Scope struct {
 	name   string
 	scope  map[string]Symbol
 
+	pkg      *Package
 	function *Function
 }
 
@@ -55,6 +56,28 @@ func (s *Scope) Function() *Function {
 	}
 
 	return s.parent.Function()
+}
+
+func (s *Scope) Packages() []*Package {
+	var pkgs []*Package
+	for _, val := range s.scope {
+		switch val := val.(type) {
+		case *Package:
+			pkgs = append(pkgs, val)
+		}
+	}
+
+	return pkgs
+}
+
+func (s *Scope) Package() *Package {
+	if s.pkg != nil {
+		return s.pkg
+	} else if s.parent == nil {
+		return nil
+	}
+
+	return s.parent.Package()
 }
 
 func (s *Scope) get(name string) (Symbol, bool) {

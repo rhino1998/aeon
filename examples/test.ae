@@ -20,22 +20,8 @@ func main() {
 
   var l (int, int, int)
 
-  for {
-    i := 0
-    if i < 5 {
-      return
-    }
-    i++
+  for i := 0; i < 3; i++ {
   }
-
-  if (x == 5) {
-    return
-  } else if x == 2 {
-    return
-  } else {
-    return
-  }
-
 
   // test comment
 

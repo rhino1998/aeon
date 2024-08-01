@@ -21,6 +21,17 @@ func (unknownType) Name() string   { return "<unknown>" }
 func (unknownType) String() string { return "<unknown>" }
 func (unknownType) Kind() Kind     { return KindUnknown }
 
+func BaseType(typ Type) Type {
+	switch typ := typ.(type) {
+	case *ReferencedType:
+		return resolveType(typ.Dereference())
+	case *DerivedType:
+		return resolveType(typ.Underlying())
+	default:
+		return typ
+	}
+}
+
 func resolveType(typ Type) Type {
 	switch typ := typ.(type) {
 	case *ReferencedType:

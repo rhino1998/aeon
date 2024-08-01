@@ -115,6 +115,8 @@ VarStatement <- "var" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
     Name: name.(Identifier),
     Expr: maybePtr[Expr](exp),
     Type: maybePtr[Type](typ),
+
+    Position: pos(c),
   }, nil
 }
 
@@ -131,6 +133,8 @@ VarDeclaration <- "var" _ name:Identifier _ typ:Type? _ exp:VarDeclarationExpr? 
     Name: name.(Identifier),
     Expr: maybePtr[Expr](exp),
     Type: maybePtr[Type](typ),
+
+    Position: pos(c),
   }, nil
 }
 
@@ -142,6 +146,8 @@ DeclarationStatement <- ident:Identifier _ ":=" _ exp:Expr {
   return DeclarationStatement{
     Name:ident.(Identifier),
     Expr:exp.(Expr),
+
+    Position: pos(c),
   }, nil
 }
 
@@ -149,6 +155,8 @@ AssignmentStatement <- left:Expr _ '=' _ right:Expr {
   return AssignmentStatement{
     Left:left.(Expr),
     Right:right.(Expr),
+
+    Position: pos(c),
   }, nil
 }
 
@@ -208,7 +216,7 @@ ElseStatement <- "else" _ '{' body:StatementList? _ '}' {
 }
 
 
-ForStatement <- "for" _ header:ForStatementStatements? _ '{' body:StatementList? '}' {
+ForStatement <- "for" _ header:ForStatementStatements? _ '{' __ body:StatementList? '}' {
   if header == nil {
     return ForStatement{
       Body: maybeSlice[Statement](body),
