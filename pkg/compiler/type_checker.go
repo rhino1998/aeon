@@ -129,6 +129,92 @@ func (c *Compiler) resolveStatementTypes(scope *Scope, stmt Statement) error {
 
 		stmt.Condition = cond
 
+		for _, subStmt := range stmt.Body {
+			err = c.resolveStatementTypes(stmt.Scope, subStmt)
+			if err != nil {
+				return err
+			}
+		}
+
+		if stmt.Else != nil {
+			err = c.resolveStatementTypes(scope, stmt.Else)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	case *ElseIfStatement:
+		cond, err := c.resolveExpressionTypes(scope, stmt.Condition, KindType(KindBool))
+		if err != nil {
+			return err
+		}
+
+		if cond.Type().Kind() != KindBool {
+			return cond.WrapError(fmt.Errorf("cannot use expression of type %v as a condition", cond.Type()))
+		}
+
+		stmt.Condition = cond
+
+		for _, subStmt := range stmt.Body {
+			err = c.resolveStatementTypes(stmt.Scope, subStmt)
+			if err != nil {
+				return err
+			}
+		}
+
+		if stmt.Else != nil {
+			err = c.resolveStatementTypes(scope, stmt.Else)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	case *ElseStatement:
+		for _, subStmt := range stmt.Body {
+			err := c.resolveStatementTypes(stmt.Scope, subStmt)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	case *ForStatement:
+		if stmt.Init != nil {
+			err := c.resolveStatementTypes(stmt.Scope, stmt.Init)
+			if err != nil {
+				return err
+			}
+		}
+
+		if stmt.Condition != nil {
+			cond, err := c.resolveExpressionTypes(stmt.Scope, stmt.Condition, KindType(KindBool))
+			if err != nil {
+				return err
+			}
+
+			if cond.Type().Kind() != KindBool {
+				return cond.WrapError(fmt.Errorf("cannot use expression of type %v as a condition", cond.Type()))
+			}
+
+			stmt.Condition = cond
+		}
+
+		if stmt.Step != nil {
+			err := c.resolveStatementTypes(stmt.Scope, stmt.Step)
+			if err != nil {
+				return err
+			}
+		}
+
+		for _, subStmt := range stmt.Body {
+			err := c.resolveStatementTypes(stmt.Scope, subStmt)
+			if err != nil {
+				return err
+			}
+		}
+
 		return nil
 	case *ReturnStatement:
 		if scope.Function() == nil {

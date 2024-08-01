@@ -98,7 +98,11 @@ MapType <- "map" _ '[' _ key:Type _ ']' _ value:Type {
   return MapType{Key: key.(Type), Value:value.(Type)}, nil
 }
 
-Statement <- stmt:(comment / VarStatement / ReturnStatement / DeclarationStatement / AssignmentOperatorStatement / AssignmentStatement / IfStatement / PostfixStatement / ExprStatement) {
+Statement <- stmt:(comment / VarStatement / ReturnStatement / DeclarationStatement / AssignmentOperatorStatement / AssignmentStatement / IfStatement / ForStatement / PostfixStatement / ExprStatement) {
+  return stmt, nil
+}
+
+SimpleStatement <- stmt:(VarStatement / DeclarationStatement / AssignmentOperatorStatement / AssignmentStatement / PostfixStatement / ExprStatement) {
   return stmt, nil
 }
 
@@ -203,25 +207,28 @@ ElseStatement <- "else" _ '{' body:StatementList? _ '}' {
   }, nil
 }
 
-ForStatement <- "for" _ init:(ForStatementInitStatement)? _ cond:(ForStatementConditionExpr)? _ step:(ForStatementStepStatement)? '{' body:(Statement)* _ '}' {
+
+ForStatement <- "for" _ header:ForStatementStatements? _ '{' body:StatementList? '}' {
+  if header == nil {
+    return ForStatement{
+      Body: maybeSlice[Statement](body),
+
+      Position: pos(c),
+    }, nil
+  }
+
+  f := header.(ForStatement)
+  f.Body = maybeSlice[Statement](body)
+  f.Position = pos(c)
+  return f, nil
+}
+
+ForStatementStatements <- init:SimpleStatement? _ ';' _ cond:Expr? _ ';' _ step:SimpleStatement? {
   return ForStatement{
-    Body: anyToSlice[Statement](body),
     Init: maybe[Statement](init),
     Condition: maybe[Expr](cond),
     Step: maybe[Statement](step),
   }, nil
-}
-
-ForStatementInitStatement <- init:(VarStatement) _ ';' {
-  return init.(Statement), nil
-}
-
-ForStatementConditionExpr <- exp:Expr _ ';' {
-  return exp.(Expr), nil
-}
-
-ForStatementStepStatement <- step:(PostfixStatement) {
-  return step.(Statement), nil
 }
 
 ReturnStatement <- "return" _ expr:Expr? {

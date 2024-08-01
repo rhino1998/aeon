@@ -28,6 +28,10 @@ func main() {
     return
   }
 
+  for var i B = 5; i < 2; i++ {
+    g := i
+  }
+
   // test comment
 
   return

@@ -200,7 +200,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 		scope.put(v)
 
 		return &VariableStatement{
-			Variable:   *v,
+			Variable:   v,
 			Expression: expr,
 			Type:       typ,
 
@@ -220,7 +220,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 		scope.put(v)
 
 		return &DeclarationStatement{
-			Variable:   *v,
+			Variable:   v,
 			Expression: expr,
 
 			Position: stmt.Position,
@@ -367,6 +367,49 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 
 		return &ElseStatement{
 			Scope: bodyScope,
+			Body:  body,
+
+			Position: stmt.Position,
+		}, nil
+	case parser.ForStatement:
+		var err error
+		bodyScope := newScope(scope, "for")
+
+		var init Statement
+		if stmt.Init != nil {
+			init, err = c.compileStatement(bodyScope, stmt.Init)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		var cond Expression
+		if stmt.Condition != nil {
+			cond, err = c.compileExpression(bodyScope, stmt.Condition)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		var step Statement
+		if stmt.Step != nil {
+			step, err = c.compileStatement(bodyScope, stmt.Step)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		body, err := c.compileStatements(bodyScope, stmt.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ForStatement{
+			Init:      init,
+			Condition: cond,
+			Step:      step,
+
+			Scope: scope,
 			Body:  body,
 
 			Position: stmt.Position,

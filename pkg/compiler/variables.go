@@ -57,7 +57,7 @@ type AssignmentStatement struct {
 }
 
 type VariableStatement struct {
-	Variable   Variable
+	Variable   *Variable
 	Expression Expression
 	Type       Type
 
@@ -65,7 +65,7 @@ type VariableStatement struct {
 }
 
 type DeclarationStatement struct {
-	Variable   Variable
+	Variable   *Variable
 	Expression Expression
 	Type       Type
 
