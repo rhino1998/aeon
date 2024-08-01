@@ -99,6 +99,12 @@ type Closure struct {
 	EnvLength int
 }
 
+type Map map[any]any
+
+func (m Map) String() string {
+	return fmt.Sprintf("Map(%v)", map[any]any(m))
+}
+
 type Nop struct{}
 
 func (Nop) String() string {
