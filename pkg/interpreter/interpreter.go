@@ -92,6 +92,13 @@ func (s *State) executeFunction(scope *Scope, f *compiler.Function, args ...Valu
 func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Value) error {
 	var err error
 	switch stmt := stmt.(type) {
+	case *compiler.ExpressionStatement:
+		_, err := s.executeExpression(scope, stmt.Expression)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	case *compiler.VariableStatement:
 		var val Value
 		if stmt.Expression != nil {
@@ -277,13 +284,46 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 		}
 
 		return nil
-	case *compiler.ExpressionStatement:
-		_, err := s.executeExpression(scope, stmt.Expression)
-		if err != nil {
-			return err
+	case *compiler.ForStatement:
+		scope := newScope(scope, "for")
+		if stmt.Init != nil {
+			err := s.executeStatement(scope, stmt.Init, ret)
+			if err != nil {
+				return err
+			}
 		}
 
-		return nil
+		for {
+			if stmt.Condition != nil {
+				condVal, err := s.executeExpression(scope, stmt.Condition)
+				if err != nil {
+					return err
+				}
+
+				b, err := s.boolOrFail(condVal)
+				if err != nil {
+					return stmt.WrapError(err)
+				}
+
+				if !b {
+					return nil
+				}
+			}
+
+			for _, subStmt := range stmt.Body {
+				err := s.executeStatement(scope, subStmt, ret)
+				if err != nil {
+					return err
+				}
+			}
+
+			if stmt.Step != nil {
+				err := s.executeStatement(scope, stmt.Step, ret)
+				if err != nil {
+					return err
+				}
+			}
+		}
 	default:
 		return stmt.WrapError(fmt.Errorf("unhandled statement type: %T", stmt))
 	}
@@ -404,6 +444,57 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 		b := s.valuesEqual(lhs, rhs)
 
 		return NewConstant(compiler.BoolType, b), nil
+	case compiler.OperatorNotEqual:
+		b := !s.valuesEqual(lhs, rhs)
+
+		return NewConstant(compiler.BoolType, b), nil
+	case compiler.OperatorLessThan:
+		switch lhs.Type().Kind() {
+		case compiler.KindFloat:
+			lhsVal, err := s.floatOrFail(lhs)
+			if err != nil {
+				return nil, err
+			}
+
+			rhsVal, err := s.floatOrFail(rhs)
+			if err != nil {
+				return nil, err
+			}
+
+			b := lhsVal < rhsVal
+
+			return NewConstant(compiler.BoolType, b), nil
+		case compiler.KindInt:
+			lhsVal, err := s.intOrFail(lhs)
+			if err != nil {
+				return nil, err
+			}
+
+			rhsVal, err := s.intOrFail(rhs)
+			if err != nil {
+				return nil, err
+			}
+
+			b := lhsVal < rhsVal
+
+			return NewConstant(compiler.BoolType, b), nil
+		case compiler.KindString:
+			lhsVal, err := s.stringOrFail(lhs)
+			if err != nil {
+				return nil, err
+			}
+
+			rhsVal, err := s.stringOrFail(rhs)
+			if err != nil {
+				return nil, err
+			}
+
+			b := lhsVal < rhsVal
+
+			return NewConstant(compiler.BoolType, b), nil
+		default:
+			return nil, fmt.Errorf("unsupported binary operation: %s < %s", lhs.Type(), rhs.Type())
+		}
 	default:
 		return nil, fmt.Errorf("unsupported binary operation: %s", op)
 	}
