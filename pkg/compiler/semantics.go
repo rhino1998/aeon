@@ -256,7 +256,11 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 			return nil, err
 		}
 
-		return expr, nil
+		return &ExpressionStatement{
+			Expression: expr,
+
+			Position: stmt.Position,
+		}, nil
 	case parser.ReturnStatement:
 		var expr Expression
 		if stmt.Expr != nil {
@@ -484,8 +488,8 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 		}
 
 		return &UnaryExpression{
-			expr:     exp,
-			operator: Operator(expr.Operator),
+			Expression: exp,
+			Operator:   Operator(expr.Operator),
 
 			typ: typ,
 

@@ -189,14 +189,14 @@ type AssignmentOperatorStatement struct {
 }
 
 type UnaryExpression struct {
-	expr     Expression
-	operator Operator
-
-	typ Type
+	Expression Expression
+	Operator   Operator
+	typ        Type
 
 	parser.Position
 }
 
 func (e *UnaryExpression) Type() Type {
+	// TODO: resolve
 	return e.typ
 }

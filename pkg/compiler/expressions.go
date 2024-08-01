@@ -35,3 +35,9 @@ type ParenthesizedExpression struct {
 func (e *ParenthesizedExpression) Type() Type {
 	return e.Expression.Type()
 }
+
+type ExpressionStatement struct {
+	Expression Expression
+
+	parser.Position
+}

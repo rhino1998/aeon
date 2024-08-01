@@ -277,6 +277,13 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 		}
 
 		return nil
+	case *compiler.ExpressionStatement:
+		_, err := s.executeExpression(scope, stmt.Expression)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	default:
 		return stmt.WrapError(fmt.Errorf("unhandled statement type: %T", stmt))
 	}
@@ -324,6 +331,19 @@ func (s *State) executeExpression(scope *Scope, expr compiler.Expression) (Value
 		}
 
 		return result, nil
+	case *compiler.UnaryExpression:
+		val, err := s.executeExpression(scope, expr.Expression)
+		if err != nil {
+			return nil, err
+		}
+
+		var _ = val
+
+		switch expr.Operator {
+
+		default:
+			return nil, expr.WrapError(fmt.Errorf("unhandled unary operator %q", expr.Operator))
+		}
 	default:
 		return nil, expr.WrapError(fmt.Errorf("unhandled expression type: %T", expr))
 	}

@@ -18,6 +18,8 @@ func main() {
   x++
   y+="a"
 
+  y ++ 5
+
   var q map[int]int
 
   if (x == 5) {

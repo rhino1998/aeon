@@ -166,7 +166,7 @@ ExprStatement <- exp:Expr {
   }, nil
 }
 
-PostfixStatement <- exp:Expr op:("++" / "--") {
+PostfixStatement <- exp:Expr _ op:("++" / "--") {
   return PostfixStatement{
     Expr: exp.(Expr),
     Operator: Operator(op.([]byte)),
