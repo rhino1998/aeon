@@ -46,7 +46,7 @@ func EmitXenonCode(w io.Writer, bcs []Bytecode, funcs map[string]map[string]Addr
 		page := i / xeCtx.PageSize
 		pageAddr := i % xeCtx.PageSize
 
-		log.Printf("%d:%d:%s", page, pageAddr, bcBytes)
+		log.Printf("%d:%d:%s", page, pageAddr, bc)
 		xeCtx.Code[PageAddr{
 			Page: page,
 			Addr: pageAddr}] = string(bcBytes)
@@ -72,6 +72,8 @@ func EmitXenonCode(w io.Writer, bcs []Bytecode, funcs map[string]map[string]Addr
 
 func marshalByteCode(bc Bytecode) ([]byte, error) {
 	code := bc.xenon()
+
+	// TODO: better format
 
 	args, err := MarshalXenon(bc)
 	if err != nil {

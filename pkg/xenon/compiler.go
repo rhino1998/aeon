@@ -529,6 +529,8 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 	case *compiler.SymbolReferenceExpression:
 		// TODO: handle globals
 		return nil, scope.offset(expr.Name()), nil
+	case *compiler.ParenthesizedExpression:
+		return cs.compileExpression(expr.Expression, scope, dst)
 	case *compiler.BinaryExpression:
 		lhsBC, lhsOp, err := cs.compileExpression(expr.Left, scope, dst)
 		if err != nil {
@@ -555,6 +557,6 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 
 		return bc, dst, nil
 	default:
-		return nil, Operand{}, expr.WrapError(fmt.Errorf("unhandled expression %T", expr))
+		return nil, Operand{}, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
 }

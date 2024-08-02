@@ -161,7 +161,7 @@ func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
 	}
 
 	if expr.Kind() != kind {
-		return UnspecifiedKindType{kind: kind}, nil
+		return KindType(kind), nil
 	}
 
 	return expr, nil

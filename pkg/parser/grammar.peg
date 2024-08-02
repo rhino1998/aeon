@@ -293,8 +293,6 @@ Identifier <- !Keyword [_a-zA-Z][_a-zA-Z0-9]* {
   return Identifier(c.text), nil
 }
 
-Expr <- ParenthesizedExpr / UnaryExpr / DotExpr / CallExpr / BinaryExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
-
 ParenthesizedExpr <- '(' _ expr:Expr _ ')' {
   return ParenthesizedExpr{
     Expr: expr.(Expr),
@@ -376,7 +374,13 @@ DotExpr <- exp:Expr '.' ident:Identifier {
   }, nil
 }
 
-BinaryExpr <- left:Expr _ op:("||") _ right:Expr {
+Expr <- MaybeOrExpr
+
+TermExpr <- UnaryExpr / DotExpr / CallExpr / ParenthesizedExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
+
+MaybeExpExpr <- ExpExpr / TermExpr
+
+ExpExpr <- left:TermExpr _ op:("**") _ right:MaybeExpExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -384,7 +388,11 @@ BinaryExpr <- left:Expr _ op:("||") _ right:Expr {
 
     Position: pos(c),
   }, nil
-} / left:Expr _ op:("&&") _ right:Expr {
+}
+
+MaybeMulExpr <- MulExpr / MaybeExpExpr
+
+MulExpr <- left:MaybeExpExpr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") _ right:MaybeMulExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -392,7 +400,11 @@ BinaryExpr <- left:Expr _ op:("||") _ right:Expr {
 
     Position: pos(c),
   }, nil
-} / left:Expr _ op:("==" / "!=" / "<" / ">" / ">=" / "<=") _ right:Expr {
+}
+
+MaybeAddExpr <- AddExpr / MaybeMulExpr
+
+AddExpr <- left:MaybeMulExpr _ op:("+" / "-" / "|" / "^") _ right:MaybeAddExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -400,7 +412,11 @@ BinaryExpr <- left:Expr _ op:("||") _ right:Expr {
 
     Position: pos(c),
   }, nil
-} / left:Expr _ op:("+" / "-" / "|" / "^") _ right:Expr {
+}
+
+MaybeCmpExpr <- CmpExpr / MaybeAddExpr
+
+CmpExpr <- left:MaybeAddExpr _ op:("==" / "!=" / "<" / ">" / ">=" / "<=") _ right:MaybeCmpExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -408,7 +424,11 @@ BinaryExpr <- left:Expr _ op:("||") _ right:Expr {
 
     Position: pos(c),
   }, nil
-} / left:Expr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") _ right:Expr {
+}
+
+MaybeAndExpr <- AndExpr / MaybeCmpExpr
+
+AndExpr <- left:MaybeCmpExpr _ op:("&&") _ right:MaybeCmpExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -416,7 +436,11 @@ BinaryExpr <- left:Expr _ op:("||") _ right:Expr {
 
     Position: pos(c),
   }, nil
-} / left:Expr _ op:("**") _ right:Expr {
+}
+
+MaybeOrExpr <- OrExpr / MaybeAndExpr
+
+OrExpr <- left:MaybeAndExpr _ op:("||") _ right:MaybeAndExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
