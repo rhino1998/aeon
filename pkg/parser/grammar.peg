@@ -376,31 +376,7 @@ DotExpr <- exp:Expr '.' ident:Identifier {
   }, nil
 }
 
-BinaryExpr <- left:Expr _ op:("**") _ right:Expr {
-  return BinaryExpr{
-    Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
-    Right: right.(Expr),
-
-    Position: pos(c),
-  }, nil
-} / left:Expr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") _ right:Expr {
-  return BinaryExpr{
-    Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
-    Right: right.(Expr),
-
-    Position: pos(c),
-  }, nil
-} / left:Expr _ op:("+" / "-" / "|" / "^") _ right:Expr {
-  return BinaryExpr{
-    Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
-    Right: right.(Expr),
-
-    Position: pos(c),
-  }, nil
-} / left:Expr _ op:("==" / "!=" / "<" / ">" / ">=" / "<=") _ right:Expr {
+BinaryExpr <- left:Expr _ op:("||") _ right:Expr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -416,7 +392,31 @@ BinaryExpr <- left:Expr _ op:("**") _ right:Expr {
 
     Position: pos(c),
   }, nil
-} / left:Expr _ op:("||") _ right:Expr {
+} / left:Expr _ op:("==" / "!=" / "<" / ">" / ">=" / "<=") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+
+    Position: pos(c),
+  }, nil
+} / left:Expr _ op:("+" / "-" / "|" / "^") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+
+    Position: pos(c),
+  }, nil
+} / left:Expr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") _ right:Expr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: Operator(op.([]byte)),
+    Right: right.(Expr),
+
+    Position: pos(c),
+  }, nil
+} / left:Expr _ op:("**") _ right:Expr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -426,7 +426,7 @@ BinaryExpr <- left:Expr _ op:("**") _ right:Expr {
   }, nil
 }
 
-UnaryExpr <- op:("-" / "+" / "!" / "^" / "*" / "&") _ exp:Expr {
+UnaryExpr <- op:("-" / "+" / "!" / "^" / "*" / "&") exp:Expr {
   return UnaryExpr{
     Operator: Operator(op.([]byte)),
     Expr: exp.(Expr),

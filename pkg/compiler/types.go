@@ -201,31 +201,6 @@ func (k Kind) String() string {
 	}
 }
 
-func (k Kind) MarshalXenon() ([]byte, error) {
-	switch k {
-	case KindBool:
-		return []byte("B"), nil
-	case KindInt:
-		return []byte("I"), nil
-	case KindFloat:
-		return []byte("F"), nil
-	case KindString:
-		return []byte("S"), nil
-	case KindPointer:
-		return []byte("*"), nil
-	case KindTuple:
-		return []byte("T"), nil
-	case KindSlice:
-		return []byte("["), nil
-	case KindMap:
-		return []byte("M"), nil
-	case KindStruct:
-		return []byte("X"), nil
-	default:
-		return []byte("U"), nil
-	}
-}
-
 type Type interface {
 	Kind() Kind
 	Name() string

@@ -79,12 +79,10 @@ func main() {
 					}
 					defer out.Close()
 
-					err = xenon.EmitXenonCode(out, bc)
+					err = xenon.EmitXenonCode(out, bc, funcMap)
 					if err != nil {
 						return err
 					}
-
-					var _ = funcMap
 
 					return nil
 				},
@@ -187,7 +185,7 @@ func main() {
 						return err
 					}
 
-					err = xenon.EmitXenonCode(os.Stdout, bc)
+					err = xenon.EmitXenonCode(os.Stdout, bc, funcMap)
 					if err != nil {
 						return err
 					}

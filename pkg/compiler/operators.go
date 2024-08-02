@@ -9,7 +9,7 @@ import (
 type Operator string
 
 const (
-	OperatorPower Operator = "**"
+	OperatorExponentiation Operator = "**"
 
 	OperatorMultiplication Operator = "*"
 	OperatorDivision       Operator = "/"
@@ -87,6 +87,10 @@ func validateBinaryExpression(left Type, operator Operator, right Type) (Type, e
 }
 
 var binaryOperatorKinds = map[BinaryOperatorKinds]Kind{
+	// **
+	{OperatorExponentiation, KindInt, KindInt}:     KindInt,
+	{OperatorExponentiation, KindFloat, KindFloat}: KindFloat,
+
 	// +
 	{OperatorAddition, KindInt, KindInt}:       KindInt,
 	{OperatorAddition, KindFloat, KindFloat}:   KindFloat,

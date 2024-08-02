@@ -1,6 +1,10 @@
 package compiler
 
-import "fmt"
+import (
+	"cmp"
+	"fmt"
+	"slices"
+)
 
 type Symbol interface {
 	Name() string
@@ -45,6 +49,10 @@ func (s *Scope) Functions() []*Function {
 		}
 	}
 
+	slices.SortFunc(funcs, func(a, b *Function) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
 	return funcs
 }
 
@@ -66,6 +74,10 @@ func (s *Scope) Packages() []*Package {
 			pkgs = append(pkgs, val)
 		}
 	}
+
+	slices.SortFunc(pkgs, func(a, b *Package) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
 
 	return pkgs
 }

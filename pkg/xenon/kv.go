@@ -2,9 +2,11 @@ package xenon
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"unicode"
 )
 
@@ -41,6 +43,12 @@ func marshalXenon(v reflect.Value) ([]byte, error) {
 	case reflect.Map:
 		var buf bytes.Buffer
 
+		type pair struct {
+			key string
+			val reflect.Value
+		}
+		var pairs []pair
+
 		iter := v.MapRange()
 		for iter.Next() {
 			key, val := iter.Key(), iter.Value()
@@ -55,16 +63,25 @@ func marshalXenon(v reflect.Value) ([]byte, error) {
 				return nil, fmt.Errorf("unsupport key type %v", key.Type())
 			}
 
-			if unicode.IsNumber([]rune(keyStr)[0]) {
-				keyStr = "_" + keyStr
+			pairs = append(pairs, pair{keyStr, val})
+		}
+
+		slices.SortFunc[[]pair, pair](pairs, func(a, b pair) int {
+			return cmp.Compare(a.key, b.key)
+		})
+
+		for _, pair := range pairs {
+
+			if unicode.IsNumber([]rune(pair.key)[0]) {
+				pair.key = "_" + pair.key
 			}
 
-			valBytes, err := marshalXenon(val)
+			valBytes, err := marshalXenon(pair.val)
 			if err != nil {
-				return nil, fmt.Errorf("failed to marshal value for key %v: %w", keyStr, err)
+				return nil, fmt.Errorf("failed to marshal value for key %v: %w", pair.key, err)
 			}
 
-			_, _ = io.WriteString(&buf, fmt.Sprintf(".%s{%s}", keyStr, valBytes))
+			_, _ = io.WriteString(&buf, fmt.Sprintf(".%s{%s}", pair.key, valBytes))
 		}
 
 		return buf.Bytes(), nil

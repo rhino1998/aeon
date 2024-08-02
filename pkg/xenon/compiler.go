@@ -2,7 +2,6 @@ package xenon
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
 )
@@ -11,6 +10,7 @@ type compilerState struct {
 	prog *compiler.Program
 
 	regs      *RegisterState
+	returnReg Operand
 	constMap  map[string]map[string]Immediate
 	globalMap map[string]map[string]Addr
 	funcMap   map[string]map[string]Addr
@@ -27,8 +27,10 @@ func Compile(prog *compiler.Program) ([]Bytecode, map[string]map[string]Addr, er
 }
 
 func newCompilerState() *compilerState {
+	regs := newRegisterState()
 	return &compilerState{
-		regs:      newRegisterState(),
+		regs:      regs,
+		returnReg: regs.alloc(), // reserve reg 01 as the return register
 		constMap:  make(map[string]map[string]Immediate),
 		globalMap: make(map[string]map[string]Addr),
 		funcMap:   make(map[string]map[string]Addr),
@@ -97,14 +99,20 @@ func (r *Scope) setVar(name string, offset AddrOffset) {
 	r.varNames[name] = offset
 }
 
-func (r *Scope) newVar(name string) AddrOffset {
+func (r *Scope) newVar(name string) Operand {
 	r.varNames[name] = r.next
 	r.next++
-	return r.next - 1
+	return Operand{
+		Value:  r.next - 1,
+		Source: ValueSourceLocal,
+	}
 }
 
-func (r *Scope) offset(name string) AddrOffset {
-	return r.varNames[name]
+func (r *Scope) offset(name string) Operand {
+	return Operand{
+		Value:  r.varNames[name],
+		Source: ValueSourceLocal,
+	}
 }
 
 func (r *Scope) sub() *Scope {
@@ -137,12 +145,10 @@ func newRegisterState() *RegisterState {
 		registers: make(map[Register]struct{}),
 	}
 
-	regs.alloc() // discard reg 00
-
 	return regs
 }
 
-func (r *RegisterState) alloc() Register {
+func (r *RegisterState) alloc() Operand {
 	var reg Register
 	for {
 		_, ok := r.registers[reg]
@@ -151,14 +157,17 @@ func (r *RegisterState) alloc() Register {
 			if r.maxRegister < reg {
 				r.maxRegister = reg
 			}
-			return reg
+			return Operand{
+				Source: ValueSourceRegister,
+				Value:  reg,
+			}
 		}
 		reg++
 	}
 }
 
-func (r *RegisterState) dealloc(reg Register) {
-	delete(r.registers, reg)
+func (r *RegisterState) dealloc(reg Operand) {
+	delete(r.registers, reg.Value.(Register))
 }
 
 func (cs *compilerState) compileFunction(f *compiler.Function) ([]Bytecode, error) {
@@ -168,9 +177,8 @@ func (cs *compilerState) compileFunction(f *compiler.Function) ([]Bytecode, erro
 
 	bc = append(bc, Push{
 		Src: Operand{
-			Kind:   compiler.KindString,
 			Source: ValueSourceImmediate,
-			Value:  String(fmt.Sprintf("#func %s", f.Name())),
+			Value:  String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
 		},
 	})
 	scope.newVar("#funcname")
@@ -193,7 +201,7 @@ func (cs *compilerState) compileFunction(f *compiler.Function) ([]Bytecode, erro
 	}
 
 	// just in case
-	bc = append(bc, Return{0})
+	bc = append(bc, Return{})
 	return bc, nil
 }
 
@@ -202,104 +210,89 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 	switch stmt := stmt.(type) {
 	case *compiler.VarStatement:
 		var err error
-		var reg Register
 		var initBC []Bytecode
 
+		dst := scope.newVar(stmt.Variable.Name())
+
+		var rhsOp Operand
 		if stmt.Expression != nil {
-			initBC, reg, err = cs.compileExpression(stmt.Expression, scope)
+			initBC, rhsOp, err = cs.compileExpression(stmt.Expression, scope, dst)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			initBC, reg, err = cs.makeZeroValue(stmt.Type)
+			initBC, rhsOp, err = cs.makeZeroValue(stmt.Type, dst)
 			if err != nil {
 				return nil, err
 			}
-			// TODO: zero values
 		}
 
-		defer cs.regs.dealloc(reg)
-
 		bc = append(bc, initBC...)
-		bc = append(bc, Mov{
-			Dst: Operand{
-				Kind:   stmt.Variable.Type().Kind(),
-				Source: ValueSourceLocal,
-				Value:  scope.newVar(stmt.Variable.Name()),
-			},
-			Src: Operand{
-				Kind:   stmt.Variable.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-		})
+		if rhsOp != dst {
+			bc = append(bc, Mov{
+				Dst: dst,
+				Src: rhsOp,
+			})
+		}
+
 		return bc, nil
 	case *compiler.DeclarationStatement:
-		initBC, reg, err := cs.compileExpression(stmt.Expression, scope)
+		dst := scope.newVar(stmt.Variable.Name())
+		initBC, rhsOp, err := cs.compileExpression(stmt.Expression, scope, dst)
 		if err != nil {
 			return nil, err
 		}
-		defer cs.regs.dealloc(reg)
 
 		bc = append(bc, initBC...)
-		bc = append(bc, Mov{
-			Dst: Operand{
-				Kind:   stmt.Variable.Type().Kind(),
-				Source: ValueSourceLocal,
-				Value:  scope.newVar(stmt.Variable.Name()),
-			},
-			Src: Operand{
-				Kind:   stmt.Expression.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-		})
+
+		if rhsOp != dst {
+			bc = append(bc, Mov{
+				Dst: dst,
+				Src: rhsOp,
+			})
+		}
+
 		return bc, nil
 	case *compiler.AssignmentStatement:
-		rhsBC, rhsReg, err := cs.compileExpression(stmt.Right, scope)
-		if err != nil {
-			return nil, err
-		}
-		defer cs.regs.dealloc(rhsReg)
-
-		bc = append(bc, rhsBC...)
-		// TODO: resolve nested LHS
-		//
+		var lhsOp Operand
 		switch lhs := stmt.Left.(type) {
 		case *compiler.SymbolReferenceExpression:
-			// TODO: handle globals
-			bc = append(bc, Mov{
-				Dst: Operand{
-					Kind:   lhs.Type().Kind(),
-					Source: ValueSourceLocal,
-					Value:  scope.offset(lhs.Name()),
-				},
-				Src: Operand{
-					Kind:   stmt.Right.Type().Kind(),
-					Source: ValueSourceRegister,
-					Value:  rhsReg,
-				},
-			})
-
-			return bc, nil
+			lhsOp = scope.offset(lhs.Name())
 		default:
 			return nil, stmt.WrapError(fmt.Errorf("unhandled LHS type in assigment: %T", lhs))
 		}
+
+		rhsBC, rhsOp, err := cs.compileExpression(stmt.Right, scope, lhsOp)
+		if err != nil {
+			return nil, err
+		}
+
+		bc = append(bc, rhsBC...)
+		if lhsOp != rhsOp {
+			bc = append(bc, Mov{
+				Dst: lhsOp,
+				Src: rhsOp,
+			})
+		}
+
+		return bc, nil
 	case *compiler.AssignmentOperatorStatement:
-		var lhsOffset AddrOffset
+		var lhsOp Operand
 		// TODO: complex LHS
 		switch expr := stmt.Left.(type) {
 		case *compiler.SymbolReferenceExpression:
-			lhsOffset = scope.offset(expr.Name())
+			lhsOp = scope.offset(expr.Name())
 		default:
 			return nil, stmt.WrapError(fmt.Errorf("unhandled LHS type in assigment: %T", stmt.Left))
 		}
 
-		rhsBC, rhsReg, err := cs.compileExpression(stmt.Right, scope)
+		rhsOp := cs.regs.alloc()
+		defer cs.regs.dealloc(rhsOp)
+
+		rhsBC, rhsOp, err := cs.compileExpression(stmt.Right, scope, rhsOp)
 		if err != nil {
 			return nil, err
 		}
-		defer cs.regs.dealloc(rhsReg)
 
 		bc = append(bc, rhsBC...)
 
@@ -318,31 +311,19 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 		}
 
 		bc = append(bc, BinOp{
-			Op: operator,
-			Dst: Operand{
-				Kind:   stmt.Left.Type().Kind(),
-				Source: ValueSourceLocal,
-				Value:  lhsOffset,
-			},
-			Left: Operand{
-				Kind:   stmt.Left.Type().Kind(),
-				Source: ValueSourceLocal,
-				Value:  lhsOffset,
-			},
-			Right: Operand{
-				Kind:   stmt.Right.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  rhsReg,
-			},
+			Op:    BinaryOperator(stmt.Left.Type().Kind(), operator, stmt.Right.Type().Kind()),
+			Dst:   lhsOp,
+			Left:  lhsOp,
+			Right: rhsOp,
 		})
 
 		return bc, nil
 	case *compiler.PostfixStatement:
-		var lhsOffset AddrOffset
+		var lhsOp Operand
 		// TODO: complex LHS
 		switch expr := stmt.Expression.(type) {
 		case *compiler.SymbolReferenceExpression:
-			lhsOffset = scope.offset(expr.Name())
+			lhsOp = scope.offset(expr.Name())
 		default:
 			return nil, stmt.WrapError(fmt.Errorf("unhandled LHS type in assigment: %T", stmt.Expression))
 		}
@@ -358,42 +339,32 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 		}
 
 		bc = append(bc, BinOp{
-			Op: operator,
-			Dst: Operand{
-				Kind:   stmt.Expression.Type().Kind(),
-				Source: ValueSourceLocal,
-				Value:  lhsOffset,
-			},
-			Left: Operand{
-				Kind:   stmt.Expression.Type().Kind(),
-				Source: ValueSourceLocal,
-				Value:  lhsOffset,
-			},
-			Right: Operand{
-				Kind:   stmt.Expression.Type().Kind(),
-				Source: ValueSourceImmediate,
-				Value:  Int(1),
-			},
+			Op:    BinaryOperator(stmt.Expression.Type().Kind(), operator, stmt.Expression.Type().Kind()),
+			Dst:   lhsOp,
+			Left:  lhsOp,
+			Right: ImmediateOperand(Int(1)),
 		})
 
 		return bc, nil
 	case *compiler.ReturnStatement:
-		var reg Register
 		if f.Return() != nil {
 			var exprBC []Bytecode
 			var err error
-			exprBC, reg, err = cs.compileExpression(stmt.Expression, scope)
+			exprBC, rhsOp, err := cs.compileExpression(stmt.Expression, scope, cs.returnReg)
 			if err != nil {
 				return nil, err
 			}
-			defer cs.regs.dealloc(reg)
-
 			bc = append(bc, exprBC...)
+
+			if rhsOp != cs.returnReg {
+				bc = append(bc, Mov{
+					Dst: cs.returnReg,
+					Src: rhsOp,
+				})
+			}
 		}
 
-		bc = append(bc, Return{
-			Register: reg,
-		})
+		bc = append(bc, Return{})
 
 		return bc, nil
 	case *compiler.ForStatement:
@@ -429,48 +400,38 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 
 		var condBC []Bytecode
 		if stmt.Condition != nil {
-			var condReg Register
-			condBC, condReg, err = cs.compileExpression(stmt.Condition, scope)
+			condReg := cs.regs.alloc()
+			defer cs.regs.dealloc(condReg)
+
+			condBC, condReg, err = cs.compileExpression(stmt.Condition, scope, condReg)
 			if err != nil {
 				return nil, err
 			}
-			defer cs.regs.dealloc(condReg)
 
 			condBC = append(condBC, JmpRC{
 				Invert: true,
-				Src: Operand{
-					Kind:   compiler.KindBool,
-					Source: ValueSourceRegister,
-					Value:  condReg,
-				},
-				Dst: Operand{
-					Kind:   compiler.KindInt,
-					Source: ValueSourceImmediate,
-					Value:  Int(len(stepBC) + len(bodyBC) + 1),
-				},
+				Src:    condReg,
+				Dst:    ImmediateOperand(Int(len(stepBC) + len(bodyBC) + 1)),
 			})
 		}
 
-		log.Println(initBC)
 		bc = append(bc, initBC...)
 		bc = append(bc, condBC...)
 		bc = append(bc, bodyBC...)
 		bc = append(bc, stepBC...)
 		bc = append(bc, JmpR{
-			Dst: Operand{
-				Kind:   compiler.KindInt,
-				Source: ValueSourceImmediate,
-				Value:  Int(-(len(bodyBC) + len(condBC) + len(stepBC) + 1)),
-			},
+			Dst: ImmediateOperand(Int(-(len(bodyBC) + len(condBC) + len(stepBC) + 1))),
 		})
 
 		return bc, nil
 	case *compiler.IfStatement:
-		condBC, condReg, err := cs.compileExpression(stmt.Condition, scope)
+		condReg := cs.regs.alloc()
+		defer cs.regs.dealloc(condReg)
+
+		condBC, condReg, err := cs.compileExpression(stmt.Condition, scope, condReg)
 		if err != nil {
 			return nil, err
 		}
-		defer cs.regs.dealloc(condReg)
 
 		bodyScope := scope.sub()
 
@@ -486,16 +447,8 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 
 		condBC = append(condBC, JmpRC{
 			Invert: true,
-			Src: Operand{
-				Kind:   compiler.KindBool,
-				Source: ValueSourceRegister,
-				Value:  condReg,
-			},
-			Dst: Operand{
-				Kind:   compiler.KindInt,
-				Source: ValueSourceImmediate,
-				Value:  Int(len(bodyBC)),
-			},
+			Src:    condReg,
+			Dst:    ImmediateOperand(Int(len(bodyBC))),
 		})
 
 		bc = append(bc, condBC...)
@@ -507,7 +460,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 	}
 }
 
-func (cs *compilerState) makeZeroValue(typ compiler.Type) ([]Bytecode, Register, error) {
+func (cs *compilerState) makeZeroValue(typ compiler.Type, dst Operand) ([]Bytecode, Operand, error) {
 	var bc []Bytecode
 	switch typ := compiler.BaseType(typ).(type) {
 	case *compiler.BasicType:
@@ -522,180 +475,86 @@ func (cs *compilerState) makeZeroValue(typ compiler.Type) ([]Bytecode, Register,
 		case compiler.KindBool:
 			imm = Bool(false)
 		default:
-			return nil, 0, fmt.Errorf("unhandled zero value for type %s", typ)
+			return nil, Operand{}, fmt.Errorf("unhandled zero value for type %s", typ)
 		}
 
-		reg := cs.regs.alloc()
-		bc = append(bc, Mov{
-			Dst: Operand{
-				Kind:   typ.Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-			Src: Operand{
-				Kind:   typ.Kind(),
-				Source: ValueSourceImmediate,
-				Value:  imm,
-			},
-		})
-
-		return bc, reg, nil
+		return nil, Operand{
+			Source: ValueSourceImmediate,
+			Value:  imm,
+		}, nil
 	case *compiler.TupleType:
 		elems := typ.Elems()
-		reg := cs.regs.alloc()
-		bc = append(bc, MakeTupleR{
-			Size: len(elems),
-			Dst:  reg,
+		bc = append(bc, Make{
+			Kind: shortKind(compiler.KindTuple),
+			Size: ImmediateOperand(Int(len(elems))),
+			Dst:  dst,
 		})
 
 		for i, elem := range elems {
-			elemBC, elemReg, err := cs.makeZeroValue(elem)
+			elemReg := cs.regs.alloc()
+			elemBC, elemDst, err := cs.makeZeroValue(elem, elemReg)
 			if err != nil {
-				return nil, 0, fmt.Errorf("tuple index %d: ", i)
+				return nil, Operand{}, fmt.Errorf("tuple index %d: ", i)
 			}
 
 			bc = append(bc, elemBC...)
 
-			bc = append(bc, SetIndexTupleRIR{
-				Base:  reg,
-				Index: Int(i),
-				Src:   elemReg,
+			bc = append(bc, SetIndex{
+				Kind:  shortKind(compiler.KindTuple),
+				Base:  dst,
+				Index: ImmediateOperand(Int(i)),
+				Src:   elemDst,
 			})
 
 			cs.regs.dealloc(elemReg)
 		}
 
-		return bc, reg, nil
+		return bc, dst, nil
 	default:
-		return nil, 0, fmt.Errorf("unhandled zero value for type %s", typ)
+		return nil, Operand{}, fmt.Errorf("unhandled zero value for type %s", typ)
 	}
 }
 
-func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scope) ([]Bytecode, Register, error) {
+func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scope, dst Operand) ([]Bytecode, Operand, error) {
 	var bc []Bytecode
 	switch expr := expr.(type) {
 	case *compiler.Literal[int64]:
-		reg := cs.regs.alloc()
-		bc = append(bc, Mov{
-			Dst: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-			Src: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceImmediate,
-				Value:  Int(expr.Value()),
-			},
-		})
-
-		return bc, reg, nil
+		return nil, ImmediateOperand(Int(expr.Value())), nil
 	case *compiler.Literal[float64]:
-		reg := cs.regs.alloc()
-		bc = append(bc, Mov{
-			Dst: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-			Src: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceImmediate,
-				Value:  Float(expr.Value()),
-			},
-		})
-		return bc, reg, nil
+		return nil, ImmediateOperand(Float(expr.Value())), nil
 	case *compiler.Literal[string]:
-		reg := cs.regs.alloc()
-		bc = append(bc, Mov{
-			Dst: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-			Src: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceImmediate,
-				Value:  String(expr.Value()),
-			},
-		})
-
-		return bc, reg, nil
+		return nil, ImmediateOperand(String(expr.Value())), nil
 	case *compiler.Literal[bool]:
-		reg := cs.regs.alloc()
-		bc = append(bc, Mov{
-			Dst: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-			Src: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceImmediate,
-				Value:  Bool(expr.Value()),
-			},
-		})
-
-		return bc, reg, nil
+		return nil, ImmediateOperand(Bool(expr.Value())), nil
+	case *compiler.SymbolReferenceExpression:
+		// TODO: handle globals
+		return nil, scope.offset(expr.Name()), nil
 	case *compiler.BinaryExpression:
-		lhsBC, lhsReg, err := cs.compileExpression(expr.Left, scope)
+		lhsBC, lhsOp, err := cs.compileExpression(expr.Left, scope, dst)
 		if err != nil {
-			return nil, 0, err
+			return nil, Operand{}, err
 		}
-		defer cs.regs.dealloc(lhsReg)
 
 		bc = append(bc, lhsBC...)
 
-		rhsBC, rhsReg, err := cs.compileExpression(expr.Right, scope)
+		rhsReg := cs.regs.alloc()
+		rhsBC, rhsOp, err := cs.compileExpression(expr.Right, scope, rhsReg)
 		if err != nil {
-			return nil, 0, err
+			return nil, Operand{}, err
 		}
 		defer cs.regs.dealloc(rhsReg)
 
 		bc = append(bc, rhsBC...)
 
-		reg := cs.regs.alloc()
-
 		bc = append(bc, BinOp{
-			Op: expr.Operator,
-			Dst: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-			Left: Operand{
-				Kind:   expr.Left.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  lhsReg,
-			},
-			Right: Operand{
-				Kind:   expr.Right.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  rhsReg,
-			},
+			Op:    BinaryOperator(expr.Left.Type().Kind(), expr.Operator, expr.Right.Type().Kind()),
+			Dst:   dst,
+			Left:  lhsOp,
+			Right: rhsOp,
 		})
 
-		return bc, reg, nil
-	case *compiler.SymbolReferenceExpression:
-		// TODO: handle globals
-
-		reg := cs.regs.alloc()
-
-		bc = append(bc, Mov{
-			Dst: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceRegister,
-				Value:  reg,
-			},
-			Src: Operand{
-				Kind:   expr.Type().Kind(),
-				Source: ValueSourceLocal,
-				Value:  scope.offset(expr.Name()),
-			},
-		})
-
-		return bc, reg, nil
+		return bc, dst, nil
 	default:
-		return nil, 0, expr.WrapError(fmt.Errorf("unhandled expression %T", expr))
+		return nil, Operand{}, expr.WrapError(fmt.Errorf("unhandled expression %T", expr))
 	}
 }

@@ -6,10 +6,9 @@ type A *B
 
 type B int
 
-func main() {
+func main() string {
   var x int = 5
   var y = "hello"
-  var z = true
 
   w := 7
   w += 9
@@ -18,15 +17,13 @@ func main() {
   x++
   y+="a"
 
-  for i := 0; i < 2; i++ {
-    for j := 0; j < 4; j++ {
-    }
-  }
+	z := 5 ** 5
+
 
 
   // test comment
 
-  return
+  return z
 }
 
 

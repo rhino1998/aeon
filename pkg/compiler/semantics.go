@@ -117,6 +117,7 @@ func (c *Compiler) compileFunction(p *Package, scope *Scope, decl parser.Functio
 
 	f := &Function{
 		name:  string(decl.Name),
+		pkg:   p,
 		scope: newScope(scope, qualifiedName),
 	}
 	f.scope.function = f

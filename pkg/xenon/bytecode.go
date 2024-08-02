@@ -191,20 +191,26 @@ type ConvertIntFloat = Convert[int64, float64]
 type ConvertFloatInt = Convert[float64, int64]
 
 type Operand struct {
-	Kind   compiler.Kind `xc:"k"`
-	Source ValueSource   `xc:"s"`
-	Value  any           `xc:"v"`
+	Source ValueSource `xc:"s"`
+	Value  any         `xc:"v"`
 }
 
 func (o Operand) String() string {
-	return fmt.Sprintf("%s(%s)", o.Kind, o.Value)
+	return fmt.Sprintf("%s", o.Value)
+}
+
+func ImmediateOperand(imm Immediate) Operand {
+	return Operand{
+		Value:  imm,
+		Source: ValueSourceImmediate,
+	}
 }
 
 type BinOp struct {
-	Op    compiler.Operator `xc:"o"`
-	Dst   Operand           `xc:"d"`
-	Left  Operand           `xc:"l"`
-	Right Operand           `xc:"r"`
+	Op    Operator `xc:"o"`
+	Dst   Operand  `xc:"d"`
+	Left  Operand  `xc:"l"`
+	Right Operand  `xc:"r"`
 }
 
 func (o BinOp) xenon() string {
@@ -215,16 +221,14 @@ func (o BinOp) String() string {
 	return fmt.Sprintf("BinOp(%s) %v = %v %v %v", o.Op, o.Dst, o.Left, o.Op, o.Right)
 }
 
-type Return struct {
-	Register Register `xc:"r"`
-}
+type Return struct{}
 
 func (r Return) xenon() string {
 	return "ret"
 }
 
 func (r Return) String() string {
-	return fmt.Sprintf("RET %v", r.Register)
+	return fmt.Sprintf("RET")
 }
 
 type CallExtern struct {
@@ -246,6 +250,37 @@ func (c Call[Func]) xenon() string {
 
 type CallAddr = Call[Addr]
 type CallClosure = Call[Closure]
+
+func shortKind(k compiler.Kind) string {
+	switch k {
+	case compiler.KindBool:
+		return "B"
+	case compiler.KindInt:
+		return "I"
+	case compiler.KindFloat:
+		return "F"
+	case compiler.KindString:
+		return "S"
+	case compiler.KindPointer:
+		return "*"
+	case compiler.KindTuple:
+		return "T"
+	case compiler.KindSlice:
+		return "["
+	case compiler.KindMap:
+		return "M"
+	case compiler.KindStruct:
+		return "X"
+	default:
+		return "U"
+	}
+}
+
+type Operator string
+
+func BinaryOperator(left compiler.Kind, op compiler.Operator, right compiler.Kind) Operator {
+	return Operator(fmt.Sprintf("%s%s%s", shortKind(left), string(op), shortKind(right)))
+}
 
 type Jmp struct {
 	Dst Operand `xc:"d"`
@@ -273,7 +308,7 @@ func (j JmpR) String() string {
 
 type JmpRC struct {
 	Invert bool    `xc:"i"`
-	Src    Operand `xc:"d"`
+	Src    Operand `xc:"s"`
 	Dst    Operand `xc:"d"`
 }
 
@@ -289,44 +324,38 @@ func (j JmpRC) String() string {
 	return fmt.Sprintf("JMPRC %v if %s%v", j.Dst, not, j.Src)
 }
 
-type Make[T, Dst any] struct {
-	Dst  Dst `xc:"d"`
-	Size int `xc:"s"`
+type Make struct {
+	Kind string  `xc:"k"`
+	Dst  Operand `xc:"d"`
+	Size Operand `xc:"s"`
 }
 
-func (Make[T, Dst]) xenon() string {
+func (Make) xenon() string {
 	return "make"
 }
 
-func (m Make[T, Dst]) Striung() string {
-	var t T
-	return fmt.Sprintf("MAKE(%T) %v %d", t, m.Dst, m.Size)
+func (m Make) String() string {
+	return fmt.Sprintf("MAKE(%s) %v %d", m.Kind, m.Dst, m.Size)
 }
 
-type MakeTupleR = Make[Tuple, Register]
-
-type Index[T, Base, Idx, Dst any] struct {
-	Base  Base `xc:"b"`
-	Index Idx  `xc:"i"`
-	Dst   Dst  `xc:"d"`
+type Index struct {
+	Kind  string  `xc:"k"`
+	Base  Operand `xc:"b"`
+	Index Operand `xc:"i"`
+	Dst   Operand `xc:"d"`
 }
 
-func (Index[T, Base, Idx, Dst]) xenon() string {
+func (Index) xenon() string {
 	return "ind"
 }
 
-type IndexTupleRRR = Index[Tuple, Register, Register, Register]
-type IndexTupleRIR = Index[Tuple, Register, Register, Register]
-
-type SetIndex[T, Base, Index, Src any] struct {
-	Base  Base  `xc:"b"`
-	Index Index `xc:"i"`
-	Src   Src   `xc:"s"`
+type SetIndex struct {
+	Kind  string  `xc:"k"`
+	Base  Operand `xc:"b"`
+	Index Operand `xc:"i"`
+	Src   Operand `xc:"s"`
 }
 
-func (SetIndex[T, Base, Idx, Src]) xenon() string {
+func (SetIndex) xenon() string {
 	return "set"
 }
-
-type SetIndexTupleRRR = SetIndex[Tuple, Register, Register, Register]
-type SetIndexTupleRIR = SetIndex[Tuple, Register, Immediate, Register]

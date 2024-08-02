@@ -4,9 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"math"
 	"strings"
-
-	"github.com/rhino1998/aeon/pkg/compiler"
 )
 
 const PageSize = 65535 // annoyingly not a power of 2
@@ -30,7 +29,6 @@ type Runtime struct {
 }
 
 func NewRuntime(prog []Bytecode, externs ExternFuncs, memPages int, registers int) (*Runtime, error) {
-	log.Printf("%#v", prog)
 	r := &Runtime{
 		externs: externs,
 
@@ -255,11 +253,11 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			return err
 		}
 
-		// log.Println("--------------")
-		// log.Printf("%s", code)
-		// log.Printf("fp: %v", r.fp)
-		// r.printRegisters()
-		// r.printStack()
+		log.Println("--------------")
+		log.Printf("%s", code)
+		log.Printf("fp: %v", r.fp)
+		r.printRegisters()
+		r.printStack()
 
 		pc++
 
@@ -323,10 +321,6 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			}
 			r.ret = r.externs[code.Extern](args)
 		case Return:
-			if code.Register != 0 {
-				r.ret = r.registers[code.Register]
-			}
-
 			r.sp, err = loadType[Addr](r, r.fp-2)
 			if err != nil {
 				return fmt.Errorf("failed to load sp from fp-2: %w", err)
@@ -346,6 +340,7 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 
 			// exit completely
 			if pc == 0 {
+				log.Printf("%v", r.registers[0])
 				return nil
 			}
 		case Jmp:
@@ -376,20 +371,52 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 
 				pc = pc.Offset(AddrOffset(val.(Int)))
 			}
-		case Make[Tuple, Register]:
-			r.registers[code.Dst] = make(Tuple, code.Size)
-		case SetIndex[Tuple, Register, Immediate, Register]:
-			tuple := r.registers[code.Base].(Tuple)
-			tuple[code.Index.(Int)] = r.registers[code.Src]
-			r.registers[code.Base] = tuple
+		case Make:
+			switch code.Kind {
+			case "T":
+				size, err := load(code.Size)()
+				if err != nil {
+					return err
+				}
+
+				err = store(code.Dst)(make(Tuple, size.(Int)), nil)
+				if err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unimplemented kind %q", code.Kind)
+			}
+		case SetIndex:
+			switch code.Kind {
+			case "T":
+				tuple, err := load(code.Base)()
+				if err != nil {
+					return err
+				}
+
+				index, err := load(code.Index)()
+				if err != nil {
+					return err
+				}
+
+				src, err := load(code.Src)()
+				if err != nil {
+					return err
+				}
+
+				tuple.(Tuple)[index.(Int)] = src
+
+				err = store(code.Base)(tuple, nil)
+				if err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unimplemented kind %q", code.Kind)
+			}
 		case BinOp:
 			err = store(code.Dst)(
 				binaryOp(
-					binaryOperatorFuncs[compiler.BinaryOperatorKinds{
-						Operator: code.Op,
-						Left:     code.Left.Kind,
-						Right:    code.Right.Kind,
-					}],
+					binaryOperatorFuncs[code.Op],
 					load(code.Left),
 					load(code.Right),
 				),
@@ -428,32 +455,94 @@ func binaryOp(op binaryOperatorFunc, loadA, loadB loadFunc) (any, error) {
 	return op(a, b), nil
 }
 
-var binaryOperatorFuncs = map[compiler.BinaryOperatorKinds]binaryOperatorFunc{
-	{Operator: compiler.OperatorAddition, Left: compiler.KindInt, Right: compiler.KindInt}:       opAdd[Int],
-	{Operator: compiler.OperatorAddition, Left: compiler.KindFloat, Right: compiler.KindFloat}:   opAdd[Float],
-	{Operator: compiler.OperatorAddition, Left: compiler.KindString, Right: compiler.KindString}: opAdd[String],
+var binaryOperatorFuncs = map[Operator]binaryOperatorFunc{
+	"I**I": opExp[Int],
+	"F**F": opExp[Float],
 
-	{Operator: compiler.OperatorLessThan, Left: compiler.KindInt, Right: compiler.KindInt}:     opLessThan[Int],
-	{Operator: compiler.OperatorLessThan, Left: compiler.KindFloat, Right: compiler.KindFloat}: opLessThan[Float],
+	"I+I": opAdd[Int],
+	"F+F": opAdd[Float],
+	"S+S": opAdd[String],
 
-	{Operator: compiler.OperatorGreaterThan, Left: compiler.KindInt, Right: compiler.KindInt}:     opGreaterThan[Int],
-	{Operator: compiler.OperatorGreaterThan, Left: compiler.KindFloat, Right: compiler.KindFloat}: opGreaterThan[Float],
+	"I-I": opSub[Int],
+	"F-F": opSub[Float],
+
+	"I*I": opMul[Int],
+	"F*F": opMul[Float],
+
+	"I/I": opDiv[Int],
+	"F/F": opDiv[Float],
+
+	"I%I": opMod[Int],
+
+	"I<I": opLT[Int],
+	"F<F": opLT[Float],
+
+	"I<=I": opLTE[Int],
+	"F<=F": opLTE[Float],
+
+	"I>I": opGT[Int],
+	"F>F": opGT[Float],
+
+	"I>=I": opGTE[Int],
+	"F>=F": opGTE[Float],
+
+	"I==I": opEQ[Int],
+	"F==F": opEQ[Float],
+	"S==S": opEQ[String],
+	"B==B": opEQ[Bool],
+
+	"I!=I": opNE[Int],
+	"F!=F": opNE[Float],
+	"S!=S": opNE[String],
+	"B!=B": opNE[Bool],
+}
+
+func opExp[T Int | Float](a, b any) any {
+	return T(math.Pow(float64(a.(T)), float64(b.(T))))
 }
 
 func opAdd[T Int | String | Float](a, b any) any {
 	return a.(T) + b.(T)
 }
 
-func opLessThan[T Int | Float](a, b any) any {
+func opSub[T Int | Float](a, b any) any {
+	return a.(T) - b.(T)
+}
+
+func opMul[T Int | Float](a, b any) any {
+	return a.(T) * b.(T)
+}
+
+func opDiv[T Int | Float](a, b any) any {
+	return a.(T) / b.(T)
+}
+
+func opMod[T Int](a, b any) any {
+	return a.(T) % b.(T)
+}
+
+func opLT[T Int | Float](a, b any) any {
 	return Bool(a.(T) < b.(T))
 }
 
-func opGreaterThan[T Int | Float](a, b any) any {
+func opLTE[T Int | Float](a, b any) any {
+	return Bool(a.(T) <= b.(T))
+}
+
+func opGT[T Int | Float](a, b any) any {
 	return Bool(a.(T) > b.(T))
 }
 
-func opSub[T Int | Float](a, b any) any {
-	return a.(T) - b.(T)
+func opGTE[T Int | Float](a, b any) any {
+	return Bool(a.(T) >= b.(T))
+}
+
+func opEQ[T Int | String | Float | Bool](a, b any) any {
+	return a.(T) == b.(T)
+}
+
+func opNE[T Int | String | Float | Bool](a, b any) any {
+	return a.(T) != b.(T)
 }
 
 func (r *Runtime) printRegisters() {

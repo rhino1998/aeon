@@ -4,12 +4,17 @@ import "github.com/rhino1998/aeon/pkg/parser"
 
 type Function struct {
 	name string
+	pkg  *Package
 
 	parameters []*Variable
 	ret        Type
 	body       []Statement
 
 	scope *Scope
+}
+
+func (f *Function) Package() *Package {
+	return f.pkg
 }
 
 func (f *Function) Name() string {
