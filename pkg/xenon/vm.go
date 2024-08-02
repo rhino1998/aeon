@@ -45,8 +45,6 @@ func NewRuntime(prog []Bytecode, externs ExternFuncs, memPages int, registers in
 		r.codePages[page][pageAddr] = code
 	}
 
-	r.registers[0] = int64(0)
-
 	err := r.push(Addr(0))
 	if err != nil {
 		return nil, err
@@ -244,7 +242,7 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		// case <-time.After(100 * time.Millisecond):
+			// case <-time.After(100 * time.Millisecond):
 		default:
 		}
 
@@ -256,6 +254,7 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		log.Println("--------------")
 		log.Printf("%s", code)
 		log.Printf("fp: %v", r.fp)
+		log.Printf("sp: %v", r.sp)
 		r.printRegisters()
 		r.printStack()
 
@@ -296,8 +295,13 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			if err != nil {
 				return err
 			}
-		case CallAddr:
-			err := r.push(r.sp)
+		case Call:
+			funcAddr, err := load(code.Func)()
+			if err != nil {
+				return fmt.Errorf("could not resolve function addr")
+			}
+
+			err = r.push(r.sp)
 			if err != nil {
 				return fmt.Errorf("failed to push sp: %w", err)
 			}
@@ -312,8 +316,8 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 				return fmt.Errorf("failed to push next pc: %w", err)
 			}
 
-			r.fp = r.sp
-			pc = code.Func
+			r.fp = r.sp - 1
+			pc = Addr(funcAddr.(Int)) // TODO: add proper pointer type
 		case CallExtern:
 			args, err := r.loadArgs(r.sp, code.Args)
 			if err != nil {
@@ -321,6 +325,11 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			}
 			r.ret = r.externs[code.Extern](args)
 		case Return:
+			pc, err = loadType[Addr](r, r.fp)
+			if err != nil {
+				return fmt.Errorf("failed to load pc from fp: %w", err)
+			}
+
 			r.sp, err = loadType[Addr](r, r.fp-2)
 			if err != nil {
 				return fmt.Errorf("failed to load sp from fp-2: %w", err)
@@ -331,18 +340,14 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 				return fmt.Errorf("failed to load fp from fp-1: %w", err)
 			}
 
-			pc, err = loadType[Addr](r, r.fp)
-			if err != nil {
-				return fmt.Errorf("failed to load pc from fp: %w", err)
-			}
-
 			r.zeroStack()
 
 			// exit completely
-			if pc == 0 {
+			if r.fp == 0 {
 				log.Printf("%v", r.registers[0])
 				return nil
 			}
+
 		case Jmp:
 			val, err := load(code.Dst)()
 			if err != nil {
@@ -371,6 +376,13 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 
 				pc = pc.Offset(AddrOffset(val.(Int)))
 			}
+		case PopN:
+			n, err := load(code.Src)()
+			if err != nil {
+				return err
+			}
+
+			r.sp -= Addr(n.(Int))
 		case Make:
 			switch code.Kind {
 			case "T":
@@ -506,19 +518,19 @@ func opAdd[T Int | String | Float](a, b any) any {
 }
 
 func opSub[T Int | Float](a, b any) any {
-	return a.(T) - b.(T)
+	return T(a.(T) - b.(T))
 }
 
 func opMul[T Int | Float](a, b any) any {
-	return a.(T) * b.(T)
+	return T(a.(T) * b.(T))
 }
 
 func opDiv[T Int | Float](a, b any) any {
-	return a.(T) / b.(T)
+	return T(a.(T) / b.(T))
 }
 
 func opMod[T Int](a, b any) any {
-	return a.(T) % b.(T)
+	return T(a.(T) % b.(T))
 }
 
 func opLT[T Int | Float](a, b any) any {
@@ -538,11 +550,11 @@ func opGTE[T Int | Float](a, b any) any {
 }
 
 func opEQ[T Int | String | Float | Bool](a, b any) any {
-	return a.(T) == b.(T)
+	return Bool(a.(T) == b.(T))
 }
 
 func opNE[T Int | String | Float | Bool](a, b any) any {
-	return a.(T) != b.(T)
+	return Bool(a.(T) != b.(T))
 }
 
 func (r *Runtime) printRegisters() {

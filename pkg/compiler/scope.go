@@ -3,8 +3,15 @@ package compiler
 import (
 	"cmp"
 	"fmt"
+	"log"
 	"slices"
 )
+
+type SymbolStub string
+
+func (s SymbolStub) Name() string {
+	return string(s)
+}
 
 type Symbol interface {
 	Name() string
@@ -52,6 +59,10 @@ func (s *Scope) Functions() []*Function {
 	slices.SortFunc(funcs, func(a, b *Function) int {
 		return cmp.Compare(a.Name(), b.Name())
 	})
+
+	for _, f := range funcs {
+		log.Println(f.Name())
+	}
 
 	return funcs
 }
@@ -108,8 +119,10 @@ func (s *Scope) get(name string) (Symbol, bool) {
 
 func (s *Scope) put(symbol Symbol) error {
 	name := symbol.Name()
-	if _, ok := s.scope[name]; ok {
-		return fmt.Errorf("%s is already defined in this scope", name)
+	if maybeStub, ok := s.scope[name]; ok {
+		if _, ok := maybeStub.(SymbolStub); !ok {
+			return fmt.Errorf("%s is already defined in this scope", name)
+		}
 	}
 
 	s.scope[name] = symbol

@@ -343,7 +343,9 @@ IdentifierExpr <- ident:Identifier {
   }, nil
 }
 
-CallExpr <- exp:Expr '(' args:CallArgumentList? ')' {
+MaybeCallExpr <- CallExpr / IdentifierExpr
+
+CallExpr <- exp:MaybeCallExpr '(' args:CallArgumentList? ')' {
   call := CallExpr{
     Expr: exp.(Expr),
 
@@ -376,7 +378,7 @@ DotExpr <- exp:Expr '.' ident:Identifier {
 
 Expr <- MaybeOrExpr
 
-TermExpr <- UnaryExpr / DotExpr / CallExpr / ParenthesizedExpr / NumberLiteral / StringLiteral / BooleanLiteral / IdentifierExpr
+TermExpr <- UnaryExpr / DotExpr / ParenthesizedExpr / NumberLiteral / StringLiteral / BooleanLiteral / MaybeCallExpr
 
 MaybeExpExpr <- ExpExpr / TermExpr
 
@@ -416,7 +418,7 @@ AddExpr <- left:MaybeMulExpr _ op:("+" / "-" / "|" / "^") _ right:MaybeAddExpr {
 
 MaybeCmpExpr <- CmpExpr / MaybeAddExpr
 
-CmpExpr <- left:MaybeAddExpr _ op:("==" / "!=" / "<" / ">" / ">=" / "<=") _ right:MaybeCmpExpr {
+CmpExpr <- left:MaybeAddExpr _ op:("==" / "!=" / ">=" / "<=" / ">" / "<") _ right:MaybeCmpExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),

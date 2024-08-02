@@ -53,14 +53,14 @@ func (f *Function) Body() []Statement {
 }
 
 type CallExpression struct {
-	function Expression
-	args     []Expression
+	Function Expression
+	Args     []Expression
 
 	parser.Position
 }
 
 func (e *CallExpression) Type() Type {
-	return e.function.Type()
+	return BaseType(e.Function.Type()).(*FunctionType).Return()
 }
 
 type ReturnStatement struct {

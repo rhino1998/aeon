@@ -148,6 +148,24 @@ func newRegisterState() *RegisterState {
 	return regs
 }
 
+func (r *RegisterState) save() []Operand {
+	ops := make([]Operand, 0, r.maxRegister)
+
+	// skip reg0
+	for i := Register(1); i < r.maxRegister; i++ {
+		if _, ok := r.registers[i]; !ok {
+			continue
+		}
+
+		ops = append(ops, Operand{
+			Source: ValueSourceRegister,
+			Value:  i,
+		})
+	}
+
+	return ops
+}
+
 func (r *RegisterState) alloc() Operand {
 	var reg Register
 	for {
@@ -181,7 +199,7 @@ func (cs *compilerState) compileFunction(f *compiler.Function) ([]Bytecode, erro
 			Value:  String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
 		},
 	})
-	scope.newVar("#funcname")
+	_ = scope.newVar("#funcname")
 
 	for i, param := range f.Parameters() {
 		if param.Name() == "" {
@@ -212,45 +230,43 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 		var err error
 		var initBC []Bytecode
 
-		dst := scope.newVar(stmt.Variable.Name())
+		reg := cs.regs.alloc()
+		defer cs.regs.dealloc(reg)
 
 		var rhsOp Operand
 		if stmt.Expression != nil {
-			initBC, rhsOp, err = cs.compileExpression(stmt.Expression, scope, dst)
+			initBC, rhsOp, err = cs.compileExpression(stmt.Expression, scope, reg)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			initBC, rhsOp, err = cs.makeZeroValue(stmt.Type, dst)
+			initBC, rhsOp, err = cs.makeZeroValue(stmt.Type, reg)
 			if err != nil {
 				return nil, err
 			}
 		}
 
 		bc = append(bc, initBC...)
-		if rhsOp != dst {
-			bc = append(bc, Mov{
-				Dst: dst,
-				Src: rhsOp,
-			})
-		}
+		bc = append(bc, Push{
+			Src: rhsOp,
+		})
+		scope.newVar(stmt.Variable.Name())
 
 		return bc, nil
 	case *compiler.DeclarationStatement:
-		dst := scope.newVar(stmt.Variable.Name())
-		initBC, rhsOp, err := cs.compileExpression(stmt.Expression, scope, dst)
+		reg := cs.regs.alloc()
+		defer cs.regs.dealloc(reg)
+
+		initBC, rhsOp, err := cs.compileExpression(stmt.Expression, scope, reg)
 		if err != nil {
 			return nil, err
 		}
 
 		bc = append(bc, initBC...)
-
-		if rhsOp != dst {
-			bc = append(bc, Mov{
-				Dst: dst,
-				Src: rhsOp,
-			})
-		}
+		bc = append(bc, Push{
+			Src: rhsOp,
+		})
+		scope.newVar(stmt.Variable.Name())
 
 		return bc, nil
 	case *compiler.AssignmentStatement:
@@ -368,25 +384,18 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 
 		return bc, nil
 	case *compiler.ForStatement:
+		initScope := scope.sub()
+
 		var err error
 		var initBC []Bytecode
 		if stmt.Init != nil {
-			initBC, err = cs.compileStatement(f, stmt.Init, scope)
+			initBC, err = cs.compileStatement(f, stmt.Init, initScope)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		var stepBC []Bytecode
-		if stmt.Step != nil {
-			// variables defined in the step aren't in any real scope
-			stepBC, err = cs.compileStatement(f, stmt.Step, scope.sub())
-			if err != nil {
-				return nil, err
-			}
-		}
-
-		bodyScope := scope.sub()
+		bodyScope := initScope.sub()
 
 		var bodyBC []Bytecode
 		for _, subStmt := range stmt.Body {
@@ -396,6 +405,17 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			}
 
 			bodyBC = append(bodyBC, bodyStmtBC...)
+		}
+
+		stepScope := initScope.sub()
+
+		var stepBC []Bytecode
+		if stmt.Step != nil {
+			// variables defined in the step aren't in any real scope
+			stepBC, err = cs.compileStatement(f, stmt.Step, stepScope)
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		var condBC []Bytecode
@@ -403,7 +423,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			condReg := cs.regs.alloc()
 			defer cs.regs.dealloc(condReg)
 
-			condBC, condReg, err = cs.compileExpression(stmt.Condition, scope, condReg)
+			condBC, condReg, err = cs.compileExpression(stmt.Condition, initScope, condReg)
 			if err != nil {
 				return nil, err
 			}
@@ -411,7 +431,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			condBC = append(condBC, JmpRC{
 				Invert: true,
 				Src:    condReg,
-				Dst:    ImmediateOperand(Int(len(stepBC) + len(bodyBC) + 1)),
+				Dst:    ImmediateOperand(Int(len(stepBC) + len(bodyBC) + 2)),
 			})
 		}
 
@@ -419,19 +439,41 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 		bc = append(bc, condBC...)
 		bc = append(bc, bodyBC...)
 		bc = append(bc, stepBC...)
-		bc = append(bc, JmpR{
-			Dst: ImmediateOperand(Int(-(len(bodyBC) + len(condBC) + len(stepBC) + 1))),
+		bc = append(bc, PopN{
+			Src: ImmediateOperand(Int(max(
+				stepScope.next-initScope.next,
+				bodyScope.next-initScope.next,
+			))),
 		})
+		bc = append(bc, JmpR{
+			Dst: ImmediateOperand(Int(-(len(bodyBC) + len(condBC) + len(stepBC) + 2))),
+		})
+		bc = append(bc, PopN{
+			Src: ImmediateOperand(Int(initScope.next - scope.next)),
+		})
+
+		return bc, nil
+	case *compiler.ExpressionStatement:
+		reg := cs.regs.alloc()
+		defer cs.regs.dealloc(reg)
+
+		exprBC, _, err := cs.compileExpression(stmt.Expression, scope, reg)
+		if err != nil {
+			return nil, err
+		}
+
+		bc = append(bc, exprBC...)
 
 		return bc, nil
 	case *compiler.IfStatement:
 		condReg := cs.regs.alloc()
-		defer cs.regs.dealloc(condReg)
 
-		condBC, condReg, err := cs.compileExpression(stmt.Condition, scope, condReg)
+		condBC, condOp, err := cs.compileExpression(stmt.Condition, scope, condReg)
 		if err != nil {
 			return nil, err
 		}
+
+		cs.regs.dealloc(condReg)
 
 		bodyScope := scope.sub()
 
@@ -443,15 +485,93 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			}
 
 			bodyBC = append(bodyBC, bodyStmtBC...)
+			bodyBC = append(bodyBC, PopN{
+				Src: ImmediateOperand(Int(bodyScope.next - scope.next)),
+			})
 		}
 
 		condBC = append(condBC, JmpRC{
 			Invert: true,
-			Src:    condReg,
+			Src:    condOp,
 			Dst:    ImmediateOperand(Int(len(bodyBC))),
 		})
 
 		bc = append(bc, condBC...)
+		bc = append(bc, bodyBC...)
+
+		if stmt.Else != nil {
+			elseBC, err := cs.compileStatement(f, stmt.Else, scope)
+			if err != nil {
+				return nil, err
+			}
+
+			bc = append(bc, elseBC...)
+		}
+
+		return bc, nil
+	case *compiler.ElseIfStatement:
+		condReg := cs.regs.alloc()
+
+		condBC, condOp, err := cs.compileExpression(stmt.Condition, scope, condReg)
+		if err != nil {
+			return nil, err
+		}
+
+		cs.regs.dealloc(condReg)
+
+		bodyScope := scope.sub()
+
+		var bodyBC []Bytecode
+		for _, subStmt := range stmt.Body {
+			bodyStmtBC, err := cs.compileStatement(f, subStmt, bodyScope)
+			if err != nil {
+				return nil, err
+			}
+
+			bodyBC = append(bodyBC, bodyStmtBC...)
+			bodyBC = append(bodyBC, PopN{
+				Src: ImmediateOperand(Int(bodyScope.next - scope.next)),
+			})
+		}
+
+		condBC = append(condBC, JmpRC{
+			Invert: true,
+			Src:    condOp,
+			Dst:    ImmediateOperand(Int(len(bodyBC))),
+		})
+
+		bc = append(bc, condBC...)
+		bc = append(bc, bodyBC...)
+
+		if stmt.Else != nil {
+			elseBC, err := cs.compileStatement(f, stmt.Else, scope)
+			if err != nil {
+				return nil, err
+			}
+
+			bc = append(bc, elseBC...)
+		}
+
+		return bc, nil
+	case *compiler.ElseStatement:
+		condReg := cs.regs.alloc()
+		defer cs.regs.dealloc(condReg)
+
+		bodyScope := scope.sub()
+
+		var bodyBC []Bytecode
+		for _, subStmt := range stmt.Body {
+			bodyStmtBC, err := cs.compileStatement(f, subStmt, bodyScope)
+			if err != nil {
+				return nil, err
+			}
+
+			bodyBC = append(bodyBC, bodyStmtBC...)
+			bodyBC = append(bodyBC, PopN{
+				Src: ImmediateOperand(Int(bodyScope.next - scope.next)),
+			})
+		}
+
 		bc = append(bc, bodyBC...)
 
 		return bc, nil
@@ -556,6 +676,68 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 		})
 
 		return bc, dst, nil
+	case *compiler.CallExpression:
+		callScope := scope.sub()
+
+		// save registers
+		usedRegs := cs.regs.save()
+		regSlots := make([]Operand, len(usedRegs))
+		for i, regOp := range usedRegs {
+			bc = append(bc, Push{
+				Src: regOp,
+			})
+			regSlots[i] = callScope.newVar(fmt.Sprintf("__arg%d", i))
+		}
+
+		argReg := cs.regs.alloc()
+		for i, arg := range expr.Args {
+			argBC, argOp, err := cs.compileExpression(arg, callScope, argReg)
+			if err != nil {
+				return nil, Operand{}, err
+			}
+
+			bc = append(bc, argBC...)
+			bc = append(bc, Push{
+				Src: argOp,
+			})
+			callScope.newVar(fmt.Sprintf("__arg%d", i))
+		}
+		cs.regs.dealloc(argReg)
+
+		var funcOp Operand
+		// TODO: handle closures/packages/etc
+		switch fexpr := expr.Function.(type) {
+		case *compiler.SymbolReferenceExpression:
+			funcAddr := cs.funcMap["main"][fexpr.Name()]
+			funcOp = Operand{
+				Source: ValueSourceImmediate,
+				Value:  Int(funcAddr),
+			}
+		default:
+			return nil, Operand{}, expr.WrapError(fmt.Errorf("dynamic calls not yet supported"))
+		}
+
+		bc = append(bc, Call{
+			Func: funcOp,
+		})
+
+		for i, regOp := range usedRegs {
+			bc = append(bc, Mov{
+				Src: regSlots[i],
+				Dst: regOp,
+			})
+		}
+
+		bc = append(bc, PopN{
+			Src: ImmediateOperand(Int(len(expr.Args) + len(usedRegs))),
+		})
+
+		bc = append(bc, Push{
+			Src: cs.returnReg,
+		})
+		safeDst := scope.newVar(fmt.Sprintf("__call%d", scope.next))
+
+		return bc, safeDst, nil
 	default:
 		return nil, Operand{}, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}

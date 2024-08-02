@@ -373,14 +373,14 @@ func (t FunctionType) Kind() Kind { return KindFunction }
 func (t FunctionType) Name() string { return fmt.Sprintf("%s.%s", t.scope, t.name) }
 
 func (t FunctionType) String() string {
-	params := make([]string, len(t.parameters))
+	params := make([]string, 0, len(t.parameters))
 	for _, param := range t.parameters {
 		params = append(params, param.String())
 	}
 
 	var retStr string
 	if t.ret != nil {
-		retStr = " " + t.ret.String()
+		retStr = t.ret.String()
 	}
 
 	return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), retStr)

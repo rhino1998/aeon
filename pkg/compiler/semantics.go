@@ -17,6 +17,15 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 	for _, decl := range entry.Declarations {
 		switch decl := decl.(type) {
 		case parser.FunctionDeclaration:
+			pkg.scope.put(SymbolStub(decl.Name))
+		case parser.TypeDeclaration:
+			pkg.scope.put(SymbolStub(decl.Name))
+		}
+	}
+
+	for _, decl := range entry.Declarations {
+		switch decl := decl.(type) {
+		case parser.FunctionDeclaration:
 			err := c.compileFunction(pkg, pkg.scope, decl)
 			if err != nil {
 				var posError *parser.PositionError
@@ -152,8 +161,9 @@ func (c *Compiler) compileFunction(p *Package, scope *Scope, decl parser.Functio
 		}
 
 		f.ret = typ
-
 	}
+
+	f.scope.put(f)
 
 	for _, stmt := range decl.Body {
 		compiledStmt, err := c.compileStatement(f.scope, stmt)
@@ -513,8 +523,8 @@ func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression
 		// TODO: validate argument types
 
 		return &CallExpression{
-			function: funcExpr,
-			args:     exprs,
+			Function: funcExpr,
+			Args:     exprs,
 
 			Position: expr.Position,
 		}, nil

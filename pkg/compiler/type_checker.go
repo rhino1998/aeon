@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"log"
 )
 
 func (c *Compiler) resolveProgramTypes(prog *Program) error {
@@ -418,6 +419,9 @@ func (c *Compiler) resolveExpressionTypes(scope *Scope, expr Expression, bound T
 
 		expr.Right = right
 
+		log.Printf("%T %T", expr.Left, expr.Right)
+		log.Println(expr.Left.Type(), expr.Right.Type())
+
 		typ, err := validateBinaryExpression(expr.Left.Type(), expr.Operator, expr.Right.Type())
 
 		if err != nil {
@@ -436,6 +440,35 @@ func (c *Compiler) resolveExpressionTypes(scope *Scope, expr Expression, bound T
 		}
 
 		expr.Expression = subExpr
+
+		return expr, nil
+	case *CallExpression:
+		fExpr, err := c.resolveExpressionTypes(scope, expr.Function, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		expr.Function = fExpr
+
+		if fExpr.Type().Kind() != KindFunction {
+			return nil, expr.WrapError(fmt.Errorf("cannot call non-function type %v", fExpr.Type()))
+		}
+
+		baseFType := BaseType(fExpr.Type()).(*FunctionType)
+
+		// TODO: variadic
+		if len(baseFType.Parameters()) != len(expr.Args) {
+			return nil, expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(baseFType.Parameters()), len(expr.Args)))
+		} else {
+			for i := range len(expr.Args) {
+				arg, err := c.resolveExpressionTypes(scope, expr.Args[i], baseFType.Parameters()[i])
+				if err != nil {
+					return nil, err
+				}
+
+				expr.Args[i] = arg
+			}
+		}
 
 		return expr, nil
 	default:

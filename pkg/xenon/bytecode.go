@@ -132,6 +132,18 @@ func (Nop) xenon() string {
 	return "nop"
 }
 
+type PopN struct {
+	Src Operand `xc:"s"`
+}
+
+func (p PopN) xenon() string {
+	return "popn"
+}
+
+func (p PopN) String() string {
+	return fmt.Sprintf("POPN %s", p.Src)
+}
+
 type Mov struct {
 	Src Operand `xc:"s"`
 	Dst Operand `xc:"d"`
@@ -240,16 +252,17 @@ func (e CallExtern) xenon() string {
 	return "ext"
 }
 
-type Call[Func any] struct {
-	Func Func `xc:"f"`
+type Call struct {
+	Func Operand `xc:"f"`
 }
 
-func (c Call[Func]) xenon() string {
+func (c Call) String() string {
+	return fmt.Sprintf("CALL %s", c.Func)
+}
+
+func (c Call) xenon() string {
 	return "call"
 }
-
-type CallAddr = Call[Addr]
-type CallClosure = Call[Closure]
 
 func shortKind(k compiler.Kind) string {
 	switch k {

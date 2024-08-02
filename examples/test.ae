@@ -7,26 +7,12 @@ type A *B
 type B int
 
 func main() string {
-  var x int = 5
-  var y = "hello"
-
-  w := 7
-  w += 9
-  w = 10
-
-  x++
-  y+="a"
-
-	z := 0
-
-  for i := 0; i < 2; i++ {
-    for j := 0; j < 40; j++ {
-			 z += 5*5+1
-    }
-  }
-
-
   // test comment
+	//
+	z := 0
+	for i := 0; i < 10; i++ {
+		z+=h(i)
+	}
 
   return z
 }
@@ -34,7 +20,18 @@ func main() string {
 
 func f(a ()) int {}
 
-func g() (int, int) {}
+func g(y int) int{
+	return 3
+}
+
+func h(x int) int {
+	if x <= 0 {
+		return 0
+	} else if x == 1 {
+		return 1
+	}
+	return h(x-1) + h(x-2)
+}
 
 func j() () {}
 
