@@ -1,0 +1,148 @@
+
+const $PAGE_SIZE = 65535
+
+function @aeon_trunc($a:number):number
+	if ($a > 0)
+		return floor($a)
+	return ceil($a)
+
+{{range $page := loop 0 .NumCodePages}}
+array $aeon_code_page_{{$page}}:text
+{{end}}
+
+function @aeon_code($addr:number):text
+	var $page = @aeon_trunc($addr / $PAGE_SIZE)
+	var $pageAddr = @aeon_trunc($addr % $PAGE_SIZE)
+	{{range $page := loop 0 .NumCodePages}}
+	if ($page == {{$page}})
+		return $aeon_code_page_{{$page}}.$pageAddr
+	{{ end }}
+
+function @aeon_code_init()
+	{{range $page := loop 0 .NumCodePages}}
+	$aeon_code_page_{{$page}}.fill($PAGE_SIZE, "")
+	{{end}}
+
+{{range $page := loop 0 .NumMemPages}}
+array $aeon_mem_page_{{$page}}:text
+{{end}}
+
+function @aeon_mem_load($addr:number):text
+	var $page = @aeon_trunc($addr / $PAGE_SIZE)
+	var $pageAddr = @aeon_trunc($addr % $PAGE_SIZE)
+	{{range $page := loop 0 .NumMemPages}}
+	if ($page == {{$page}})
+		return $aeon_mem_page_{{$page}}.$pageAddr
+	{{end}}
+
+function @aeon_mem_store($addr:number, $value:text):text
+	var $page = @aeon_trunc($addr / $PAGE_SIZE)
+	var $pageAddr = @aeon_trunc($addr % $PAGE_SIZE)
+
+	{{range $page := loop 0 .NumMemPages}}
+	if ($page == {{$page}})
+		$aeon_mem_page_{{$page}}.$pageAddr = $value
+	{{end}}
+
+function @aeon_mem_init()
+	{{range $page := loop 0 .NumMemPages}}
+	$aeon_mem_page_{{$page}}.fill($PAGE_SIZE, "")
+	{{end}}
+
+{{range $i := loop 0 .NumRegisters}}
+var $aeon_reg{{$i}}:text
+{{end}}
+
+function @aeon_reg_load($reg:number):text
+	{{range $i := loop 0 .NumRegisters}}
+	if ($reg == {{$i}})
+		return $aeon_reg{{$i}}
+	{{end}}
+
+function @aeon_reg_store($reg:number, $value:text):text
+	{{range $i := loop 0 .NumRegisters}}
+	if ($reg == {{$i}})
+		$aeon_reg{{$i}} = $value
+	{{end}}
+
+function @aeon_load($op:text, $fp:number):text
+	if ($op.s == "M")
+		return @aeon_mem_load($op.v:number)
+	elseif ($op.s == "R")
+		return @aeon_reg_load($op.v:number)
+	elseif ($op.s == "L")
+		return @aeon_mem_load($op.v:number + $fp)
+	elseif ($op.s == "I")
+		return $op.v
+
+function @aeon_store($op:text, $fp:number, $value:text)
+	if ($op.s == "M")
+		@aeon_mem_store($op.v:number, $value)
+	elseif ($op.s == "R")
+		@aeon_reg_store($op.v:number, $value)
+	elseif ($op.s == "L")
+		@aeon_mem_store($op.v:number + $fp, $value)
+
+function @aeon_add_int($a:text, $b:text):text
+	return (@aeon_trunc($a:number) + @aeon_trunc($b:number)):text
+
+function @aeon_add_float($a:text, $b:text):text
+	return ($a:number + $b:number):text
+
+function @aeon_add_string($a:text, $b:text):text
+	return $a & $b
+
+function @aeon_sub_int($a:text, $b:text):text
+	return (@aeon_trunc($a:number) - @aeon_trunc($b:number)):text
+
+function @aeon_sub_float($a:text, $b:text):text
+	return ($a:number - $b:number):text
+
+function @aeon_bop($op:text, $a:text, $b:text):text
+	$op = $a.k & $op & $b.k
+
+	if ($op == "I+I")
+		return @aeon_add_int($a, $b)
+	elseif ($op == "F+F")
+		return @aeon_add_float($a, $b)
+	elseif ($op == "S+S")
+		return @aeon_add_string($a, $b)
+	elseif ($op == "I-I")
+		return @aeon_add_int($a, $b)
+	elseif ($op == "F-F")
+		return @aeon_add_float($a, $b)
+
+	else
+		var $x = 5
+		var $y = $x:text
+
+function @aeon_run($pc:number):text
+	var $fp = 2
+	var $sp = 3
+
+	while (1)
+		var $bc = @aeon_code($pc)
+		$pc++
+
+		if ($bc.t == "nop")
+			continue
+		elseif ($bc.t == "push")
+			@aeon_mem_store($sp, @aeon_load($bc.s))
+			$sp++
+		elseif ($bc.t == "bop")
+			@aeon_store($bc.d, @aeon_bop($bc.op, $bc.l, $bc.r))
+		elseif ($bc.t == "mov")
+			@aeon_store($bc.d, @aeon_load($bc.s))
+		elseif ($bc.t == "jmp")
+			$pc = @aeon_load($bc.s):number
+		elseif ($bc.t == "jmpr")
+			$pc += @aeon_load($bc.d):number
+		elseif ($bc.t == "jmprc")
+			var $cond = @aeon_load($bc.s):number
+			if ($cond xor ($bc.i:number))
+				$pc += @aeon_load($bc.d):number
+
+init
+	@aeon_code_init()
+	@aeon_mem_init()
+	print("hello")

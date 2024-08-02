@@ -224,7 +224,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 		bc = append(bc, Mov{
 			Dst: Operand{
 				Kind:   stmt.Variable.Type().Kind(),
-				Source: ValueSourceOffset,
+				Source: ValueSourceLocal,
 				Value:  scope.newVar(stmt.Variable.Name()),
 			},
 			Src: Operand{
@@ -245,7 +245,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 		bc = append(bc, Mov{
 			Dst: Operand{
 				Kind:   stmt.Variable.Type().Kind(),
-				Source: ValueSourceOffset,
+				Source: ValueSourceLocal,
 				Value:  scope.newVar(stmt.Variable.Name()),
 			},
 			Src: Operand{
@@ -271,7 +271,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			bc = append(bc, Mov{
 				Dst: Operand{
 					Kind:   lhs.Type().Kind(),
-					Source: ValueSourceOffset,
+					Source: ValueSourceLocal,
 					Value:  scope.offset(lhs.Name()),
 				},
 				Src: Operand{
@@ -321,12 +321,12 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			Op: operator,
 			Dst: Operand{
 				Kind:   stmt.Left.Type().Kind(),
-				Source: ValueSourceOffset,
+				Source: ValueSourceLocal,
 				Value:  lhsOffset,
 			},
 			Left: Operand{
 				Kind:   stmt.Left.Type().Kind(),
-				Source: ValueSourceOffset,
+				Source: ValueSourceLocal,
 				Value:  lhsOffset,
 			},
 			Right: Operand{
@@ -361,12 +361,12 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 			Op: operator,
 			Dst: Operand{
 				Kind:   stmt.Expression.Type().Kind(),
-				Source: ValueSourceOffset,
+				Source: ValueSourceLocal,
 				Value:  lhsOffset,
 			},
 			Left: Operand{
 				Kind:   stmt.Expression.Type().Kind(),
-				Source: ValueSourceOffset,
+				Source: ValueSourceLocal,
 				Value:  lhsOffset,
 			},
 			Right: Operand{
@@ -689,7 +689,7 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 			},
 			Src: Operand{
 				Kind:   expr.Type().Kind(),
-				Source: ValueSourceOffset,
+				Source: ValueSourceLocal,
 				Value:  scope.offset(expr.Name()),
 			},
 		})

@@ -14,8 +14,12 @@ var (
 	sliceType = reflect.TypeOf(Slice{})
 )
 
-func marshalKV(v reflect.Value) ([]byte, error) {
+func marshalXenon(v reflect.Value) ([]byte, error) {
 	t := v.Type()
+
+	if marshaller, ok := v.Interface().(XenonMarshaller); ok {
+		return marshaller.MarshalXenon()
+	}
 
 	switch t.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -33,7 +37,7 @@ func marshalKV(v reflect.Value) ([]byte, error) {
 			return []byte("0"), nil
 		}
 	case reflect.Pointer:
-		return marshalKV(v.Elem())
+		return marshalXenon(v.Elem())
 	case reflect.Map:
 		var buf bytes.Buffer
 
@@ -55,7 +59,7 @@ func marshalKV(v reflect.Value) ([]byte, error) {
 				keyStr = "_" + keyStr
 			}
 
-			valBytes, err := marshalKV(val)
+			valBytes, err := marshalXenon(val)
 			if err != nil {
 				return nil, fmt.Errorf("failed to marshal value for key %v: %w", keyStr, err)
 			}
@@ -81,16 +85,20 @@ func marshalKV(v reflect.Value) ([]byte, error) {
 			val[key] = fieldVal.Interface()
 		}
 
-		return MarshalKV(val)
+		return MarshalXenon(val)
 	case reflect.Interface:
-		return MarshalKV(v.Interface())
+		return MarshalXenon(v.Interface())
 	default:
 		return nil, fmt.Errorf("unhandled type %v", t)
 	}
 }
 
-func MarshalKV(val any) ([]byte, error) {
+func MarshalXenon(val any) ([]byte, error) {
 	v := reflect.ValueOf(val)
 
-	return marshalKV(v)
+	return marshalXenon(v)
+}
+
+type XenonMarshaller interface {
+	MarshalXenon() ([]byte, error)
 }

@@ -63,10 +63,28 @@ func main() {
 						return fmt.Errorf("failed to initialize compiler: %w", err)
 					}
 
-					_, err = compiler.Compile(ctx)
+					prog, err := compiler.Compile(ctx)
 					if err != nil {
 						return err
 					}
+
+					bc, funcMap, err := xenon.Compile(prog)
+					if err != nil {
+						return err
+					}
+
+					out, err := os.Create("main.xc")
+					if err != nil {
+						return err
+					}
+					defer out.Close()
+
+					err = xenon.EmitXenonCode(out, bc)
+					if err != nil {
+						return err
+					}
+
+					var _ = funcMap
 
 					return nil
 				},
@@ -165,6 +183,11 @@ func main() {
 					}
 
 					bc, funcMap, err := xenon.Compile(prog)
+					if err != nil {
+						return err
+					}
+
+					err = xenon.EmitXenonCode(os.Stdout, bc)
 					if err != nil {
 						return err
 					}

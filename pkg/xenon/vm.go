@@ -181,9 +181,9 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			return loadI(operand.Value.(Immediate))
 		case ValueSourceRegister:
 			return loadR(operand.Value.(Register))
-		case ValueSourceAddress:
+		case ValueSourceMemory:
 			return loadM(operand.Value.(Addr))
-		case ValueSourceOffset:
+		case ValueSourceLocal:
 			return loadO(operand.Value.(AddrOffset))
 		default:
 			return func() (any, error) {
@@ -227,9 +227,9 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		switch operand.Source {
 		case ValueSourceRegister:
 			return storeR(operand.Value.(Register))
-		case ValueSourceAddress:
+		case ValueSourceMemory:
 			return storeM(operand.Value.(Addr))
-		case ValueSourceOffset:
+		case ValueSourceLocal:
 			return storeO(operand.Value.(AddrOffset))
 		default:
 			return func(any, error) error {
@@ -376,10 +376,6 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 
 				pc = pc.Offset(AddrOffset(val.(Int)))
 			}
-		case ConvertIntFloat:
-			r.registers[code.Register] = Float(r.registers[code.Register].(Int))
-		case ConvertFloatInt:
-			r.registers[code.Register] = Int(r.registers[code.Register].(Float))
 		case Make[Tuple, Register]:
 			r.registers[code.Dst] = make(Tuple, code.Size)
 		case SetIndex[Tuple, Register, Immediate, Register]:

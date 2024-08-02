@@ -12,13 +12,30 @@ type ValueSource int
 const (
 	ValueSourceImmediate ValueSource = 0
 	ValueSourceRegister  ValueSource = 1
-	ValueSourceAddress   ValueSource = 2
-	ValueSourceOffset    ValueSource = 3
+	ValueSourceMemory    ValueSource = 2
+	ValueSourceLocal     ValueSource = 3
 )
+
+func (s ValueSource) MarshalXenon() ([]byte, error) {
+	switch s {
+	case ValueSourceImmediate:
+		return []byte("I"), nil
+	case ValueSourceMemory:
+		return []byte("M"), nil
+	case ValueSourceRegister:
+		return []byte("R"), nil
+	case ValueSourceLocal:
+		return []byte("L"), nil
+	default:
+		return nil, fmt.Errorf("invalid value source %x", s)
+	}
+}
 
 const FrameSize = 3
 
-type Bytecode interface{}
+type Bytecode interface {
+	xenon() string
+}
 
 type Int int64
 
@@ -111,9 +128,17 @@ func (Nop) String() string {
 	return "NOP"
 }
 
+func (Nop) xenon() string {
+	return "nop"
+}
+
 type Mov struct {
-	Src Operand
-	Dst Operand
+	Src Operand `xc:"s"`
+	Dst Operand `xc:"d"`
+}
+
+func (m Mov) xenon() string {
+	return "mov"
 }
 
 func (m Mov) String() string {
@@ -125,8 +150,12 @@ type Store struct {
 	Dst Operand `xc:"d"`
 }
 
-func (m Store) String() string {
-	return fmt.Sprintf("Store *%v = %v", m.Dst, m.Src)
+func (s Store) String() string {
+	return fmt.Sprintf("Store *%v = %v", s.Dst, s.Src)
+}
+
+func (s Store) xenon() string {
+	return "store"
 }
 
 type Load struct {
@@ -138,12 +167,20 @@ func (m Load) String() string {
 	return fmt.Sprintf("Load %v = *%v", m.Dst, m.Src)
 }
 
+func (m Load) xenon() string {
+	return "load"
+}
+
 type Push struct {
 	Src Operand `xc:"s"`
 }
 
 func (p Push) String() string {
 	return fmt.Sprintf("PUSH %v", p.Src)
+}
+
+func (p Push) xenon() string {
+	return "push"
 }
 
 type Convert[To, From any] struct {
@@ -153,21 +190,10 @@ type Convert[To, From any] struct {
 type ConvertIntFloat = Convert[int64, float64]
 type ConvertFloatInt = Convert[float64, int64]
 
-type Add[T Int | Float | String, Dst, A, B any] struct {
-	A   A
-	B   B
-	Dst Dst
-}
-
-func (o Add[T, Dst, A, B]) String() string {
-	var t T
-	return fmt.Sprintf("ADD(%T) %v + %v = %v", t, o.A, o.B, o.Dst)
-}
-
 type Operand struct {
-	Kind   compiler.Kind
-	Source ValueSource
-	Value  any
+	Kind   compiler.Kind `xc:"k"`
+	Source ValueSource   `xc:"s"`
+	Value  any           `xc:"v"`
 }
 
 func (o Operand) String() string {
@@ -175,10 +201,14 @@ func (o Operand) String() string {
 }
 
 type BinOp struct {
-	Op    compiler.Operator
-	Dst   Operand
-	Left  Operand
-	Right Operand
+	Op    compiler.Operator `xc:"o"`
+	Dst   Operand           `xc:"d"`
+	Left  Operand           `xc:"l"`
+	Right Operand           `xc:"r"`
+}
+
+func (o BinOp) xenon() string {
+	return "bop"
 }
 
 func (o BinOp) String() string {
@@ -189,6 +219,10 @@ type Return struct {
 	Register Register `xc:"r"`
 }
 
+func (r Return) xenon() string {
+	return "ret"
+}
+
 func (r Return) String() string {
 	return fmt.Sprintf("RET %v", r.Register)
 }
@@ -197,8 +231,17 @@ type CallExtern struct {
 	Args   int
 	Extern string
 }
+
+func (e CallExtern) xenon() string {
+	return "ext"
+}
+
 type Call[Func any] struct {
 	Func Func `xc:"f"`
+}
+
+func (c Call[Func]) xenon() string {
+	return "call"
 }
 
 type CallAddr = Call[Addr]
@@ -206,6 +249,10 @@ type CallClosure = Call[Closure]
 
 type Jmp struct {
 	Dst Operand `xc:"d"`
+}
+
+func (j Jmp) xenon() string {
+	return "jmp"
 }
 
 func (j Jmp) String() string {
@@ -216,14 +263,22 @@ type JmpR struct {
 	Dst Operand `xc:"d"`
 }
 
+func (j JmpR) xenon() string {
+	return "jmpr"
+}
+
 func (j JmpR) String() string {
 	return fmt.Sprintf("JMPR %v", j.Dst)
 }
 
 type JmpRC struct {
-	Invert bool
+	Invert bool    `xc:"i"`
 	Src    Operand `xc:"d"`
 	Dst    Operand `xc:"d"`
+}
+
+func (j JmpRC) xenon() string {
+	return "jmprc"
 }
 
 func (j JmpRC) String() string {
@@ -235,8 +290,12 @@ func (j JmpRC) String() string {
 }
 
 type Make[T, Dst any] struct {
-	Dst  Dst
-	Size int
+	Dst  Dst `xc:"d"`
+	Size int `xc:"s"`
+}
+
+func (Make[T, Dst]) xenon() string {
+	return "make"
 }
 
 func (m Make[T, Dst]) Striung() string {
@@ -246,19 +305,27 @@ func (m Make[T, Dst]) Striung() string {
 
 type MakeTupleR = Make[Tuple, Register]
 
-type Index[T, Base, Index, Dst any] struct {
-	Base  Base
-	Index Index
-	Dst   Dst
+type Index[T, Base, Idx, Dst any] struct {
+	Base  Base `xc:"b"`
+	Index Idx  `xc:"i"`
+	Dst   Dst  `xc:"d"`
+}
+
+func (Index[T, Base, Idx, Dst]) xenon() string {
+	return "ind"
 }
 
 type IndexTupleRRR = Index[Tuple, Register, Register, Register]
 type IndexTupleRIR = Index[Tuple, Register, Register, Register]
 
 type SetIndex[T, Base, Index, Src any] struct {
-	Base  Base
-	Index Index
-	Src   Src
+	Base  Base  `xc:"b"`
+	Index Index `xc:"i"`
+	Src   Src   `xc:"s"`
+}
+
+func (SetIndex[T, Base, Idx, Src]) xenon() string {
+	return "set"
 }
 
 type SetIndexTupleRRR = SetIndex[Tuple, Register, Register, Register]
