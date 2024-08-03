@@ -139,6 +139,16 @@ type FunctionDeclaration struct {
 	Position
 }
 
+type ExternFunctionDeclaration struct {
+	baseDeclaration
+
+	Name       Identifier
+	Parameters []Parameter
+	Return     Type
+
+	Position
+}
+
 type VarDeclaration struct {
 	baseDeclaration
 

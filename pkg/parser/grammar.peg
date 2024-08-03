@@ -53,7 +53,7 @@ File <- pkg:Package __ decls:(Declaration)* EOF {
   }, nil
 }
 
-Keyword <- "map" / "func" / "if" / "else" / "for" / "package" / "var"
+Keyword <- "map" / "func" / "if" / "else" / "for" / "package" / "var" / "extern"
 
 Package <- "package" _ name:Identifier {
   return Package{
@@ -61,7 +61,7 @@ Package <- "package" _ name:Identifier {
   }, nil
 }
 
-Declaration <- _ decl:(FunctionDeclaration / TypeDeclaration / VarDeclaration) __ {
+Declaration <- _ decl:(FunctionDeclaration / ExternFuncDeclaration / TypeDeclaration / VarDeclaration) __ {
   return decl, nil
 }
 
@@ -244,6 +244,14 @@ ReturnStatement <- "return" _ expr:Expr? {
     Expr: maybe[Expr](expr),
 
     Position: pos(c),
+  }, nil
+}
+
+ExternFuncDeclaration <- "extern" _ "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ {
+  return ExternFunctionDeclaration{
+    Name: name.(Identifier),
+    Parameters: maybeSlice[Parameter](params),
+    Return: maybe[Type](ret),
   }, nil
 }
 

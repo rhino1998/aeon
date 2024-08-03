@@ -2,6 +2,7 @@ package xenon
 
 import (
 	"fmt"
+	"log"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
 )
@@ -9,11 +10,12 @@ import (
 type compilerState struct {
 	prog *compiler.Program
 
-	regs      *RegisterState
-	returnReg Operand
-	constMap  map[string]map[string]Immediate
-	globalMap map[string]map[string]Addr
-	funcMap   map[string]map[string]Addr
+	regs          *RegisterState
+	returnReg     Operand
+	constMap      map[string]map[string]Immediate
+	globalMap     map[string]map[string]Addr
+	externFuncMap map[string]*compiler.FunctionType
+	funcMap       map[string]map[string]Addr
 }
 
 func Compile(prog *compiler.Program) ([]Bytecode, map[string]map[string]Addr, error) {
@@ -29,12 +31,17 @@ func Compile(prog *compiler.Program) ([]Bytecode, map[string]map[string]Addr, er
 func newCompilerState() *compilerState {
 	regs := newRegisterState()
 	return &compilerState{
-		regs:      regs,
-		returnReg: regs.alloc(), // reserve reg 01 as the return register
-		constMap:  make(map[string]map[string]Immediate),
-		globalMap: make(map[string]map[string]Addr),
-		funcMap:   make(map[string]map[string]Addr),
+		regs:          regs,
+		returnReg:     regs.alloc(), // reserve reg 01 as the return register
+		constMap:      make(map[string]map[string]Immediate),
+		globalMap:     make(map[string]map[string]Addr),
+		externFuncMap: make(map[string]*compiler.FunctionType),
+		funcMap:       make(map[string]map[string]Addr),
 	}
+}
+
+func (cs *compilerState) registerExternFunc(ftype *compiler.FunctionType) {
+	cs.externFuncMap[ftype.Name()] = ftype
 }
 
 func (cs *compilerState) registerFunc(pkg, name string, addr Addr) {
@@ -74,6 +81,10 @@ func (cs *compilerState) compile(prog *compiler.Program) ([]Bytecode, error) {
 		var _ = pkg
 	}
 
+	for _, externFunc := range prog.ExternFuncs() {
+		cs.registerExternFunc(externFunc)
+	}
+
 	for _, pkg := range prog.Packages() {
 		for _, pkgFunc := range pkg.Functions() {
 			funcAddr := Addr(len(bc))
@@ -108,11 +119,16 @@ func (r *Scope) newVar(name string) Operand {
 	}
 }
 
-func (r *Scope) offset(name string) Operand {
-	return Operand{
-		Value:  r.varNames[name],
-		Source: ValueSourceLocal,
+func (r *Scope) offset(name string) (Operand, bool) {
+	off, ok := r.varNames[name]
+	if !ok {
+		return Operand{}, false
 	}
+
+	return Operand{
+		Value:  off,
+		Source: ValueSourceLocal,
+	}, true
 }
 
 func (r *Scope) sub() *Scope {
@@ -150,9 +166,10 @@ func newRegisterState() *RegisterState {
 
 func (r *RegisterState) save() []Operand {
 	ops := make([]Operand, 0, r.maxRegister)
+	log.Println(r.maxRegister)
 
 	// skip reg0
-	for i := Register(1); i < r.maxRegister; i++ {
+	for i := Register(1); i <= r.maxRegister; i++ {
 		if _, ok := r.registers[i]; !ok {
 			continue
 		}
@@ -206,7 +223,7 @@ func (cs *compilerState) compileFunction(f *compiler.Function) ([]Bytecode, erro
 			continue
 		}
 
-		scope.setVar(param.Name(), -AddrOffset(FrameSize+i))
+		scope.setVar(param.Name(), -AddrOffset(FrameSize+i+15))
 	}
 
 	for _, stmt := range f.Body() {
@@ -273,7 +290,12 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 		var lhsOp Operand
 		switch lhs := stmt.Left.(type) {
 		case *compiler.SymbolReferenceExpression:
-			lhsOp = scope.offset(lhs.Name())
+			op, ok := scope.offset(lhs.Name())
+			if !ok {
+				return nil, stmt.WrapError(fmt.Errorf("could not resolve name %q for assignment", lhs.Name()))
+			}
+
+			lhsOp = op
 		default:
 			return nil, stmt.WrapError(fmt.Errorf("unhandled LHS type in assigment: %T", lhs))
 		}
@@ -295,9 +317,14 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 	case *compiler.AssignmentOperatorStatement:
 		var lhsOp Operand
 		// TODO: complex LHS
-		switch expr := stmt.Left.(type) {
+		switch lhs := stmt.Left.(type) {
 		case *compiler.SymbolReferenceExpression:
-			lhsOp = scope.offset(expr.Name())
+			op, ok := scope.offset(lhs.Name())
+			if !ok {
+				return nil, stmt.WrapError(fmt.Errorf("could not resolve name %q for assignment", lhs.Name()))
+			}
+
+			lhsOp = op
 		default:
 			return nil, stmt.WrapError(fmt.Errorf("unhandled LHS type in assigment: %T", stmt.Left))
 		}
@@ -337,9 +364,14 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 	case *compiler.PostfixStatement:
 		var lhsOp Operand
 		// TODO: complex LHS
-		switch expr := stmt.Expression.(type) {
+		switch lhs := stmt.Expression.(type) {
 		case *compiler.SymbolReferenceExpression:
-			lhsOp = scope.offset(expr.Name())
+			op, ok := scope.offset(lhs.Name())
+			if !ok {
+				return nil, stmt.WrapError(fmt.Errorf("could not resolve name %q for assignment", lhs.Name()))
+			}
+
+			lhsOp = op
 		default:
 			return nil, stmt.WrapError(fmt.Errorf("unhandled LHS type in assigment: %T", stmt.Expression))
 		}
@@ -598,10 +630,9 @@ func (cs *compilerState) makeZeroValue(typ compiler.Type, dst Operand) ([]Byteco
 			return nil, Operand{}, fmt.Errorf("unhandled zero value for type %s", typ)
 		}
 
-		return nil, Operand{
-			Source: ValueSourceImmediate,
-			Value:  imm,
-		}, nil
+		return nil, ImmediateOperand(imm), nil
+	case *compiler.PointerType:
+		return nil, ImmediateOperand(Addr(0)), nil
 	case *compiler.TupleType:
 		elems := typ.Elems()
 		bc = append(bc, Make{
@@ -647,8 +678,14 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 	case *compiler.Literal[bool]:
 		return nil, ImmediateOperand(Bool(expr.Value())), nil
 	case *compiler.SymbolReferenceExpression:
+		op, ok := scope.offset(expr.Name())
+		if ok {
+			return nil, op, nil
+		}
+
 		// TODO: handle globals
-		return nil, scope.offset(expr.Name()), nil
+
+		return nil, Operand{}, expr.WrapError(fmt.Errorf("could not resolve name %q for assignment", expr.Name()))
 	case *compiler.ParenthesizedExpression:
 		return cs.compileExpression(expr.Expression, scope, dst)
 	case *compiler.BinaryExpression:
@@ -676,18 +713,46 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 		})
 
 		return bc, dst, nil
+	case *compiler.UnaryExpression:
+		srcBC, srcOp, err := cs.compileExpression(expr.Expression, scope, dst)
+		if err != nil {
+			return nil, Operand{}, err
+		}
+
+		bc = append(bc, srcBC...)
+
+		switch expr.Operator {
+		case compiler.OperatorAddress:
+			// TODO: escape analysis
+			switch subExpr := expr.Expression.(type) {
+			case *compiler.SymbolReferenceExpression:
+				offset, ok := scope.offset(subExpr.Name())
+				if !ok {
+					// TODO: globals
+					return nil, Operand{}, expr.WrapError(fmt.Errorf("could not resolve address of %v", subExpr.Name()))
+				}
+
+				bc = append(bc, LAddr{
+					Dst: dst,
+					Src: ImmediateOperand(Int(offset.Value.(AddrOffset))),
+				})
+
+				return bc, dst, nil
+			default:
+				return nil, Operand{}, fmt.Errorf("address of non-symbol expressions is not currently supported")
+			}
+
+		default:
+			bc = append(bc, UnOp{
+				Op:  UnaryOperator(expr.Operator, expr.Expression.Type().Kind()),
+				Dst: dst,
+				Src: srcOp,
+			})
+		}
+
+		return bc, dst, nil
 	case *compiler.CallExpression:
 		callScope := scope.sub()
-
-		// save registers
-		usedRegs := cs.regs.save()
-		regSlots := make([]Operand, len(usedRegs))
-		for i, regOp := range usedRegs {
-			bc = append(bc, Push{
-				Src: regOp,
-			})
-			regSlots[i] = callScope.newVar(fmt.Sprintf("__arg%d", i))
-		}
 
 		argReg := cs.regs.alloc()
 		for i, arg := range expr.Args {
@@ -708,7 +773,31 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 		// TODO: handle closures/packages/etc
 		switch fexpr := expr.Function.(type) {
 		case *compiler.SymbolReferenceExpression:
-			funcAddr := cs.funcMap["main"][fexpr.Name()]
+			maybeFType := compiler.BaseType(fexpr.Type())
+			_, ok := maybeFType.(*compiler.FunctionType)
+			if !ok {
+				return nil, Operand{}, expr.WrapError(fmt.Errorf("cannot call non-function value of type: %v", maybeFType))
+			}
+
+			funcAddr, ok := cs.funcMap["main"][fexpr.Name()]
+			if !ok {
+				log.Println(cs.externFuncMap)
+				if _, ok := cs.externFuncMap[fexpr.Name()]; ok {
+					bc = append(bc, CallExtern{
+						Func: fexpr.Name(),
+					})
+
+					bc = append(bc, Push{
+						Src: cs.returnReg,
+					})
+					safeDst := scope.newVar(fmt.Sprintf("__call%d", scope.next))
+
+					return bc, safeDst, nil
+				}
+
+				return nil, Operand{}, expr.WrapError(fmt.Errorf("unresolved function address %q", fexpr.Name()))
+			}
+
 			funcOp = Operand{
 				Source: ValueSourceImmediate,
 				Value:  Int(funcAddr),
@@ -721,23 +810,16 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 			Func: funcOp,
 		})
 
-		for i, regOp := range usedRegs {
-			bc = append(bc, Mov{
-				Src: regSlots[i],
-				Dst: regOp,
-			})
-		}
-
 		bc = append(bc, PopN{
-			Src: ImmediateOperand(Int(len(expr.Args) + len(usedRegs))),
+			Src: ImmediateOperand(Int(len(expr.Args))),
 		})
 
-		bc = append(bc, Push{
+		bc = append(bc, Mov{
 			Src: cs.returnReg,
+			Dst: dst,
 		})
-		safeDst := scope.newVar(fmt.Sprintf("__call%d", scope.next))
 
-		return bc, safeDst, nil
+		return bc, dst, nil
 	default:
 		return nil, Operand{}, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}

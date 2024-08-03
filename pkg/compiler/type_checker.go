@@ -457,11 +457,11 @@ func (c *Compiler) resolveExpressionTypes(scope *Scope, expr Expression, bound T
 		baseFType := BaseType(fExpr.Type()).(*FunctionType)
 
 		// TODO: variadic
-		if len(baseFType.Parameters()) != len(expr.Args) {
-			return nil, expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(baseFType.Parameters()), len(expr.Args)))
+		if len(baseFType.Parameters) != len(expr.Args) {
+			return nil, expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(baseFType.Parameters), len(expr.Args)))
 		} else {
 			for i := range len(expr.Args) {
-				arg, err := c.resolveExpressionTypes(scope, expr.Args[i], baseFType.Parameters()[i])
+				arg, err := c.resolveExpressionTypes(scope, expr.Args[i], baseFType.Parameters[i])
 				if err != nil {
 					return nil, err
 				}

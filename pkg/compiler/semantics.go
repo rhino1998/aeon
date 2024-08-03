@@ -20,6 +20,8 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 			pkg.scope.put(SymbolStub(decl.Name))
 		case parser.TypeDeclaration:
 			pkg.scope.put(SymbolStub(decl.Name))
+		case parser.ExternFunctionDeclaration:
+			pkg.scope.put(SymbolStub(decl.Name))
 		}
 	}
 
@@ -45,10 +47,58 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 
 				return err
 			}
+		case parser.ExternFunctionDeclaration:
+			err := c.compileExternFunctionDeclaration(pkg, pkg.scope, decl)
+			if err != nil {
+				var posError *parser.PositionError
+				if !errors.As(err, &posError) {
+					return FileError{File: filename, Err: err}
+				}
+
+				return err
+			}
 		}
 	}
 
 	return nil
+}
+
+func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *Scope, decl parser.ExternFunctionDeclaration) error {
+	f := &ExternFunction{
+		name: string(decl.Name),
+	}
+
+	for _, param := range decl.Parameters {
+		var paramName string
+		if param.Name != nil {
+			paramName = string(*param.Name)
+		}
+
+		typ, err := c.compileTypeReference(scope, param.Type)
+		if err != nil {
+			return err
+		}
+
+		variable := &Variable{
+			name: paramName,
+			typ:  typ,
+		}
+
+		f.parameters = append(f.parameters, variable)
+	}
+
+	if decl.Return != nil {
+		typ, err := c.compileTypeReference(scope, decl.Return)
+		if err != nil {
+			return err
+		}
+
+		f.ret = typ
+	}
+
+	p.prog.externFuncs[f.Name()] = f.Type().(*FunctionType)
+
+	return scope.put(f)
 }
 
 func (c *Compiler) compileTypeDeclaration(p *Package, scope *Scope, decl parser.TypeDeclaration) error {

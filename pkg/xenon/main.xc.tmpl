@@ -1,4 +1,9 @@
 
+
+function @print($s:text)
+	print($s)
+
+
 const $PAGE_SIZE = {{.PageSize}}
 
 {{range $page := loop 0 .NumCodePages -}}
@@ -125,8 +130,29 @@ function @aeon_lt($a:text, $b:text):text
 function @aeon_gt($a:text, $b:text):text
 	return ($a:number > $b:number):text
 
+function @aeon_lte($a:text, $b:text):text
+	return ($a:number < $b:number):text
+
+function @aeon_gte($a:text, $b:text):text
+	return ($a:number > $b:number):text
+
 function @aeon_eq($a:text, $b:text):text
 	return ($a:number == $b:number):text
+
+function @aeon_ne($a:text, $b:text):text
+	return ($a:number == $b:number):text
+
+function @aeon_extern_args($bc:text):number
+	{{ range $entry := .ExternFuncs }}
+	if ($bc.f == "{{$entry.Name}}")
+		return {{len $entry.ArgTypes}}
+	{{ end }}
+
+function @aeon_call_extern($bc:text, $sp:number):text
+	{{ range $entry := .ExternFuncs }}
+	if ($bc.f == "{{$entry.Name}}")
+		{{if $entry.HasReturn}}return{{end}} @{{$entry.Name}}({{range $i, $t := $entry.ArgTypes}}{{if $i }},{{end}}@aeon_mem_load($sp-{{len $entry.ArgTypes}}+{{$i}}){{$t}}{{end}})
+	{{ end }}
 
 function @aeon_bop($op:text, $a:text, $b:text, $fp:number):text
 	var $av = @aeon_load($a, $fp)
@@ -164,25 +190,49 @@ function @aeon_bop($op:text, $a:text, $b:text, $fp:number):text
 		return @aeon_lt($av, $bv)
 	elseif ($op == "F>F")
 		return @aeon_gt($av, $bv)
+	elseif ($op == "I<=I")
+		return @aeon_lte($av, $bv)
+	elseif ($op == "I>=I")
+		return @aeon_gte($av, $bv)
+	elseif ($op == "F<=F")
+		return @aeon_lte($av, $bv)
+	elseif ($op == "F>=F")
+		return @aeon_gte($av, $bv)
 	elseif ($op == "I==I")
-		return @aeon_gt($av, $bv)
+		return @aeon_eq($av, $bv)
 	elseif ($op == "F==F")
-		return @aeon_gt($av, $bv)
-	elseif ($op == "B==B")
-		return @aeon_gt($av, $bv)
+		return @aeon_eq($av, $bv)
 	elseif ($op == "S==S")
-		return @aeon_gt($av, $bv)
+		return @aeon_eq($av, $bv)
+	elseif ($op == "B==B")
+		return @aeon_eq($av, $bv)
+	elseif ($op == "I!=I")
+		return @aeon_ne($av, $bv)
+	elseif ($op == "F!=F")
+		return @aeon_ne($av, $bv)
+	elseif ($op == "S!=S")
+		return @aeon_ne($av, $bv)
+	elseif ($op == "B!=B")
+		return @aeon_ne($av, $bv)
 	else
 		print(text("bad binary operand {} {} {}", $op, $a, $b))
 		@aeon_fatal()
 
 function @aeon_run($pc:number):text
-	var $fp = 2
-	var $sp = 3
+	var $sp = 0
 
-	@aeon_mem_store(0, "0")
-	@aeon_mem_store(1, "0")
-	@aeon_mem_store(2, "0")
+	repeat 15 ($i)
+		@aeon_mem_store($i, "")
+		$sp++
+
+	@aeon_mem_store($sp, "0")
+	$sp++
+	@aeon_mem_store($sp, "0")
+	$sp++
+	@aeon_mem_store($sp, "0")
+	$sp++
+
+	var $fp = $sp - 1
 
 	var $i = 0
 
@@ -191,7 +241,7 @@ function @aeon_run($pc:number):text
 
 		var $bc = @aeon_code($pc)
 		$pc++
-		print(text("{} {} {}", $i, $pc, $bc))
+		;print(text("{} {} {}", $i, $pc, $bc))
 
 		if ($bc.t == "nop")
 			continue
@@ -210,8 +260,36 @@ function @aeon_run($pc:number):text
 			var $cond = @aeon_load($bc.s, $fp):number
 			if ($cond xor ($bc.i:number))
 				$pc += @aeon_load($bc.d, $fp):number
+		elseif ($bc.t == "popn")
+			$sp -= @aeon_load($bc.s, $fp):number
+		elseif ($bc.t == "ext")
+			@aeon_reg_store(0, @aeon_call_extern($bc, $sp))
+			$sp -= @aeon_extern_args($bc)
+		elseif ($bc.t == "call")
+			foreach $aeon_reg ($reg, $val)
+				if $reg != 0
+					@aeon_mem_store($sp, $val)
+					$sp++
+
+			var $funcAddr = @aeon_load($bc.f, $fp)
+			@aeon_mem_store($sp, $sp:text)
+			$sp++
+			@aeon_mem_store($sp, $fp:text)
+			$sp++
+			@aeon_mem_store($sp, $pc:text)
+			$sp++
+
+			$fp = $sp-1
+			$pc = $funcAddr
 		elseif ($bc.t == "ret")
-			return @aeon_reg_load(0)
+			foreach $aeon_reg ($reg, $val)
+				if $reg != 0
+					@aeon_reg_store($reg, @aeon_mem_load($fp-3-($reg-2)))
+			$pc = @aeon_mem_load($fp):number
+			$sp = @aeon_mem_load($fp - 2):number
+			$fp = @aeon_mem_load($fp - 1):number
+			if ($fp == 0)
+				return @aeon_reg_load(0)
 		else
 			print("fail", $bc)
 			@aeon_fatal()

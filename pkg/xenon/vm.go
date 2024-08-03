@@ -8,18 +8,40 @@ import (
 	"strings"
 )
 
+type RuntimeExternFuncEntry struct {
+	Args int
+	Func RuntimeExternFunc
+}
+
+func DefaultExternFuncs() RuntimeExternFuncs {
+	return RuntimeExternFuncs{
+		"print": {
+			Args: 1,
+			Func: func(s []any) any {
+				log.Println(s[0])
+				return String("")
+			},
+		},
+		"panic": {
+			Args: 1,
+			Func: func(s []any) any {
+				panic(s[0])
+			},
+		},
+	}
+}
+
 const PageSize = 65535 // annoyingly not a power of 2
 
-type ExternFuncs map[string]ExternFunc
+type RuntimeExternFuncs map[string]RuntimeExternFuncEntry
 
-type ExternFunc func([]any) any
+type RuntimeExternFunc func([]any) any
 
 type Runtime struct {
-	externs ExternFuncs
+	externFuncs RuntimeExternFuncs
 
 	codePages [][PageSize]Bytecode
 
-	ret       any
 	registers []any
 
 	sp Addr
@@ -28,9 +50,9 @@ type Runtime struct {
 	memPages [][PageSize]any
 }
 
-func NewRuntime(prog []Bytecode, externs ExternFuncs, memPages int, registers int) (*Runtime, error) {
+func NewRuntime(prog []Bytecode, externs RuntimeExternFuncs, memPages int, registers int) (*Runtime, error) {
 	r := &Runtime{
-		externs: externs,
+		externFuncs: externs,
 
 		codePages: make([][PageSize]Bytecode, (len(prog)+PageSize-1)/PageSize),
 		memPages:  make([][PageSize]any, memPages),
@@ -44,6 +66,9 @@ func NewRuntime(prog []Bytecode, externs ExternFuncs, memPages int, registers in
 		page, pageAddr := r.splitAddr(Addr(i))
 		r.codePages[page][pageAddr] = code
 	}
+	for range registers - 1 {
+		r.push(nil)
+	}
 
 	err := r.push(Addr(0))
 	if err != nil {
@@ -51,6 +76,8 @@ func NewRuntime(prog []Bytecode, externs ExternFuncs, memPages int, registers in
 	}
 	r.push(Addr(0))
 	r.push(Addr(0))
+
+	r.fp = r.sp - 1
 
 	return r, nil
 }
@@ -87,13 +114,15 @@ func (r *Runtime) load(addr Addr) (any, error) {
 	return r.memPages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadArgs(addr Addr, num int) ([]any, error) {
+func (r *Runtime) loadArgs(sp Addr, num int) ([]any, error) {
 	var args []any
 	for i := 0; i < num; i++ {
-		arg, err := r.load(addr.Offset(AddrOffset(-i)))
+		arg, err := r.load(sp.Offset(AddrOffset(-(i + 1))))
 		if err != nil {
 			return nil, err
 		}
+
+		log.Printf("%d %v", i, arg)
 
 		args = append(args, arg)
 	}
@@ -234,10 +263,6 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		}
 	}
 
-	// Fake frame
-	r.sp = 3
-	r.fp = 2
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -255,6 +280,7 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		log.Printf("%s", code)
 		log.Printf("fp: %v", r.fp)
 		log.Printf("sp: %v", r.sp)
+		log.Printf("pc: %v", pc)
 		r.printRegisters()
 		r.printStack()
 
@@ -296,12 +322,21 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 				return err
 			}
 		case Call:
+			sp := r.sp
+
+			for reg, val := range r.registers[1:] {
+				err := r.push(val)
+				if err != nil {
+					return fmt.Errorf("failed to push %s", Register(reg))
+				}
+			}
+
 			funcAddr, err := load(code.Func)()
 			if err != nil {
 				return fmt.Errorf("could not resolve function addr")
 			}
 
-			err = r.push(r.sp)
+			err = r.push(sp)
 			if err != nil {
 				return fmt.Errorf("failed to push sp: %w", err)
 			}
@@ -319,12 +354,25 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			r.fp = r.sp - 1
 			pc = Addr(funcAddr.(Int)) // TODO: add proper pointer type
 		case CallExtern:
-			args, err := r.loadArgs(r.sp, code.Args)
-			if err != nil {
-				return fmt.Errorf("failed to load %d args for extern %q", code.Args, code.Extern)
+			entry, ok := r.externFuncs[code.Func]
+			if !ok {
+				return fmt.Errorf("undefined extern func %q", code.Func)
 			}
-			r.ret = r.externs[code.Extern](args)
+
+			args, err := r.loadArgs(r.sp, entry.Args)
+			if err != nil {
+				return fmt.Errorf("failed to load %d args for extern %q", entry.Args, code.Func)
+			}
+			r.registers[0] = entry.Func(args)
+			r.sp -= Addr(entry.Args)
 		case Return:
+			for reg := range r.registers[1:] {
+				r.registers[reg+1], err = r.load(r.fp - FrameSize - (Addr(reg)))
+				if err != nil {
+					return fmt.Errorf("failed to push %s", Register(reg))
+				}
+			}
+
 			pc, err = loadType[Addr](r, r.fp)
 			if err != nil {
 				return fmt.Errorf("failed to load pc from fp: %w", err)
@@ -339,8 +387,6 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 			if err != nil {
 				return fmt.Errorf("failed to load fp from fp-1: %w", err)
 			}
-
-			r.zeroStack()
 
 			// exit completely
 			if r.fp == 0 {
@@ -433,6 +479,35 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 					load(code.Right),
 				),
 			)
+		case UnOp:
+			switch code.Op {
+			case "*P":
+				addr, err := load(code.Src)()
+				if err != nil {
+					return err
+				}
+
+				if addr.(Addr) == 0 {
+					return fmt.Errorf("nil pointer dereference")
+				}
+
+				err = store(code.Dst)(loadM(addr.(Addr))())
+				if err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("unrecognized unary operator %q", code.Op)
+			}
+		case LAddr:
+			offset, err := load(code.Src)()
+			if err != nil {
+				return err
+			}
+
+			err = store(code.Dst)(r.fp.Offset(AddrOffset(offset.(Int))), nil)
+			if err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unrecognized bytecode: %T %v", code, code)
 		}
@@ -572,10 +647,10 @@ func (r *Runtime) printStack() {
 	for {
 		val, err := r.load(addr)
 		if err != nil {
-			return
+			panic(err)
 		}
 
-		if val == nil {
+		if addr == r.sp {
 			return
 		}
 

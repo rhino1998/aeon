@@ -99,6 +99,8 @@ func IsTypeResolvable(s *Scope, typ Type) bool {
 		return false
 	case *BasicType:
 		return IsKnownType(s, typ)
+	case *PointerType:
+		return IsTypeResolvable(s, typ.Pointee())
 	case *DerivedType:
 		return IsTypeResolvable(s, typ.Underlying())
 	case *SliceType:
@@ -114,14 +116,14 @@ func IsTypeResolvable(s *Scope, typ Type) bool {
 
 		return true
 	case *FunctionType:
-		for _, param := range typ.Parameters() {
+		for _, param := range typ.Parameters {
 			if !IsTypeResolvable(s, param) {
 				return false
 			}
 		}
 
-		if typ.ret != nil {
-			if !IsTypeResolvable(s, typ.ret) {
+		if typ.Return != nil {
+			if !IsTypeResolvable(s, typ.Return) {
 				return false
 			}
 		}
@@ -364,32 +366,24 @@ type StructField struct {
 type FunctionType struct {
 	name       string
 	scope      string
-	parameters []Type
-	ret        Type
+	Parameters []Type
+	Return     Type
 }
 
 func (t FunctionType) Kind() Kind { return KindFunction }
 
-func (t FunctionType) Name() string { return fmt.Sprintf("%s.%s", t.scope, t.name) }
+func (t FunctionType) Name() string { return t.name }
 
 func (t FunctionType) String() string {
-	params := make([]string, 0, len(t.parameters))
-	for _, param := range t.parameters {
+	params := make([]string, 0, len(t.Parameters))
+	for _, param := range t.Parameters {
 		params = append(params, param.String())
 	}
 
 	var retStr string
-	if t.ret != nil {
-		retStr = t.ret.String()
+	if t.Return != nil {
+		retStr = t.Return.String()
 	}
 
 	return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), retStr)
-}
-
-func (t FunctionType) Parameters() []Type {
-	return t.parameters
-}
-
-func (t FunctionType) Return() Type {
-	return t.ret
 }

@@ -47,27 +47,10 @@ const (
 	OperatorMultiplyEquals Operator = "*="
 	OperatorDivideEquals   Operator = "/="
 	OperatorModuloEquals   Operator = "%="
+
+	OperatorAddress     Operator = "&"
+	OperatorDereference Operator = "*"
 )
-
-var binaryOperatorNumericKinds = map[[2]Kind]Kind{
-	{KindFloat, KindFloat}: KindFloat,
-	{KindInt, KindInt}:     KindInt,
-}
-
-var binaryOperatorComparisonKinds = map[[2]Kind]Kind{
-	{KindFloat, KindFloat}:   KindBool,
-	{KindInt, KindInt}:       KindBool,
-	{KindString, KindString}: KindBool,
-	{KindBool, KindBool}:     KindBool,
-}
-
-var binaryOperatorIntegerKinds = map[[2]Kind]Kind{
-	{KindInt, KindInt}: KindInt,
-}
-
-var binaryOperatorBooleanKinds = map[[2]Kind]Kind{
-	{KindBool, KindBool}: KindBool,
-}
 
 func validateBinaryExpression(left Type, operator Operator, right Type) (Type, error) {
 	kind := binaryOperatorKinds[BinaryOperatorKinds{operator, left.Kind(), right.Kind()}]
@@ -141,21 +124,16 @@ var binaryOperatorKinds = map[BinaryOperatorKinds]Kind{
 	{OperatorGreaterThanOrEqual, KindFloat, KindFloat}: KindBool,
 }
 
-var unaryOperatorNumericKinds = map[Kind]Kind{
-	KindInt:   KindInt,
-	KindFloat: KindFloat,
-}
-
-var unaryOperatorIntegerKinds = map[Kind]Kind{
-	KindInt: KindInt,
-}
-
-var unaryOperatorBooleanKinds = map[Kind]Kind{
-	KindBool: KindBool,
-}
-
 func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
-	kind := unaryOperatorKinds[operator][expr.Kind()]
+	if operator == OperatorDereference {
+		if expr.Kind() != KindPointer {
+			return nil, fmt.Errorf("cannot dereference non-pointer type: %v", expr)
+		}
+
+		return BaseType(expr).(*PointerType).Pointee(), nil
+	}
+
+	kind := unaryOperatorKinds[UnaryOperatorKinds{Operator: operator, Operand: expr.Kind()}]
 	if kind == KindUnknown {
 		return nil, fmt.Errorf("invalid unary operator %q for kind %q", operator, expr.Kind())
 	}
@@ -167,15 +145,13 @@ func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
 	return expr, nil
 }
 
-var unaryOperatorKinds = map[Operator]map[Kind]Kind{
-	OperatorNegate:    unaryOperatorNumericKinds,
-	OperatorPositive:  unaryOperatorNumericKinds,
-	OperatorIncrement: unaryOperatorNumericKinds,
-	OperatorDecrement: unaryOperatorNumericKinds,
+var unaryOperatorKinds = map[UnaryOperatorKinds]Kind{
+	//{OperatorDereference, KindPointer}: KindAny,
 
-	OperatorBitwiseNot: unaryOperatorIntegerKinds,
-
-	OperatorNot: unaryOperatorBooleanKinds,
+	{OperatorAddress, KindPointer}: KindPointer,
+	{OperatorAddress, KindInt}:     KindPointer,
+	{OperatorAddress, KindFloat}:   KindPointer,
+	{OperatorAddress, KindString}:  KindPointer,
 }
 
 type BinaryExpression struct {
@@ -220,4 +196,9 @@ func (e *UnaryExpression) Type() Type {
 type BinaryOperatorKinds struct {
 	Operator    Operator
 	Left, Right Kind
+}
+
+type UnaryOperatorKinds struct {
+	Operator Operator
+	Operand  Kind
 }

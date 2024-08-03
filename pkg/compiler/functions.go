@@ -35,8 +35,8 @@ func (f *Function) Type() Type {
 	return &FunctionType{
 		name:       f.name,
 		scope:      scope,
-		parameters: paramTypes,
-		ret:        f.ret,
+		Parameters: paramTypes,
+		Return:     f.ret,
 	}
 }
 
@@ -60,11 +60,36 @@ type CallExpression struct {
 }
 
 func (e *CallExpression) Type() Type {
-	return BaseType(e.Function.Type()).(*FunctionType).Return()
+	return BaseType(e.Function.Type()).(*FunctionType).Return
 }
 
 type ReturnStatement struct {
 	Expression Expression
 
 	parser.Position
+}
+
+type ExternFunction struct {
+	name string
+
+	parameters []*Variable
+	ret        Type
+}
+
+func (f *ExternFunction) Name() string {
+	return f.name
+}
+
+func (f *ExternFunction) Type() Type {
+	var paramTypes []Type
+	for _, param := range f.parameters {
+		paramTypes = append(paramTypes, param.Type())
+	}
+
+	return &FunctionType{
+		name:       f.name,
+		scope:      "@extern",
+		Parameters: paramTypes,
+		Return:     f.ret,
+	}
 }

@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"text/template"
+
+	"github.com/rhino1998/aeon/pkg/compiler"
 )
 
 //go:embed main.xc.tmpl
@@ -16,17 +18,26 @@ type PageAddr struct {
 	Addr int
 }
 
+type ExternFuncEntry struct {
+	ArgTypes  []string
+	HasReturn bool
+	Name      string
+}
+
+type ExternFuncs []ExternFuncEntry
+
 type xenonContext struct {
 	PageSize     int
 	NumCodePages int
 	Code         map[PageAddr]string
 	MainFunc     int
 
+	ExternFuncs  []ExternFuncEntry
 	NumMemPages  int
 	NumRegisters int
 }
 
-func EmitXenonCode(w io.Writer, bcs []Bytecode, funcs map[string]map[string]Addr) error {
+func EmitXenonCode(w io.Writer, bcs []Bytecode, funcs map[string]map[string]Addr, externFuncs []*compiler.FunctionType) error {
 	var xeCtx xenonContext
 	xeCtx.PageSize = PageSize
 	xeCtx.NumCodePages = (len(bcs) + xeCtx.PageSize) / xeCtx.PageSize
@@ -36,6 +47,23 @@ func EmitXenonCode(w io.Writer, bcs []Bytecode, funcs map[string]map[string]Addr
 	xeCtx.Code = make(map[PageAddr]string)
 
 	log.Printf("Program BC:%d PageSize:%d", len(bcs), xeCtx.PageSize)
+
+	for _, extern := range externFuncs {
+		argTypes := make([]string, 0)
+		for _, param := range extern.Parameters {
+			var argType string
+			if param.Kind() == compiler.KindInt || param.Kind() == compiler.KindBool || param.Kind() == compiler.KindFloat {
+				argType = ":number"
+			}
+
+			argTypes = append(argTypes, argType)
+		}
+		xeCtx.ExternFuncs = append(xeCtx.ExternFuncs, ExternFuncEntry{
+			ArgTypes:  argTypes,
+			HasReturn: extern.Return != nil,
+			Name:      extern.Name(),
+		})
+	}
 
 	for i, bc := range bcs {
 		bcBytes, err := marshalByteCode(bc)

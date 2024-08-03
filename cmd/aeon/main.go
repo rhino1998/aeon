@@ -79,7 +79,7 @@ func main() {
 					}
 					defer out.Close()
 
-					err = xenon.EmitXenonCode(out, bc, funcMap)
+					err = xenon.EmitXenonCode(out, bc, funcMap, prog.ExternFuncs())
 					if err != nil {
 						return err
 					}
@@ -185,12 +185,7 @@ func main() {
 						return err
 					}
 
-					err = xenon.EmitXenonCode(os.Stdout, bc, funcMap)
-					if err != nil {
-						return err
-					}
-
-					runtime, err := xenon.NewRuntime(bc, nil, 5, 16)
+					runtime, err := xenon.NewRuntime(bc, xenon.DefaultExternFuncs(), 5, 16)
 					if err != nil {
 						return err
 					}

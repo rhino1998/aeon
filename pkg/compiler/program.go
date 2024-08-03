@@ -1,17 +1,23 @@
 package compiler
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 )
 
 type Program struct {
 	root *Scope
+
+	externFuncs map[string]*FunctionType
 }
 
 func newProgram() *Program {
 	p := &Program{
 		root: builtins(),
+
+		externFuncs: make(map[string]*FunctionType),
 	}
 
 	return p
@@ -27,6 +33,19 @@ func (p *Program) Packages() []*Package {
 
 func (p *Program) Function(qualifiedName string) (*Function, error) {
 	return scopedFunction(p.root, qualifiedName)
+}
+
+func (p *Program) ExternFuncs() []*FunctionType {
+	exts := make([]*FunctionType, 0, len(p.externFuncs))
+	for _, ext := range p.externFuncs {
+		exts = append(exts, ext)
+	}
+
+	slices.SortStableFunc(exts, func(a, b *FunctionType) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return exts
 }
 
 type Package struct {

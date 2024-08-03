@@ -73,6 +73,8 @@ func (r Register) String() string {
 
 type Addr uint64
 
+func (Addr) immediate() {}
+
 func (a Addr) String() string {
 	return fmt.Sprintf("0x%08x", uint64(a))
 }
@@ -218,6 +220,20 @@ func ImmediateOperand(imm Immediate) Operand {
 	}
 }
 
+type UnOp struct {
+	Op  Operator `xc:"o"`
+	Dst Operand  `xc:"d"`
+	Src Operand  `xc:"s"`
+}
+
+func (o UnOp) xenon() string {
+	return "uop"
+}
+
+func (o UnOp) String() string {
+	return fmt.Sprintf("unOp(%s) %v = %v %v", o.Op, o.Dst, o.Op, o.Src)
+}
+
 type BinOp struct {
 	Op    Operator `xc:"o"`
 	Dst   Operand  `xc:"d"`
@@ -244,8 +260,11 @@ func (r Return) String() string {
 }
 
 type CallExtern struct {
-	Args   int
-	Extern string
+	Func string `xc:"f"`
+}
+
+func (e CallExtern) String() string {
+	return fmt.Sprintf("CALL %s", e.Func)
 }
 
 func (e CallExtern) xenon() string {
@@ -275,7 +294,7 @@ func shortKind(k compiler.Kind) string {
 	case compiler.KindString:
 		return "S"
 	case compiler.KindPointer:
-		return "*"
+		return "P"
 	case compiler.KindTuple:
 		return "T"
 	case compiler.KindSlice:
@@ -293,6 +312,10 @@ type Operator string
 
 func BinaryOperator(left compiler.Kind, op compiler.Operator, right compiler.Kind) Operator {
 	return Operator(fmt.Sprintf("%s%s%s", shortKind(left), string(op), shortKind(right)))
+}
+
+func UnaryOperator(op compiler.Operator, operand compiler.Kind) Operator {
+	return Operator(fmt.Sprintf("%s%s", string(op), shortKind(operand)))
 }
 
 type Jmp struct {
@@ -371,4 +394,17 @@ type SetIndex struct {
 
 func (SetIndex) xenon() string {
 	return "set"
+}
+
+type LAddr struct {
+	Dst Operand `xc:"d"`
+	Src Operand `xc:"s"`
+}
+
+func (LAddr) xenon() string {
+	return "laddr"
+}
+
+func (a LAddr) String() string {
+	return fmt.Sprintf("LADDR %s", a.Src)
 }
