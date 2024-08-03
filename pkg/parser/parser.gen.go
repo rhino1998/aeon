@@ -2327,7 +2327,7 @@ var g = &grammar{
 				pos:  position{line: 387, col: 9, offset: 8296},
 				name: "MaybeOrExpr",
 			},
-			leader:        true,
+			leader:        false,
 			leftRecursive: true,
 		},
 		{
@@ -2385,7 +2385,7 @@ var g = &grammar{
 					},
 				},
 			},
-			leader:        false,
+			leader:        true,
 			leftRecursive: true,
 		},
 		{

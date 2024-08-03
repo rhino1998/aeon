@@ -769,50 +769,12 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 		}
 		cs.regs.dealloc(argReg)
 
-		var funcOp Operand
-		// TODO: handle closures/packages/etc
-		switch fexpr := expr.Function.(type) {
-		case *compiler.SymbolReferenceExpression:
-			maybeFType := compiler.BaseType(fexpr.Type())
-			_, ok := maybeFType.(*compiler.FunctionType)
-			if !ok {
-				return nil, Operand{}, expr.WrapError(fmt.Errorf("cannot call non-function value of type: %v", maybeFType))
-			}
-
-			funcAddr, ok := cs.funcMap["main"][fexpr.Name()]
-			if !ok {
-				log.Println(cs.externFuncMap)
-				if _, ok := cs.externFuncMap[fexpr.Name()]; ok {
-					bc = append(bc, CallExtern{
-						Func: fexpr.Name(),
-					})
-
-					bc = append(bc, Push{
-						Src: cs.returnReg,
-					})
-					safeDst := scope.newVar(fmt.Sprintf("__call%d", scope.next))
-
-					return bc, safeDst, nil
-				}
-
-				return nil, Operand{}, expr.WrapError(fmt.Errorf("unresolved function address %q", fexpr.Name()))
-			}
-
-			funcOp = Operand{
-				Source: ValueSourceImmediate,
-				Value:  Int(funcAddr),
-			}
-		default:
-			return nil, Operand{}, expr.WrapError(fmt.Errorf("dynamic calls not yet supported"))
+		callBC, err := cs.compileFunctionCall(expr.Function, scope)
+		if err != nil {
+			return nil, Operand{}, err
 		}
 
-		bc = append(bc, Call{
-			Func: funcOp,
-		})
-
-		bc = append(bc, PopN{
-			Src: ImmediateOperand(Int(len(expr.Args))),
-		})
+		bc = append(bc, callBC...)
 
 		bc = append(bc, Mov{
 			Src: cs.returnReg,
@@ -822,5 +784,50 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 		return bc, dst, nil
 	default:
 		return nil, Operand{}, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
+	}
+}
+
+func (cs *compilerState) compileFunctionCall(expr compiler.Expression, scope *Scope) ([]Bytecode, error) {
+	var bc []Bytecode
+
+	switch expr := expr.(type) {
+	case *compiler.ParenthesizedExpression:
+		return cs.compileFunctionCall(expr.Expression, scope)
+	case *compiler.SymbolReferenceExpression:
+		funcAddr, ok := cs.funcMap["main"][expr.Name()]
+		if ok {
+			// static function call
+			bc = append(bc, Call{
+				Func: ImmediateOperand(Int(funcAddr)),
+			})
+
+			ftype := compiler.BaseType(expr.Type()).(*compiler.FunctionType)
+
+			bc = append(bc, PopN{
+				Src: ImmediateOperand(Int(len(ftype.Parameters))),
+			})
+
+			return bc, nil
+		}
+
+		if _, ok := cs.externFuncMap[expr.Name()]; ok {
+			// extern function call
+
+			bc = append(bc, CallExtern{
+				Func: expr.Name(),
+			})
+
+			return bc, nil
+		}
+
+		// TODO: dynamic function calls & closures
+
+		return nil, fmt.Errorf("cannot use non-static function references")
+	case *compiler.DotExpression:
+		// TODO: methods
+
+		return nil, fmt.Errorf("cannot use a %T as a function reference yet", expr)
+	default:
+		return nil, fmt.Errorf("cannot use a %T as a function reference yet", expr)
 	}
 }

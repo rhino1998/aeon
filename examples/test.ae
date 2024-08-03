@@ -6,15 +6,21 @@ type A *B
 
 type B int
 
+extern func print(string)
+
 func main() string {
   // test comment
 	//
-	z := 0
-	for i := 0; i < 10; i++ {
-		z+=h(i)
-	}
+	i := 0
+	var x *int
+	x = &i
+	print(*x)
+	print("HELLO")
+	print(i)
+	print(h(1))
+	print(h(1))
 
-  return z
+  return ""
 }
 
 
@@ -25,12 +31,7 @@ func g(y int) int{
 }
 
 func h(x int) int {
-	if x <= 0 {
-		return 0
-	} else if x == 1 {
-		return 1
-	}
-	return h(x-1) + h(x-2)
+	return 3
 }
 
 func j() () {}
