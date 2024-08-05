@@ -11,7 +11,7 @@ type compilerState struct {
 	prog *compiler.Program
 
 	regs          *RegisterState
-	returnReg     Operand
+	returnReg     *Operand
 	constMap      map[string]map[string]Immediate
 	globalMap     map[string]map[string]Addr
 	externFuncMap map[string]*compiler.FunctionType
@@ -119,13 +119,13 @@ func (r *Scope) newVar(name string) Operand {
 	}
 }
 
-func (r *Scope) offset(name string) (Operand, bool) {
+func (r *Scope) offset(name string) (*Operand, bool) {
 	off, ok := r.varNames[name]
 	if !ok {
-		return Operand{}, false
+		return nil, false
 	}
 
-	return Operand{
+	return &Operand{
 		Value:  off,
 		Source: ValueSourceLocal,
 	}, true
@@ -164,8 +164,8 @@ func newRegisterState() *RegisterState {
 	return regs
 }
 
-func (r *RegisterState) save() []Operand {
-	ops := make([]Operand, 0, r.maxRegister)
+func (r *RegisterState) save() []*Operand {
+	ops := make([]*Operand, 0, r.maxRegister)
 	log.Println(r.maxRegister)
 
 	// skip reg0
@@ -174,7 +174,7 @@ func (r *RegisterState) save() []Operand {
 			continue
 		}
 
-		ops = append(ops, Operand{
+		ops = append(ops, &Operand{
 			Source: ValueSourceRegister,
 			Value:  i,
 		})
@@ -183,7 +183,7 @@ func (r *RegisterState) save() []Operand {
 	return ops
 }
 
-func (r *RegisterState) alloc() Operand {
+func (r *RegisterState) alloc() *Operand {
 	var reg Register
 	for {
 		_, ok := r.registers[reg]
@@ -192,7 +192,7 @@ func (r *RegisterState) alloc() Operand {
 			if r.maxRegister < reg {
 				r.maxRegister = reg
 			}
-			return Operand{
+			return &Operand{
 				Source: ValueSourceRegister,
 				Value:  reg,
 			}
@@ -201,7 +201,7 @@ func (r *RegisterState) alloc() Operand {
 	}
 }
 
-func (r *RegisterState) dealloc(reg Operand) {
+func (r *RegisterState) dealloc(reg *Operand) {
 	delete(r.registers, reg.Value.(Register))
 }
 
@@ -211,7 +211,7 @@ func (cs *compilerState) compileFunction(f *compiler.Function) ([]Bytecode, erro
 	scope := newScope()
 
 	bc = append(bc, Push{
-		Src: Operand{
+		Src: &Operand{
 			Source: ValueSourceImmediate,
 			Value:  String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
 		},
@@ -250,7 +250,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 		reg := cs.regs.alloc()
 		defer cs.regs.dealloc(reg)
 
-		var rhsOp Operand
+		var rhsOp *Operand
 		if stmt.Expression != nil {
 			initBC, rhsOp, err = cs.compileExpression(stmt.Expression, scope, reg)
 			if err != nil {
@@ -287,7 +287,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 
 		return bc, nil
 	case *compiler.AssignmentStatement:
-		var lhsOp Operand
+		var lhsOp *Operand
 		switch lhs := stmt.Left.(type) {
 		case *compiler.SymbolReferenceExpression:
 			op, ok := scope.offset(lhs.Name())
@@ -315,7 +315,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 
 		return bc, nil
 	case *compiler.AssignmentOperatorStatement:
-		var lhsOp Operand
+		var lhsOp *Operand
 		// TODO: complex LHS
 		switch lhs := stmt.Left.(type) {
 		case *compiler.SymbolReferenceExpression:
@@ -362,7 +362,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 
 		return bc, nil
 	case *compiler.PostfixStatement:
-		var lhsOp Operand
+		var lhsOp *Operand
 		// TODO: complex LHS
 		switch lhs := stmt.Expression.(type) {
 		case *compiler.SymbolReferenceExpression:
@@ -612,7 +612,7 @@ func (cs *compilerState) compileStatement(f *compiler.Function, stmt compiler.St
 	}
 }
 
-func (cs *compilerState) makeZeroValue(typ compiler.Type, dst Operand) ([]Bytecode, Operand, error) {
+func (cs *compilerState) makeZeroValue(typ compiler.Type, dst *Operand) ([]Bytecode, *Operand, error) {
 	var bc []Bytecode
 	switch typ := compiler.BaseType(typ).(type) {
 	case *compiler.BasicType:
@@ -627,7 +627,7 @@ func (cs *compilerState) makeZeroValue(typ compiler.Type, dst Operand) ([]Byteco
 		case compiler.KindBool:
 			imm = Bool(false)
 		default:
-			return nil, Operand{}, fmt.Errorf("unhandled zero value for type %s", typ)
+			return nil, nil, fmt.Errorf("unhandled zero value for type %s", typ)
 		}
 
 		return nil, ImmediateOperand(imm), nil
@@ -645,7 +645,7 @@ func (cs *compilerState) makeZeroValue(typ compiler.Type, dst Operand) ([]Byteco
 			elemReg := cs.regs.alloc()
 			elemBC, elemDst, err := cs.makeZeroValue(elem, elemReg)
 			if err != nil {
-				return nil, Operand{}, fmt.Errorf("tuple index %d: ", i)
+				return nil, nil, fmt.Errorf("tuple index %d: ", i)
 			}
 
 			bc = append(bc, elemBC...)
@@ -662,11 +662,11 @@ func (cs *compilerState) makeZeroValue(typ compiler.Type, dst Operand) ([]Byteco
 
 		return bc, dst, nil
 	default:
-		return nil, Operand{}, fmt.Errorf("unhandled zero value for type %s", typ)
+		return nil, nil, fmt.Errorf("unhandled zero value for type %s", typ)
 	}
 }
 
-func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scope, dst Operand) ([]Bytecode, Operand, error) {
+func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scope, dst *Operand) ([]Bytecode, *Operand, error) {
 	var bc []Bytecode
 	switch expr := expr.(type) {
 	case *compiler.Literal[int64]:
@@ -685,13 +685,13 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 
 		// TODO: handle globals
 
-		return nil, Operand{}, expr.WrapError(fmt.Errorf("could not resolve name %q for assignment", expr.Name()))
+		return nil, nil, expr.WrapError(fmt.Errorf("could not resolve name %q for assignment", expr.Name()))
 	case *compiler.ParenthesizedExpression:
 		return cs.compileExpression(expr.Expression, scope, dst)
 	case *compiler.BinaryExpression:
 		lhsBC, lhsOp, err := cs.compileExpression(expr.Left, scope, dst)
 		if err != nil {
-			return nil, Operand{}, err
+			return nil, nil, err
 		}
 
 		bc = append(bc, lhsBC...)
@@ -699,7 +699,7 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 		rhsReg := cs.regs.alloc()
 		rhsBC, rhsOp, err := cs.compileExpression(expr.Right, scope, rhsReg)
 		if err != nil {
-			return nil, Operand{}, err
+			return nil, nil, err
 		}
 		defer cs.regs.dealloc(rhsReg)
 
@@ -716,7 +716,7 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 	case *compiler.UnaryExpression:
 		srcBC, srcOp, err := cs.compileExpression(expr.Expression, scope, dst)
 		if err != nil {
-			return nil, Operand{}, err
+			return nil, nil, err
 		}
 
 		bc = append(bc, srcBC...)
@@ -729,7 +729,7 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 				offset, ok := scope.offset(subExpr.Name())
 				if !ok {
 					// TODO: globals
-					return nil, Operand{}, expr.WrapError(fmt.Errorf("could not resolve address of %v", subExpr.Name()))
+					return nil, nil, expr.WrapError(fmt.Errorf("could not resolve address of %v", subExpr.Name()))
 				}
 
 				bc = append(bc, LAddr{
@@ -739,7 +739,7 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 
 				return bc, dst, nil
 			default:
-				return nil, Operand{}, fmt.Errorf("address of non-symbol expressions is not currently supported")
+				return nil, nil, fmt.Errorf("address of non-symbol expressions is not currently supported")
 			}
 
 		default:
@@ -758,7 +758,7 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 		for i, arg := range expr.Args {
 			argBC, argOp, err := cs.compileExpression(arg, callScope, argReg)
 			if err != nil {
-				return nil, Operand{}, err
+				return nil, nil, err
 			}
 
 			bc = append(bc, argBC...)
@@ -771,7 +771,7 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 
 		callBC, err := cs.compileFunctionCall(expr.Function, scope)
 		if err != nil {
-			return nil, Operand{}, err
+			return nil, nil, err
 		}
 
 		bc = append(bc, callBC...)
@@ -783,7 +783,7 @@ func (cs *compilerState) compileExpression(expr compiler.Expression, scope *Scop
 
 		return bc, dst, nil
 	default:
-		return nil, Operand{}, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
+		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
 }
 

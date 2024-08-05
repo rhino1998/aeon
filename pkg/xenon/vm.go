@@ -200,7 +200,7 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		})
 	}
 
-	load := func(operand Operand) loadFunc {
+	load := func(operand *Operand) loadFunc {
 		switch operand.Source {
 		case ValueSourceImmediate:
 			return loadI(operand.Value.(Immediate))
@@ -248,7 +248,7 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		}
 	}
 
-	store := func(operand Operand) storeFunc {
+	store := func(operand *Operand) storeFunc {
 		switch operand.Source {
 		case ValueSourceRegister:
 			return storeR(operand.Value.(Register))

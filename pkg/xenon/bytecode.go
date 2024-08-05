@@ -10,10 +10,11 @@ import (
 type ValueSource int
 
 const (
-	ValueSourceImmediate ValueSource = 0
-	ValueSourceRegister  ValueSource = 1
-	ValueSourceMemory    ValueSource = 2
-	ValueSourceLocal     ValueSource = 3
+	ValueSourceImmediate     ValueSource = 0
+	ValueSourceRegister      ValueSource = 1
+	ValueSourceMemory        ValueSource = 2
+	ValueSourceLocal         ValueSource = 3
+	ValueSourceIndirectLocal ValueSource = 4
 )
 
 func (s ValueSource) MarshalXenon() ([]byte, error) {
@@ -26,6 +27,8 @@ func (s ValueSource) MarshalXenon() ([]byte, error) {
 		return []byte("R"), nil
 	case ValueSourceLocal:
 		return []byte("L"), nil
+	case ValueSourceIndirectLocal:
+		return []byte("*"), nil
 	default:
 		return nil, fmt.Errorf("invalid value source %x", s)
 	}
@@ -135,7 +138,7 @@ func (Nop) xenon() string {
 }
 
 type PopN struct {
-	Src Operand `xc:"s"`
+	Src *Operand `xc:"s"`
 }
 
 func (p PopN) xenon() string {
@@ -147,8 +150,8 @@ func (p PopN) String() string {
 }
 
 type Mov struct {
-	Src Operand `xc:"s"`
-	Dst Operand `xc:"d"`
+	Src *Operand `xc:"s"`
+	Dst *Operand `xc:"d"`
 }
 
 func (m Mov) xenon() string {
@@ -160,8 +163,8 @@ func (m Mov) String() string {
 }
 
 type Store struct {
-	Src Operand `xc:"s"`
-	Dst Operand `xc:"d"`
+	Src *Operand `xc:"s"`
+	Dst *Operand `xc:"d"`
 }
 
 func (s Store) String() string {
@@ -173,8 +176,8 @@ func (s Store) xenon() string {
 }
 
 type Load struct {
-	Src Operand `xc:"s"`
-	Dst Operand `xc:"d"`
+	Src *Operand `xc:"s"`
+	Dst *Operand `xc:"d"`
 }
 
 func (m Load) String() string {
@@ -186,7 +189,7 @@ func (m Load) xenon() string {
 }
 
 type Push struct {
-	Src Operand `xc:"s"`
+	Src *Operand `xc:"s"`
 }
 
 func (p Push) String() string {
@@ -213,8 +216,8 @@ func (o Operand) String() string {
 	return fmt.Sprintf("%s", o.Value)
 }
 
-func ImmediateOperand(imm Immediate) Operand {
-	return Operand{
+func ImmediateOperand(imm Immediate) *Operand {
+	return &Operand{
 		Value:  imm,
 		Source: ValueSourceImmediate,
 	}
@@ -222,8 +225,8 @@ func ImmediateOperand(imm Immediate) Operand {
 
 type UnOp struct {
 	Op  Operator `xc:"o"`
-	Dst Operand  `xc:"d"`
-	Src Operand  `xc:"s"`
+	Dst *Operand `xc:"d"`
+	Src *Operand `xc:"s"`
 }
 
 func (o UnOp) xenon() string {
@@ -236,9 +239,9 @@ func (o UnOp) String() string {
 
 type BinOp struct {
 	Op    Operator `xc:"o"`
-	Dst   Operand  `xc:"d"`
-	Left  Operand  `xc:"l"`
-	Right Operand  `xc:"r"`
+	Dst   *Operand `xc:"d"`
+	Left  *Operand `xc:"l"`
+	Right *Operand `xc:"r"`
 }
 
 func (o BinOp) xenon() string {
@@ -272,7 +275,7 @@ func (e CallExtern) xenon() string {
 }
 
 type Call struct {
-	Func Operand `xc:"f"`
+	Func *Operand `xc:"f"`
 }
 
 func (c Call) String() string {
@@ -319,7 +322,7 @@ func UnaryOperator(op compiler.Operator, operand compiler.Kind) Operator {
 }
 
 type Jmp struct {
-	Dst Operand `xc:"d"`
+	Dst *Operand `xc:"d"`
 }
 
 func (j Jmp) xenon() string {
@@ -331,7 +334,7 @@ func (j Jmp) String() string {
 }
 
 type JmpR struct {
-	Dst Operand `xc:"d"`
+	Dst *Operand `xc:"d"`
 }
 
 func (j JmpR) xenon() string {
@@ -343,9 +346,9 @@ func (j JmpR) String() string {
 }
 
 type JmpRC struct {
-	Invert bool    `xc:"i"`
-	Src    Operand `xc:"s"`
-	Dst    Operand `xc:"d"`
+	Invert bool     `xc:"i"`
+	Src    *Operand `xc:"s"`
+	Dst    *Operand `xc:"d"`
 }
 
 func (j JmpRC) xenon() string {
@@ -361,9 +364,9 @@ func (j JmpRC) String() string {
 }
 
 type Make struct {
-	Kind string  `xc:"k"`
-	Dst  Operand `xc:"d"`
-	Size Operand `xc:"s"`
+	Kind string   `xc:"k"`
+	Dst  *Operand `xc:"d"`
+	Size *Operand `xc:"s"`
 }
 
 func (Make) xenon() string {
@@ -375,10 +378,10 @@ func (m Make) String() string {
 }
 
 type Index struct {
-	Kind  string  `xc:"k"`
-	Base  Operand `xc:"b"`
-	Index Operand `xc:"i"`
-	Dst   Operand `xc:"d"`
+	Kind  string   `xc:"k"`
+	Base  *Operand `xc:"b"`
+	Index *Operand `xc:"i"`
+	Dst   *Operand `xc:"d"`
 }
 
 func (Index) xenon() string {
@@ -386,10 +389,10 @@ func (Index) xenon() string {
 }
 
 type SetIndex struct {
-	Kind  string  `xc:"k"`
-	Base  Operand `xc:"b"`
-	Index Operand `xc:"i"`
-	Src   Operand `xc:"s"`
+	Kind  string   `xc:"k"`
+	Base  *Operand `xc:"b"`
+	Index *Operand `xc:"i"`
+	Src   *Operand `xc:"s"`
 }
 
 func (SetIndex) xenon() string {
@@ -397,8 +400,8 @@ func (SetIndex) xenon() string {
 }
 
 type LAddr struct {
-	Dst Operand `xc:"d"`
-	Src Operand `xc:"s"`
+	Dst *Operand `xc:"d"`
+	Src *Operand `xc:"s"`
 }
 
 func (LAddr) xenon() string {
