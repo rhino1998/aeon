@@ -10,7 +10,11 @@ type Function struct {
 	ret        Type
 	body       []Statement
 
-	scope *Scope
+	symbols *SymbolScope
+
+	bytecode BytecodeSnippet
+
+	addr Addr
 }
 
 func (f *Function) Package() *Package {
@@ -22,19 +26,12 @@ func (f *Function) Name() string {
 }
 
 func (f *Function) Type() Type {
-	var scope string
-	if f.scope.parent != nil {
-		scope = f.scope.parent.name
-	}
-
 	var paramTypes []Type
 	for _, param := range f.parameters {
 		paramTypes = append(paramTypes, param.Type())
 	}
 
 	return &FunctionType{
-		name:       f.name,
-		scope:      scope,
 		Parameters: paramTypes,
 		Return:     f.ret,
 	}
@@ -50,6 +47,10 @@ func (f *Function) Return() Type {
 
 func (f *Function) Body() []Statement {
 	return f.body
+}
+
+func (f *Function) Addr() Addr {
+	return f.addr
 }
 
 type CallExpression struct {
@@ -87,8 +88,6 @@ func (f *ExternFunction) Type() Type {
 	}
 
 	return &FunctionType{
-		name:       f.name,
-		scope:      "@extern",
 		Parameters: paramTypes,
 		Return:     f.ret,
 	}

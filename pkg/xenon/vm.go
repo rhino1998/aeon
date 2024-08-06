@@ -6,6 +6,8 @@ import (
 	"log"
 	"math"
 	"strings"
+
+	"github.com/rhino1998/aeon/pkg/compiler"
 )
 
 type RuntimeExternFuncEntry struct {
@@ -19,7 +21,7 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 			Args: 1,
 			Func: func(s []any) any {
 				log.Println(s[0])
-				return String("")
+				return nil
 			},
 		},
 		"panic": {
@@ -38,55 +40,63 @@ type RuntimeExternFuncs map[string]RuntimeExternFuncEntry
 type RuntimeExternFunc func([]any) any
 
 type Runtime struct {
+	prog        *compiler.Program
 	externFuncs RuntimeExternFuncs
 
-	codePages [][PageSize]Bytecode
+	codePages [][PageSize]compiler.Bytecode
 
 	registers []any
-
-	sp Addr
-	fp Addr
 
 	memPages [][PageSize]any
 }
 
-func NewRuntime(prog []Bytecode, externs RuntimeExternFuncs, memPages int, registers int) (*Runtime, error) {
+func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages int, registers int) (*Runtime, error) {
 	r := &Runtime{
+		prog:        prog,
 		externFuncs: externs,
 
-		codePages: make([][PageSize]Bytecode, (len(prog)+PageSize-1)/PageSize),
+		codePages: make([][PageSize]compiler.Bytecode, (len(prog.Bytecode())+PageSize-1)/PageSize),
 		memPages:  make([][PageSize]any, memPages),
 		registers: make([]any, registers),
-
-		sp: 0,
-		fp: 0,
 	}
 
-	for i, code := range prog {
-		page, pageAddr := r.splitAddr(Addr(i))
+	for i, code := range prog.Bytecode() {
+		page, pageAddr := r.splitAddr(compiler.Addr(i))
 		r.codePages[page][pageAddr] = code
 	}
-	for range registers - 1 {
-		r.push(nil)
+	r.setSP(0)
+	for range registers - 2 {
+		r.push(Int(0))
 	}
 
-	err := r.push(Addr(0))
-	if err != nil {
-		return nil, err
-	}
-	r.push(Addr(0))
-	r.push(Addr(0))
+	r.push(compiler.Addr(0))
 
-	r.fp = r.sp - 1
+	r.setFP(r.sp() - 1)
 
 	return r, nil
 }
 
-func (r *Runtime) splitAddr(addr Addr) (uint64, uint64) {
+func (r *Runtime) fp() compiler.Addr {
+	return r.registers[compiler.RegisterFP].(compiler.Addr)
+}
+
+func (r *Runtime) setFP(addr compiler.Addr) {
+	r.registers[compiler.RegisterFP] = addr
+}
+
+func (r *Runtime) sp() compiler.Addr {
+	return r.registers[compiler.RegisterSP].(compiler.Addr)
+}
+
+func (r *Runtime) setSP(addr compiler.Addr) {
+	r.registers[compiler.RegisterSP] = addr
+}
+
+func (r *Runtime) splitAddr(addr compiler.Addr) (uint64, uint64) {
 	return uint64(addr / PageSize), uint64(addr % PageSize)
 }
 
-func (r *Runtime) fetch(addr Addr) (Bytecode, error) {
+func (r *Runtime) fetch(addr compiler.Addr) (compiler.Bytecode, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.codePages)) {
@@ -100,7 +110,7 @@ func (r *Runtime) fetch(addr Addr) (Bytecode, error) {
 	return r.codePages[page][pageAddr], nil
 }
 
-func (r *Runtime) load(addr Addr) (any, error) {
+func (r *Runtime) loadAddr(addr compiler.Addr) (any, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
@@ -114,10 +124,10 @@ func (r *Runtime) load(addr Addr) (any, error) {
 	return r.memPages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadArgs(sp Addr, num int) ([]any, error) {
+func (r *Runtime) loadArgs(sp compiler.Addr, num int) ([]any, error) {
 	var args []any
 	for i := 0; i < num; i++ {
-		arg, err := r.load(sp.Offset(AddrOffset(-(i + 1))))
+		arg, err := r.loadAddr(sp.Offset(compiler.AddrOffset(-(i + 1))))
 		if err != nil {
 			return nil, err
 		}
@@ -130,15 +140,15 @@ func (r *Runtime) loadArgs(sp Addr, num int) ([]any, error) {
 	return args, nil
 }
 
-func (env *Runtime) store(addr Addr, val any) error {
+func (env *Runtime) storeAddr(addr compiler.Addr, val any) error {
 	page := addr / 65536
 	pageAddr := addr % 65536
 
-	if page >= Addr(len(env.memPages)) {
+	if page >= compiler.Addr(len(env.memPages)) {
 		return fmt.Errorf("invalid page 0x%08x for addr 0x%08x", page, addr)
 	}
 
-	if pageAddr >= Addr(len(env.memPages[page])) {
+	if pageAddr >= compiler.Addr(len(env.memPages[page])) {
 		return fmt.Errorf("invalid page addr 0x%08x in page 0x%08x for addr 0x%08x", pageAddr, page, addr)
 	}
 
@@ -147,22 +157,22 @@ func (env *Runtime) store(addr Addr, val any) error {
 }
 
 func (env *Runtime) push(val any) error {
-	err := env.store(env.sp, val)
-	env.sp++
+	err := env.storeAddr(env.sp(), val)
+	env.setSP(env.sp() + 1)
 	return err
 }
 
 func (r *Runtime) pop() (any, error) {
-	val, err := r.load(r.sp)
+	val, err := r.loadAddr(r.sp())
 	r.zeroStack()
-	r.sp--
+	r.setSP(r.sp() - 1)
 	return val, err
 }
 
 func (r *Runtime) zeroStack() {
-	addr := r.sp
+	addr := r.sp()
 	for {
-		val, err := r.load(addr)
+		val, err := r.loadAddr(addr)
 		if err != nil {
 			return
 		}
@@ -171,97 +181,97 @@ func (r *Runtime) zeroStack() {
 			return
 		}
 
-		_ = r.store(addr, nil)
+		_ = r.storeAddr(addr, nil)
 	}
 }
 
-func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
-	loadM := func(addr Addr) loadFunc {
-		return loadFunc(func() (any, error) {
-			return r.load(addr)
-		})
-	}
+func (r *Runtime) loadImmediate(imm compiler.Immediate) loadFunc {
+	return loadFunc(func() (any, error) {
+		return imm, nil
+	})
+}
 
-	loadO := func(offset AddrOffset) loadFunc {
-		return loadFunc(func() (any, error) {
-			return r.load(r.fp.Offset(offset))
-		})
-	}
+func (r *Runtime) loadIndirect(indirect compiler.Indirect) loadFunc {
 
-	loadR := func(reg Register) loadFunc {
-		return loadFunc(func() (any, error) {
-			return r.registers[reg], nil
-		})
-	}
-
-	loadI := func(imm Immediate) loadFunc {
-		return loadFunc(func() (any, error) {
-			return imm, nil
-		})
-	}
-
-	load := func(operand *Operand) loadFunc {
-		switch operand.Source {
-		case ValueSourceImmediate:
-			return loadI(operand.Value.(Immediate))
-		case ValueSourceRegister:
-			return loadR(operand.Value.(Register))
-		case ValueSourceMemory:
-			return loadM(operand.Value.(Addr))
-		case ValueSourceLocal:
-			return loadO(operand.Value.(AddrOffset))
-		default:
-			return func() (any, error) {
-				return nil, fmt.Errorf("invalid source type %v", operand.Source)
-			}
+	return loadFunc(func() (any, error) {
+		base, err := r.load(indirect.Base)()
+		if err != nil {
+			return nil, err
 		}
+
+		return r.loadAddr(base.(compiler.Addr).Offset(indirect.Offset))
+	})
+}
+
+func (r *Runtime) loadRegister(reg compiler.Register) loadFunc {
+	return loadFunc(func() (any, error) {
+		return r.registers[reg], nil
+	})
+}
+
+func (r *Runtime) load(operand *compiler.Operand) loadFunc {
+	switch operand.Kind {
+	case compiler.OperandKindImmediate:
+		return r.loadImmediate(operand.Value.(compiler.Immediate))
+	case compiler.OperandKindIndirect:
+		return r.loadIndirect(operand.Value.(compiler.Indirect))
+	case compiler.OperandKindRegister:
+		return r.loadRegister(operand.Value.(compiler.Register))
+	default:
+		return nil
 	}
+}
 
-	storeM := func(addr Addr) func(any, error) error {
-		return func(val any, err error) error {
-			if err != nil {
-				return err
-			}
+func (r *Runtime) storeIndirect(indirect compiler.Indirect) storeFunc {
 
-			return r.store(addr, val)
+	return storeFunc(func(val any, err error) error {
+		if err != nil {
+			return err
 		}
-	}
 
-	storeO := func(offset AddrOffset) func(any, error) error {
-		return func(val any, err error) error {
-			if err != nil {
-				return err
-			}
-
-			return r.store(r.fp.Offset(offset), val)
+		base, err := r.load(indirect.Base)()
+		if err != nil {
+			return err
 		}
-	}
 
-	storeR := func(reg Register) func(any, error) error {
-		return func(val any, err error) error {
-			if err != nil {
-				return err
-			}
+		return r.storeAddr(base.(compiler.Addr).Offset(indirect.Offset), val)
+	})
+}
 
-			r.registers[reg] = val
-			return nil
+func (r *Runtime) storeRegister(reg compiler.Register) storeFunc {
+	return storeFunc(func(val any, err error) error {
+		if err != nil {
+			return err
 		}
+
+		r.registers[reg] = val
+		return nil
+	})
+}
+
+func (r *Runtime) store(operand *compiler.Operand) storeFunc {
+	switch operand.Kind {
+	case compiler.OperandKindIndirect:
+		return r.storeIndirect(operand.Value.(compiler.Indirect))
+	case compiler.OperandKindRegister:
+		return r.storeRegister(operand.Value.(compiler.Register))
+	default:
+		return nil
+	}
+}
+
+func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
+	parts := strings.Split(entryPoint, ".")
+	pkg, ok := r.prog.Package(parts[0])
+	if !ok {
+		return fmt.Errorf("failed to get entry point package: %s", parts[0])
+	}
+	f, ok := pkg.Function(parts[1])
+	if !ok {
+		return fmt.Errorf("failed to get entry point: %s", entryPoint)
 	}
 
-	store := func(operand *Operand) storeFunc {
-		switch operand.Source {
-		case ValueSourceRegister:
-			return storeR(operand.Value.(Register))
-		case ValueSourceMemory:
-			return storeM(operand.Value.(Addr))
-		case ValueSourceLocal:
-			return storeO(operand.Value.(AddrOffset))
-		default:
-			return func(any, error) error {
-				return fmt.Errorf("invalid source type %v", operand.Source)
-			}
-		}
-	}
+	pc := f.Addr()
 
 	for {
 		select {
@@ -278,8 +288,8 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 
 		log.Println("--------------")
 		log.Printf("%s", code)
-		log.Printf("fp: %v", r.fp)
-		log.Printf("sp: %v", r.sp)
+		log.Printf("fp: %v", r.fp())
+		log.Printf("sp: %v", r.sp())
 		log.Printf("pc: %v", pc)
 		r.printRegisters()
 		r.printStack()
@@ -289,49 +299,18 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 		switch code := code.(type) {
 		case nil:
 			return fmt.Errorf("invalid nil bytecode: %w", err)
-		case Nop:
-		case Mov:
-			err = store(code.Dst)(load(code.Src)())
-		case Store:
-			addr, err := load(code.Dst)()
-			if err != nil {
-				return err
-			}
-
-			err = storeM(addr.(Addr))(load(code.Src)())
-			if err != nil {
-				return err
-			}
-		case Load:
-			addr, err := load(code.Src)()
-			if err != nil {
-				return err
-			}
-			err = store(code.Dst)(loadM(addr.(Addr))())
-			if err != nil {
-				return err
-			}
-		case Push:
-			val, err := load(code.Src)()
-			if err != nil {
-				return err
-			}
-
-			err = r.push(val)
-			if err != nil {
-				return err
-			}
-		case Call:
+		case compiler.Mov:
+			err = r.store(code.Dst)(r.load(code.Src)())
+		case compiler.Call:
 			sp := r.sp
-
-			for reg, val := range r.registers[1:] {
+			for reg, val := range r.registers[2:] {
 				err := r.push(val)
 				if err != nil {
-					return fmt.Errorf("failed to push %s", Register(reg))
+					return fmt.Errorf("failed to push %s", compiler.Register(reg))
 				}
 			}
 
-			funcAddr, err := load(code.Func)()
+			funcAddr, err := r.load(code.Func)()
 			if err != nil {
 				return fmt.Errorf("could not resolve function addr")
 			}
@@ -351,138 +330,78 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 				return fmt.Errorf("failed to push next pc: %w", err)
 			}
 
-			r.fp = r.sp - 1
-			pc = Addr(funcAddr.(Int)) // TODO: add proper pointer type
-		case CallExtern:
+			r.setFP(r.fp() - 1)
+			pc = funcAddr.(compiler.Addr) // TODO: add proper pointer type
+		case compiler.CallExtern:
 			entry, ok := r.externFuncs[code.Func]
 			if !ok {
 				return fmt.Errorf("undefined extern func %q", code.Func)
 			}
 
-			args, err := r.loadArgs(r.sp, entry.Args)
+			args, err := r.loadArgs(r.sp(), entry.Args)
 			if err != nil {
 				return fmt.Errorf("failed to load %d args for extern %q", entry.Args, code.Func)
 			}
 			r.registers[0] = entry.Func(args)
-			r.sp -= Addr(entry.Args)
-		case Return:
-			for reg := range r.registers[1:] {
-				r.registers[reg+1], err = r.load(r.fp - FrameSize - (Addr(reg)))
+			r.setSP(r.sp() - Addr(entry.Args))
+		case compiler.Return:
+			pc, err = loadType[Addr](r, r.fp())
+			if err != nil {
+				return fmt.Errorf("failed to load pc from fp: %w", err)
+			}
+
+			for reg := range r.registers[2:] {
+				r.registers[reg+2], err = r.loadAddr(r.fp() - 1 + Addr(reg))
 				if err != nil {
 					return fmt.Errorf("failed to push %s", Register(reg))
 				}
 			}
 
-			pc, err = loadType[Addr](r, r.fp)
-			if err != nil {
-				return fmt.Errorf("failed to load pc from fp: %w", err)
-			}
-
-			r.sp, err = loadType[Addr](r, r.fp-2)
-			if err != nil {
-				return fmt.Errorf("failed to load sp from fp-2: %w", err)
-			}
-
-			r.fp, err = loadType[Addr](r, r.fp-1)
-			if err != nil {
-				return fmt.Errorf("failed to load fp from fp-1: %w", err)
-			}
-
 			// exit completely
-			if r.fp == 0 {
+			if r.fp() == 0 {
 				log.Printf("%v", r.registers[0])
 				return nil
 			}
-
-		case Jmp:
-			val, err := load(code.Dst)()
+		case compiler.Jmp:
+			val, err := r.load(code.Dst)()
 			if err != nil {
 				return err
 			}
 
 			pc = Addr(val.(Int))
-		case JmpR:
-			val, err := load(code.Dst)()
+		case compiler.JmpR:
+			val, err := r.load(code.Dst)()
 			if err != nil {
 				return err
 			}
 
 			pc = pc.Offset(AddrOffset(val.(Int)))
-		case JmpRC:
-			cond, err := load(code.Src)()
+		case compiler.JmpRC:
+			cond, err := r.load(code.Src)()
 			if err != nil {
 				return err
 			}
 
 			if cond.(Bool) != Bool(code.Invert) {
-				val, err := load(code.Dst)()
+				val, err := r.load(code.Dst)()
 				if err != nil {
 					return err
 				}
 
 				pc = pc.Offset(AddrOffset(val.(Int)))
 			}
-		case PopN:
-			n, err := load(code.Src)()
-			if err != nil {
-				return err
-			}
-
-			r.sp -= Addr(n.(Int))
-		case Make:
-			switch code.Kind {
-			case "T":
-				size, err := load(code.Size)()
-				if err != nil {
-					return err
-				}
-
-				err = store(code.Dst)(make(Tuple, size.(Int)), nil)
-				if err != nil {
-					return err
-				}
-			default:
-				return fmt.Errorf("unimplemented kind %q", code.Kind)
-			}
-		case SetIndex:
-			switch code.Kind {
-			case "T":
-				tuple, err := load(code.Base)()
-				if err != nil {
-					return err
-				}
-
-				index, err := load(code.Index)()
-				if err != nil {
-					return err
-				}
-
-				src, err := load(code.Src)()
-				if err != nil {
-					return err
-				}
-
-				tuple.(Tuple)[index.(Int)] = src
-
-				err = store(code.Base)(tuple, nil)
-				if err != nil {
-					return err
-				}
-			default:
-				return fmt.Errorf("unimplemented kind %q", code.Kind)
-			}
-		case BinOp:
-			err = store(code.Dst)(
+		case compiler.BinOp:
+			err = r.store(code.Dst)(
 				binaryOp(
 					binaryOperatorFuncs[code.Op],
-					load(code.Left),
-					load(code.Right),
+					r.load(code.Left),
+					r.load(code.Right),
 				),
 			)
-		case UnOp:
+		case compiler.UnOp:
 			switch code.Op {
 			case "*P":
-				addr, err := load(code.Src)()
+				addr, err := r.load(code.Src)()
 				if err != nil {
 					return err
 				}
@@ -491,23 +410,23 @@ func (r *Runtime) Run(ctx context.Context, pc Addr) (err error) {
 					return fmt.Errorf("nil pointer dereference")
 				}
 
-				err = store(code.Dst)(loadM(addr.(Addr))())
+				err = r.store(code.Dst)(r.loadAddr(addr.(Addr)))
 				if err != nil {
 					return err
 				}
 			default:
 				return fmt.Errorf("unrecognized unary operator %q", code.Op)
 			}
-		case LAddr:
-			offset, err := load(code.Src)()
-			if err != nil {
-				return err
-			}
-
-			err = store(code.Dst)(r.fp.Offset(AddrOffset(offset.(Int))), nil)
-			if err != nil {
-				return err
-			}
+		// case compiler.LAddr:
+		// 	addr, err := r.load(code.Src)()
+		// 	if err != nil {
+		// 		return err
+		// 	}
+		//
+		// 	err = r.store(code.Dst)(r.fp.Offset(AddrOffset(addr.(Int))), nil)
+		// 	if err != nil {
+		// 		return err
+		// 	}
 		default:
 			return fmt.Errorf("unrecognized bytecode: %T %v", code, code)
 		}
@@ -542,10 +461,21 @@ func binaryOp(op binaryOperatorFunc, loadA, loadB loadFunc) (any, error) {
 	return op(a, b), nil
 }
 
-var binaryOperatorFuncs = map[Operator]binaryOperatorFunc{
+type Float = compiler.Float
+type Int = compiler.Int
+type String = compiler.String
+type Bool = compiler.Bool
+type Addr = compiler.Addr
+type AddrOffset = compiler.AddrOffset
+type Register = compiler.Register
+
+var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{
 	"I**I": opExp[Int],
 	"F**F": opExp[Float],
 
+	"P+I": func(a any, b any) any {
+		return Addr(a.(Addr) + Addr(b.(Int)))
+	},
 	"I+I": opAdd[Int],
 	"F+F": opAdd[Float],
 	"S+S": opAdd[String],
@@ -645,12 +575,12 @@ func (r *Runtime) printStack() {
 	var addr Addr
 
 	for {
-		val, err := r.load(addr)
+		val, err := r.loadAddr(addr)
 		if err != nil {
 			panic(err)
 		}
 
-		if addr == r.sp {
+		if addr == r.sp() {
 			return
 		}
 
@@ -662,7 +592,7 @@ func (r *Runtime) printStack() {
 }
 
 func loadType[T any](env *Runtime, addr Addr) (T, error) {
-	raw, err := env.load(addr)
+	raw, err := env.loadAddr(addr)
 	if err != nil {
 		var ret T
 		return ret, err

@@ -33,9 +33,14 @@ func newState(prog *compiler.Program, entryPoint string) *State {
 }
 
 func (s *State) execute() error {
-	entryFunc, err := s.prog.Function(s.entryPoint)
-	if err != nil {
-		return err
+	entryPkg, ok := s.prog.Package("main")
+	if !ok {
+		return fmt.Errorf("could not get entry point function package")
+	}
+
+	entryFunc, ok := entryPkg.Function("main")
+	if !ok {
+		return fmt.Errorf("could not get entry point function")
 	}
 
 	if len(entryFunc.Parameters()) != 0 {
@@ -47,7 +52,7 @@ func (s *State) execute() error {
 	}
 	global := newScope(nil, "")
 
-	_, err = s.executeFunction(global, entryFunc)
+	_, err := s.executeFunction(global, entryFunc)
 	if err != nil {
 		return err
 	}
@@ -220,14 +225,17 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 
 		return nil
 	case *compiler.IfStatement:
-		cond, err := s.executeExpression(scope, stmt.Condition)
-		if err != nil {
-			return err
-		}
+		var b bool
+		if stmt.Condition != nil {
+			cond, err := s.executeExpression(scope, stmt.Condition)
+			if err != nil {
+				return err
+			}
 
-		b, err := s.boolOrFail(cond)
-		if err != nil {
-			return stmt.WrapError(err)
+			b, err = s.boolOrFail(cond)
+			if err != nil {
+				return stmt.WrapError(err)
+			}
 		}
 
 		if b {
@@ -246,44 +254,6 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 		} else {
 			return nil
 		}
-	case *compiler.ElseIfStatement:
-		cond, err := s.executeExpression(scope, stmt.Condition)
-		if err != nil {
-			return err
-		}
-
-		b, err := s.boolOrFail(cond)
-		if err != nil {
-			return stmt.WrapError(err)
-		}
-
-		if b {
-			scope := newScope(scope, "elseif")
-
-			for _, stmt := range stmt.Body {
-				err := s.executeStatement(scope, stmt, ret)
-				if err != nil {
-					return err
-				}
-			}
-
-			return nil
-		} else if stmt.Else != nil {
-			return s.executeStatement(scope, stmt.Else, ret)
-		} else {
-			return nil
-		}
-	case *compiler.ElseStatement:
-		scope := newScope(scope, "else")
-
-		for _, stmt := range stmt.Body {
-			err := s.executeStatement(scope, stmt, ret)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
 	case *compiler.ForStatement:
 		scope := newScope(scope, "for")
 		if stmt.Init != nil {

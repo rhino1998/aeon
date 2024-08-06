@@ -20,6 +20,7 @@ type unknownType struct{}
 func (unknownType) Name() string   { return "<unknown>" }
 func (unknownType) String() string { return "<unknown>" }
 func (unknownType) Kind() Kind     { return KindUnknown }
+func (unknownType) Size() int      { return 0 }
 
 func BaseType(typ Type) Type {
 	switch typ := typ.(type) {
@@ -93,12 +94,13 @@ func IsUnspecified(typ Type) bool {
 	return ok
 }
 
-func IsTypeResolvable(s *Scope, typ Type) bool {
+func IsTypeResolvable(s *SymbolScope, typ Type) bool {
 	switch typ := resolveType(typ).(type) {
 	case KindType:
 		return false
 	case *BasicType:
-		return IsKnownType(s, typ)
+		_, ok := s.getType(typ.String())
+		return ok
 	case *PointerType:
 		return IsTypeResolvable(s, typ.Pointee())
 	case *DerivedType:
@@ -137,15 +139,6 @@ func IsTypeResolvable(s *Scope, typ Type) bool {
 
 }
 
-func IsKnownType(s *Scope, typ Type) bool {
-	t, ok := s.getType(typ.Name())
-	if !ok {
-		return false
-	}
-
-	return t == typ
-}
-
 type KindType Kind
 
 func (t KindType) String() string {
@@ -158,6 +151,19 @@ func (t KindType) Name() string {
 
 func (t KindType) Kind() Kind {
 	return Kind(t)
+}
+
+func (t KindType) Size() int {
+	switch t.Kind() {
+	case KindBool, KindInt, KindFloat, KindString, KindPointer:
+		return 1
+	case KindFunction:
+		return 1
+	case KindSlice:
+		return 3
+	default:
+		return -1
+	}
 }
 
 type Kind int
@@ -205,27 +211,24 @@ func (k Kind) String() string {
 
 type Type interface {
 	Kind() Kind
-	Name() string
-
 	String() string
+	Size() int
 }
 
 type BasicType struct {
 	name string
 	kind Kind
+	size int
 }
 
 func (t BasicType) Kind() Kind     { return t.kind }
 func (t BasicType) Name() string   { return t.name }
 func (t BasicType) String() string { return t.name }
+func (t BasicType) Size() int      { return t.size }
 
 type ReferencedType struct {
-	s    *Scope
+	s    *SymbolScope
 	name string
-}
-
-func (t ReferencedType) Name() string {
-	return t.Dereference().Name()
 }
 
 func (t ReferencedType) Kind() Kind {
@@ -243,6 +246,10 @@ func (t ReferencedType) Dereference() Type {
 
 func (t ReferencedType) String() string {
 	return t.Dereference().String()
+}
+
+func (t ReferencedType) Size() int {
+	return t.Dereference().Size()
 }
 
 type DerivedType struct {
@@ -265,6 +272,10 @@ func (t DerivedType) String() string {
 
 func (t DerivedType) Underlying() Type { return t.underlying }
 
+func (t DerivedType) Size() int {
+	return t.underlying.Size()
+}
+
 func (t DerivedType) Scope() string {
 	return t.scope
 }
@@ -274,10 +285,7 @@ type PointerType struct {
 }
 
 func (PointerType) Kind() Kind { return KindPointer }
-
-func (t PointerType) Name() string {
-	return fmt.Sprintf("*%s", t.Pointee().Name())
-}
+func (PointerType) Size() int  { return 1 }
 
 func (t PointerType) String() string {
 	return fmt.Sprintf("*%s", t.Pointee().String())
@@ -291,30 +299,20 @@ type SliceType struct {
 	elem Type
 }
 
-func (t *SliceType) Kind() Kind { return KindSlice }
+func (t SliceType) Kind() Kind { return KindSlice }
 
-func (t *SliceType) Name() string { return fmt.Sprintf("[]%s", t.elem.Name()) }
+func (t SliceType) String() string { return fmt.Sprintf("[]%s", t.elem.String()) }
 
-func (t *SliceType) String() string { return fmt.Sprintf("[]%s", t.elem.String()) }
-
-func (t *SliceType) Elem() Type { return t.elem }
+func (t SliceType) Elem() Type { return t.elem }
+func (SliceType) Size() int    { return 3 }
 
 type TupleType struct {
 	elems []Type
 }
 
-func (t *TupleType) Kind() Kind { return KindTuple }
+func (t TupleType) Kind() Kind { return KindTuple }
 
-func (t *TupleType) Name() string {
-	var names []string
-	for _, elem := range t.elems {
-		names = append(names, elem.Name())
-	}
-
-	return fmt.Sprintf("(%s)", strings.Join(names, ", "))
-}
-
-func (t *TupleType) String() string {
+func (t TupleType) String() string {
 	var strs []string
 	for _, elem := range t.elems {
 		strs = append(strs, elem.String())
@@ -323,15 +321,12 @@ func (t *TupleType) String() string {
 	return fmt.Sprintf("(%s)", strings.Join(strs, ", "))
 }
 
-func (t *TupleType) Elems() []Type { return t.elems }
+func (t TupleType) Elems() []Type { return t.elems }
+func (t TupleType) Size() int     { return len(t.elems) }
 
 type MapType struct {
 	key   Type
 	value Type
-}
-
-func (t *MapType) Name() string {
-	return fmt.Sprintf("map[%s]%s", t.key.Name(), t.value.Name())
 }
 
 func (*MapType) Kind() Kind { return KindMap }
@@ -346,6 +341,10 @@ func (t *MapType) Key() Type {
 
 func (t *MapType) Value() Type {
 	return t.value
+}
+
+func (*MapType) Size() int {
+	return 1
 }
 
 type StructType struct {
@@ -364,15 +363,11 @@ type StructField struct {
 }
 
 type FunctionType struct {
-	name       string
-	scope      string
 	Parameters []Type
 	Return     Type
 }
 
 func (t FunctionType) Kind() Kind { return KindFunction }
-
-func (t FunctionType) Name() string { return t.name }
 
 func (t FunctionType) String() string {
 	params := make([]string, 0, len(t.Parameters))
@@ -386,4 +381,8 @@ func (t FunctionType) String() string {
 	}
 
 	return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), retStr)
+}
+
+func (FunctionType) Size() int {
+	return 1
 }

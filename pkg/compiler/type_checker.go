@@ -18,7 +18,7 @@ func (c *Compiler) resolveProgramTypes(prog *Program) error {
 
 func (c *Compiler) resolveFunctionTypes(f *Function) error {
 	for _, stmt := range f.Body() {
-		err := c.resolveStatementTypes(f.scope, stmt)
+		err := c.resolveStatementTypes(f.symbols, stmt)
 		if err != nil {
 			return err
 		}
@@ -27,7 +27,7 @@ func (c *Compiler) resolveFunctionTypes(f *Function) error {
 	return nil
 }
 
-func (c *Compiler) resolveStatementTypes(scope *Scope, stmt Statement) error {
+func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) error {
 	switch stmt := stmt.(type) {
 	case *VarStatement:
 		if stmt.Type != nil {
@@ -119,62 +119,28 @@ func (c *Compiler) resolveStatementTypes(scope *Scope, stmt Statement) error {
 
 		return nil
 	case *IfStatement:
-		cond, err := c.resolveExpressionTypes(scope, stmt.Condition, KindType(KindBool))
-		if err != nil {
-			return err
-		}
-
-		if cond.Type().Kind() != KindBool {
-			return cond.WrapError(fmt.Errorf("cannot use expression of type %v as a condition", cond.Type()))
-		}
-
-		stmt.Condition = cond
-
-		for _, subStmt := range stmt.Body {
-			err = c.resolveStatementTypes(stmt.Scope, subStmt)
+		if stmt.Condition != nil {
+			cond, err := c.resolveExpressionTypes(scope, stmt.Condition, KindType(KindBool))
 			if err != nil {
 				return err
 			}
-		}
 
-		if stmt.Else != nil {
-			err = c.resolveStatementTypes(scope, stmt.Else)
-			if err != nil {
-				return err
+			if cond.Type().Kind() != KindBool {
+				return cond.WrapError(fmt.Errorf("cannot use expression of type %v as a condition", cond.Type()))
 			}
+
+			stmt.Condition = cond
 		}
 
-		return nil
-	case *ElseIfStatement:
-		cond, err := c.resolveExpressionTypes(scope, stmt.Condition, KindType(KindBool))
-		if err != nil {
-			return err
-		}
-
-		if cond.Type().Kind() != KindBool {
-			return cond.WrapError(fmt.Errorf("cannot use expression of type %v as a condition", cond.Type()))
-		}
-
-		stmt.Condition = cond
-
-		for _, subStmt := range stmt.Body {
-			err = c.resolveStatementTypes(stmt.Scope, subStmt)
-			if err != nil {
-				return err
-			}
-		}
-
-		if stmt.Else != nil {
-			err = c.resolveStatementTypes(scope, stmt.Else)
-			if err != nil {
-				return err
-			}
-		}
-
-		return nil
-	case *ElseStatement:
 		for _, subStmt := range stmt.Body {
 			err := c.resolveStatementTypes(stmt.Scope, subStmt)
+			if err != nil {
+				return err
+			}
+		}
+
+		if stmt.Else != nil {
+			err := c.resolveStatementTypes(scope, stmt.Else)
 			if err != nil {
 				return err
 			}
@@ -257,7 +223,7 @@ func (c *Compiler) resolveStatementTypes(scope *Scope, stmt Statement) error {
 
 }
 
-func (c *Compiler) resolveExpressionTypes(scope *Scope, expr Expression, bound Type) (Expression, error) {
+func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, bound Type) (Expression, error) {
 	switch expr := expr.(type) {
 	case *Literal[int64]:
 		if bound == nil && IsUnspecified(expr.Type()) {
@@ -385,11 +351,9 @@ func (c *Compiler) resolveExpressionTypes(scope *Scope, expr Expression, bound T
 			return nil, expr.WrapError(fmt.Errorf("cannot coerce bool literal into %s", bound))
 		}
 	case *SymbolReferenceExpression:
-		if bound != nil {
-			sym := expr.Dereference()
-			if sym == nil {
-				return nil, expr.WrapError(fmt.Errorf("undefined name %s", expr.Name()))
-			}
+		sym := expr.Dereference()
+		if sym == nil {
+			return nil, expr.WrapError(fmt.Errorf("undefined name %s", expr.Name()))
 		}
 
 		return expr, nil

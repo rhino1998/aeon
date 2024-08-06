@@ -60,7 +60,7 @@ func (c *Compiler) Compile(ctx context.Context) (*Program, error) {
 		return nil, CompilerError{err}
 	}
 
-	_, err = prog.Function("main.main")
+	err = prog.compileBytecode(ctx)
 	if err != nil {
 		return nil, CompilerError{err}
 	}

@@ -8,11 +8,7 @@ import (
 )
 
 func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File) error {
-	pkg, ok := prog.root.getPackage(string(entry.Package.Name))
-	if !ok {
-		pkg = NewPackage(prog, string(entry.Package.Name))
-		prog.root.put(pkg)
-	}
+	pkg := prog.AddPackage(string(entry.Package.Name))
 
 	for _, decl := range entry.Declarations {
 		switch decl := decl.(type) {
@@ -63,7 +59,7 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 	return nil
 }
 
-func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *Scope, decl parser.ExternFunctionDeclaration) error {
+func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolScope, decl parser.ExternFunctionDeclaration) error {
 	f := &ExternFunction{
 		name: string(decl.Name),
 	}
@@ -96,12 +92,12 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *Scope, de
 		f.ret = typ
 	}
 
-	p.prog.externFuncs[f.Name()] = f.Type().(*FunctionType)
+	p.prog.externFuncs[f.Name()] = f
 
 	return scope.put(f)
 }
 
-func (c *Compiler) compileTypeDeclaration(p *Package, scope *Scope, decl parser.TypeDeclaration) error {
+func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl parser.TypeDeclaration) error {
 	underlying, err := c.compileTypeReference(scope, decl.Type)
 	if err != nil {
 		return err
@@ -115,7 +111,7 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *Scope, decl parser.
 	return scope.put(t)
 }
 
-func (c *Compiler) compileTypeReference(scope *Scope, typ parser.Type) (Type, error) {
+func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Type, error) {
 	switch typ := typ.(type) {
 	case parser.Identifier:
 		return &ReferencedType{s: scope, name: string(typ)}, nil
@@ -171,15 +167,15 @@ func (c *Compiler) compileTypeReference(scope *Scope, typ parser.Type) (Type, er
 	}
 }
 
-func (c *Compiler) compileFunction(p *Package, scope *Scope, decl parser.FunctionDeclaration) error {
+func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.FunctionDeclaration) error {
 	qualifiedName := fmt.Sprintf("%s.%s", scope.name, decl.Name)
 
 	f := &Function{
-		name:  string(decl.Name),
-		pkg:   p,
-		scope: newScope(scope, qualifiedName),
+		name:    string(decl.Name),
+		pkg:     p,
+		symbols: newScope(scope, qualifiedName),
 	}
-	f.scope.function = f
+	f.symbols.function = f
 
 	for _, param := range decl.Parameters {
 		var paramName string
@@ -198,7 +194,7 @@ func (c *Compiler) compileFunction(p *Package, scope *Scope, decl parser.Functio
 		}
 
 		if param.Name != nil {
-			f.scope.put(variable)
+			f.symbols.put(variable)
 		}
 
 		f.parameters = append(f.parameters, variable)
@@ -213,10 +209,10 @@ func (c *Compiler) compileFunction(p *Package, scope *Scope, decl parser.Functio
 		f.ret = typ
 	}
 
-	f.scope.put(f)
+	f.symbols.put(f)
 
 	for _, stmt := range decl.Body {
-		compiledStmt, err := c.compileStatement(f.scope, stmt)
+		compiledStmt, err := c.compileStatement(f.symbols, stmt)
 		if err != nil {
 			return err
 		}
@@ -227,7 +223,7 @@ func (c *Compiler) compileFunction(p *Package, scope *Scope, decl parser.Functio
 	return scope.put(f)
 }
 
-func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statement, error) {
+func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (Statement, error) {
 	var err error
 
 	switch stmt := stmt.(type) {
@@ -411,7 +407,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 			}
 		}
 
-		return &ElseIfStatement{
+		return &IfStatement{
 			Condition: condition,
 			Scope:     bodyScope,
 			Body:      body,
@@ -426,7 +422,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 			return nil, err
 		}
 
-		return &ElseStatement{
+		return &IfStatement{
 			Scope: bodyScope,
 			Body:  body,
 
@@ -480,7 +476,7 @@ func (c *Compiler) compileStatement(scope *Scope, stmt parser.Statement) (Statem
 	}
 }
 
-func (c *Compiler) compileStatements(scope *Scope, stmts []parser.Statement) ([]Statement, error) {
+func (c *Compiler) compileStatements(scope *SymbolScope, stmts []parser.Statement) ([]Statement, error) {
 	var ret []Statement
 	for _, stmt := range stmts {
 		retStmt, err := c.compileStatement(scope, stmt)
@@ -494,7 +490,7 @@ func (c *Compiler) compileStatements(scope *Scope, stmts []parser.Statement) ([]
 	return ret, nil
 }
 
-func (c *Compiler) compileExpression(scope *Scope, expr parser.Expr) (Expression, error) {
+func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expression, error) {
 	switch expr := expr.(type) {
 	case parser.NumberLiteral:
 		if expr.IsInteger() {

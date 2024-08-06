@@ -202,3 +202,13 @@ type UnaryOperatorKinds struct {
 	Operator Operator
 	Operand  Kind
 }
+
+type Operation string
+
+func BinaryOperation(left Kind, op Operator, right Kind) Operation {
+	return Operation(fmt.Sprintf("%s%s%s", shortKind(left), string(op), shortKind(right)))
+}
+
+func UnaryOperation(op Operator, operand Kind) Operation {
+	return Operation(fmt.Sprintf("%s%s", string(op), shortKind(operand)))
+}

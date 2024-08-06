@@ -6,6 +6,9 @@ type Variable struct {
 	name string
 	typ  Type
 	expr *any
+
+	global   bool
+	escaping bool
 }
 
 func (v *Variable) Name() string {
@@ -20,8 +23,16 @@ func (v *Variable) SetType(typ Type) {
 	v.typ = typ
 }
 
+func (v *Variable) Escaping() bool {
+	return v.escaping
+}
+
+func (v *Variable) SetEscaping(escaping bool) {
+	v.escaping = true
+}
+
 type SymbolReferenceExpression struct {
-	scope *Scope
+	scope *SymbolScope
 	name  string
 
 	parser.Position
@@ -67,7 +78,6 @@ type VarStatement struct {
 type DeclarationStatement struct {
 	Variable   *Variable
 	Expression Expression
-	Type       Type
 
 	parser.Position
 }

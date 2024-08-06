@@ -68,18 +68,13 @@ func main() {
 						return err
 					}
 
-					bc, funcMap, err := xenon.Compile(prog)
-					if err != nil {
-						return err
-					}
-
 					out, err := os.Create("main.xc")
 					if err != nil {
 						return err
 					}
 					defer out.Close()
 
-					err = xenon.EmitXenonCode(out, bc, funcMap, prog.ExternFuncs())
+					err = xenon.EmitXenonCode(out, prog)
 					if err != nil {
 						return err
 					}
@@ -180,19 +175,12 @@ func main() {
 						os.Exit(1)
 					}
 
-					bc, funcMap, err := xenon.Compile(prog)
+					runtime, err := xenon.NewRuntime(prog, xenon.DefaultExternFuncs(), 5, 16)
 					if err != nil {
 						return err
 					}
 
-					runtime, err := xenon.NewRuntime(bc, xenon.DefaultExternFuncs(), 5, 16)
-					if err != nil {
-						return err
-					}
-
-					log.Printf("%#v", funcMap)
-
-					return runtime.Run(ctx, funcMap["main"]["main"])
+					return runtime.Run(ctx, "main.main")
 				},
 			},
 		},

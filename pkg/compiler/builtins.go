@@ -22,7 +22,7 @@ var (
 	}
 )
 
-func builtins() *Scope {
+func builtins() *SymbolScope {
 	s := newScope(nil, "builtins")
 
 	s.put(IntType)

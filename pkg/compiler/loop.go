@@ -7,7 +7,7 @@ type ForStatement struct {
 	Condition Expression
 	Step      Statement
 
-	Scope *Scope
+	Scope *SymbolScope
 	Body  []Statement
 
 	parser.Position

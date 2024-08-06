@@ -12,9 +12,6 @@ func main() string {
   // test comment
 	//
 	i := 0
-	var x *int
-	x = &i
-	print(*x)
 	print("HELLO")
 	print(i)
 	print(h(1))

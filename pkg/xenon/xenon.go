@@ -37,20 +37,31 @@ type xenonContext struct {
 	NumRegisters int
 }
 
-func EmitXenonCode(w io.Writer, bcs []Bytecode, funcs map[string]map[string]Addr, externFuncs []*compiler.FunctionType) error {
+func EmitXenonCode(w io.Writer, prog *compiler.Program) error {
 	var xeCtx xenonContext
 	xeCtx.PageSize = PageSize
-	xeCtx.NumCodePages = (len(bcs) + xeCtx.PageSize) / xeCtx.PageSize
+	xeCtx.NumCodePages = (len(prog.Bytecode()) + xeCtx.PageSize) / xeCtx.PageSize
 	xeCtx.NumMemPages = 10
 	xeCtx.NumRegisters = 16
-	xeCtx.MainFunc = int(funcs["main"]["main"])
+
+	pkg, ok := prog.Package("main")
+	if !ok {
+		return fmt.Errorf("failed to get entry point")
+	}
+	f, ok := pkg.Function("main")
+	if !ok {
+		return fmt.Errorf("failed to get entry point")
+	}
+
+	xeCtx.MainFunc = int(f.Addr())
 	xeCtx.Code = make(map[PageAddr]string)
 
-	log.Printf("Program BC:%d PageSize:%d", len(bcs), xeCtx.PageSize)
+	log.Printf("Program BC:%d PageSize:%d", len(prog.Bytecode()), xeCtx.PageSize)
 
-	for _, extern := range externFuncs {
+	for _, extern := range prog.ExternFuncs() {
+		ftype := extern.Type().(*compiler.FunctionType)
 		argTypes := make([]string, 0)
-		for _, param := range extern.Parameters {
+		for _, param := range ftype.Parameters {
 			var argType string
 			if param.Kind() == compiler.KindInt || param.Kind() == compiler.KindBool || param.Kind() == compiler.KindFloat {
 				argType = ":number"
@@ -60,12 +71,12 @@ func EmitXenonCode(w io.Writer, bcs []Bytecode, funcs map[string]map[string]Addr
 		}
 		xeCtx.ExternFuncs = append(xeCtx.ExternFuncs, ExternFuncEntry{
 			ArgTypes:  argTypes,
-			HasReturn: extern.Return != nil,
+			HasReturn: ftype.Return != nil,
 			Name:      extern.Name(),
 		})
 	}
 
-	for i, bc := range bcs {
+	for i, bc := range prog.Bytecode() {
 		bcBytes, err := marshalByteCode(bc)
 		if err != nil {
 			return err
@@ -98,8 +109,8 @@ func EmitXenonCode(w io.Writer, bcs []Bytecode, funcs map[string]map[string]Addr
 	return tmpl.Execute(w, &xeCtx)
 }
 
-func marshalByteCode(bc Bytecode) ([]byte, error) {
-	code := bc.xenon()
+func marshalByteCode(bc compiler.Bytecode) ([]byte, error) {
+	code := bc.Name()
 
 	// TODO: better format
 

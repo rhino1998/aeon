@@ -1,57 +1,63 @@
 package compiler
 
-import (
-	"cmp"
-	"fmt"
-	"slices"
-	"strings"
-)
-
 type Program struct {
-	root *Scope
+	root *SymbolScope
 
-	externFuncs map[string]*FunctionType
+	externFuncs map[string]*ExternFunction
+	packages    map[string]*Package
+
+	registers int
+	bytecode  BytecodeSnippet
 }
 
 func newProgram() *Program {
 	p := &Program{
 		root: builtins(),
 
-		externFuncs: make(map[string]*FunctionType),
+		externFuncs: make(map[string]*ExternFunction),
+		packages:    make(map[string]*Package),
 	}
 
 	return p
+}
+
+func (p *Program) Bytecode() []Bytecode {
+	return p.bytecode
 }
 
 func (p *Program) Functions() []*Function {
 	return p.root.Functions()
 }
 
+func (p *Program) FrameSize() int {
+	return p.registers
+}
+
+func (p *Program) AddPackage(name string) *Package {
+	pkg := NewPackage(p, name)
+
+	p.packages[name] = pkg
+
+	return pkg
+}
+
 func (p *Program) Packages() []*Package {
-	return p.root.Packages()
+	return sortedMap(p.packages, (*Package).Name)
 }
 
-func (p *Program) Function(qualifiedName string) (*Function, error) {
-	return scopedFunction(p.root, qualifiedName)
+func (p *Program) Package(name string) (*Package, bool) {
+	pkg, ok := p.packages[name]
+	return pkg, ok
 }
 
-func (p *Program) ExternFuncs() []*FunctionType {
-	exts := make([]*FunctionType, 0, len(p.externFuncs))
-	for _, ext := range p.externFuncs {
-		exts = append(exts, ext)
-	}
-
-	slices.SortStableFunc(exts, func(a, b *FunctionType) int {
-		return cmp.Compare(a.Name(), b.Name())
-	})
-
-	return exts
+func (p *Program) ExternFuncs() []*ExternFunction {
+	return sortedMapByKey(p.externFuncs)
 }
 
 type Package struct {
 	name  string
 	prog  *Program
-	scope *Scope
+	scope *SymbolScope
 }
 
 func NewPackage(prog *Program, name string) *Package {
@@ -73,40 +79,6 @@ func (p *Package) Functions() []*Function {
 	return p.scope.Functions()
 }
 
-func (p *Package) Function(qualifiedName string) (*Function, error) {
-	return scopedFunction(p.scope, qualifiedName)
-}
-
-func scopedFunction(scope *Scope, qualifiedName string) (*Function, error) {
-	var currentScope string
-	parts := strings.Split(qualifiedName, ".")
-
-	for len(parts) > 1 {
-		sym, ok := scope.get(parts[0])
-		if !ok {
-			return nil, fmt.Errorf("no such package %q", qualifiedName)
-		}
-
-		switch sym := sym.(type) {
-		case *Package:
-			scope = sym.scope
-			currentScope += "." + parts[0]
-			parts = parts[1:]
-			continue
-		default:
-			return nil, fmt.Errorf("%q is not a package", qualifiedName)
-		}
-	}
-
-	f, ok := scope.get(parts[0])
-	if !ok {
-		return nil, fmt.Errorf("no such function %q", qualifiedName)
-	}
-
-	switch f := f.(type) {
-	case *Function:
-		return f, nil
-	default:
-		return nil, fmt.Errorf("no such function %q", qualifiedName)
-	}
+func (p *Package) Function(name string) (*Function, bool) {
+	return p.scope.getFunction(name)
 }

@@ -1,43 +1,45 @@
-package xenon
+package compiler
 
 import (
 	"fmt"
 	"strings"
-
-	"github.com/rhino1998/aeon/pkg/compiler"
 )
 
-type ValueSource int
+type Bytecode interface {
+	Name() string
+}
+
+type BytecodeSnippet []Bytecode
+
+func (s *BytecodeSnippet) Add(bcs ...Bytecode) {
+	*s = append(*s, bcs...)
+}
+
+type OperandKind int
 
 const (
-	ValueSourceImmediate     ValueSource = 0
-	ValueSourceRegister      ValueSource = 1
-	ValueSourceMemory        ValueSource = 2
-	ValueSourceLocal         ValueSource = 3
-	ValueSourceIndirectLocal ValueSource = 4
+	OperandKindImmediate OperandKind = 0
+	OperandKindRegister  OperandKind = 1
+	OperandKindIndirect  OperandKind = 2
+	OperandKindExtern    OperandKind = 3
 )
 
-func (s ValueSource) MarshalXenon() ([]byte, error) {
+func (s OperandKind) MarshalXenon() ([]byte, error) {
 	switch s {
-	case ValueSourceImmediate:
+	case OperandKindImmediate:
 		return []byte("I"), nil
-	case ValueSourceMemory:
-		return []byte("M"), nil
-	case ValueSourceRegister:
+	case OperandKindRegister:
 		return []byte("R"), nil
-	case ValueSourceLocal:
-		return []byte("L"), nil
-	case ValueSourceIndirectLocal:
+	case OperandKindIndirect:
 		return []byte("*"), nil
 	default:
 		return nil, fmt.Errorf("invalid value source %x", s)
 	}
 }
 
-const FrameSize = 3
-
-type Bytecode interface {
-	xenon() string
+type Indirect struct {
+	Base   *Operand   `xc:"b"`
+	Offset AddrOffset `xc:"o"`
 }
 
 type Int int64
@@ -66,12 +68,6 @@ func (Bool) immediate() {}
 
 func (b Bool) String() string {
 	return fmt.Sprintf("Bool(%v)", bool(b))
-}
-
-type Register int64
-
-func (r Register) String() string {
-	return fmt.Sprintf("reg%02x", int64(r))
 }
 
 type Addr uint64
@@ -137,24 +133,12 @@ func (Nop) xenon() string {
 	return "nop"
 }
 
-type PopN struct {
-	Src *Operand `xc:"s"`
-}
-
-func (p PopN) xenon() string {
-	return "popn"
-}
-
-func (p PopN) String() string {
-	return fmt.Sprintf("POPN %s", p.Src)
-}
-
 type Mov struct {
 	Src *Operand `xc:"s"`
 	Dst *Operand `xc:"d"`
 }
 
-func (m Mov) xenon() string {
+func (m Mov) Name() string {
 	return "mov"
 }
 
@@ -188,18 +172,6 @@ func (m Load) xenon() string {
 	return "load"
 }
 
-type Push struct {
-	Src *Operand `xc:"s"`
-}
-
-func (p Push) String() string {
-	return fmt.Sprintf("PUSH %v", p.Src)
-}
-
-func (p Push) xenon() string {
-	return "push"
-}
-
 type Convert[To, From any] struct {
 	Register
 }
@@ -208,8 +180,8 @@ type ConvertIntFloat = Convert[int64, float64]
 type ConvertFloatInt = Convert[float64, int64]
 
 type Operand struct {
-	Source ValueSource `xc:"s"`
-	Value  any         `xc:"v"`
+	Kind  OperandKind `xc:"k"`
+	Value any         `xc:"v"`
 }
 
 func (o Operand) String() string {
@@ -218,18 +190,18 @@ func (o Operand) String() string {
 
 func ImmediateOperand(imm Immediate) *Operand {
 	return &Operand{
-		Value:  imm,
-		Source: ValueSourceImmediate,
+		Value: imm,
+		Kind:  OperandKindImmediate,
 	}
 }
 
 type UnOp struct {
-	Op  Operator `xc:"o"`
-	Dst *Operand `xc:"d"`
-	Src *Operand `xc:"s"`
+	Op  Operation `xc:"o"`
+	Dst *Operand  `xc:"d"`
+	Src *Operand  `xc:"s"`
 }
 
-func (o UnOp) xenon() string {
+func (o UnOp) Name() string {
 	return "uop"
 }
 
@@ -238,13 +210,13 @@ func (o UnOp) String() string {
 }
 
 type BinOp struct {
-	Op    Operator `xc:"o"`
-	Dst   *Operand `xc:"d"`
-	Left  *Operand `xc:"l"`
-	Right *Operand `xc:"r"`
+	Op    Operation `xc:"o"`
+	Dst   *Operand  `xc:"d"`
+	Left  *Operand  `xc:"l"`
+	Right *Operand  `xc:"r"`
 }
 
-func (o BinOp) xenon() string {
+func (o BinOp) Name() string {
 	return "bop"
 }
 
@@ -254,7 +226,7 @@ func (o BinOp) String() string {
 
 type Return struct{}
 
-func (r Return) xenon() string {
+func (r Return) Name() string {
 	return "ret"
 }
 
@@ -270,7 +242,7 @@ func (e CallExtern) String() string {
 	return fmt.Sprintf("CALL %s", e.Func)
 }
 
-func (e CallExtern) xenon() string {
+func (e CallExtern) Name() string {
 	return "ext"
 }
 
@@ -282,50 +254,40 @@ func (c Call) String() string {
 	return fmt.Sprintf("CALL %s", c.Func)
 }
 
-func (c Call) xenon() string {
+func (c Call) Name() string {
 	return "call"
 }
 
-func shortKind(k compiler.Kind) string {
+func shortKind(k Kind) string {
 	switch k {
-	case compiler.KindBool:
+	case KindBool:
 		return "B"
-	case compiler.KindInt:
+	case KindInt:
 		return "I"
-	case compiler.KindFloat:
+	case KindFloat:
 		return "F"
-	case compiler.KindString:
+	case KindString:
 		return "S"
-	case compiler.KindPointer:
+	case KindPointer:
 		return "P"
-	case compiler.KindTuple:
+	case KindTuple:
 		return "T"
-	case compiler.KindSlice:
+	case KindSlice:
 		return "["
-	case compiler.KindMap:
+	case KindMap:
 		return "M"
-	case compiler.KindStruct:
+	case KindStruct:
 		return "X"
 	default:
 		return "U"
 	}
 }
 
-type Operator string
-
-func BinaryOperator(left compiler.Kind, op compiler.Operator, right compiler.Kind) Operator {
-	return Operator(fmt.Sprintf("%s%s%s", shortKind(left), string(op), shortKind(right)))
-}
-
-func UnaryOperator(op compiler.Operator, operand compiler.Kind) Operator {
-	return Operator(fmt.Sprintf("%s%s", string(op), shortKind(operand)))
-}
-
 type Jmp struct {
 	Dst *Operand `xc:"d"`
 }
 
-func (j Jmp) xenon() string {
+func (j Jmp) Name() string {
 	return "jmp"
 }
 
@@ -337,7 +299,7 @@ type JmpR struct {
 	Dst *Operand `xc:"d"`
 }
 
-func (j JmpR) xenon() string {
+func (j JmpR) Name() string {
 	return "jmpr"
 }
 
@@ -351,7 +313,7 @@ type JmpRC struct {
 	Dst    *Operand `xc:"d"`
 }
 
-func (j JmpRC) xenon() string {
+func (j JmpRC) Name() string {
 	return "jmprc"
 }
 
@@ -369,7 +331,7 @@ type Make struct {
 	Size *Operand `xc:"s"`
 }
 
-func (Make) xenon() string {
+func (Make) Name() string {
 	return "make"
 }
 
@@ -404,7 +366,7 @@ type LAddr struct {
 	Src *Operand `xc:"s"`
 }
 
-func (LAddr) xenon() string {
+func (LAddr) Name() string {
 	return "laddr"
 }
 

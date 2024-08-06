@@ -8,12 +8,14 @@ import (
 	"reflect"
 	"slices"
 	"unicode"
+
+	"github.com/rhino1998/aeon/pkg/compiler"
 )
 
 var (
-	tupleType = reflect.TypeOf(Tuple{})
-	mapType   = reflect.TypeOf(Map{})
-	sliceType = reflect.TypeOf(Slice{})
+	tupleType = reflect.TypeOf(compiler.Tuple{})
+	mapType   = reflect.TypeOf(compiler.Map{})
+	sliceType = reflect.TypeOf(compiler.Slice{})
 )
 
 func marshalXenon(v reflect.Value) ([]byte, error) {
