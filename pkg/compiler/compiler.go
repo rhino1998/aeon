@@ -37,32 +37,42 @@ func New(logger *slog.Logger, config Config) (*Compiler, error) {
 	}, nil
 }
 
-func (c *Compiler) Compile(ctx context.Context) (*Program, error) {
+func (c *Compiler) Compile(ctx context.Context) (_ *Program, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	prog := newProgram()
 	for _, file := range c.Config.Files {
 		f, err := c.Config.Src.Open(file)
 		if err != nil {
-			return nil, fmt.Errorf("failed to open file %q: %w", file, err)
+			errs.Add(err)
+			continue
 		}
 		ast, err := parser.ParseReader(file, f, parser.InitState("filename", file))
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse file %q: %w", file, err)
+			errs.Add(err)
+			continue
 		}
 
 		err = c.compileFile(prog, file, ast.(parser.File))
 		if err != nil {
-			return nil, CompilerError{err}
+			errs.Add(err)
+			continue
 		}
 	}
 
-	err := c.resolveProgramTypes(prog)
+	err = c.resolveProgramTypes(prog)
 	if err != nil {
-		return nil, CompilerError{err}
+		errs.Add(err)
+		return nil, errs
 	}
 
 	err = prog.compileBytecode(ctx)
 	if err != nil {
-		return nil, CompilerError{err}
+		errs.Add(err)
+		return nil, errs
 	}
 
 	return prog, nil

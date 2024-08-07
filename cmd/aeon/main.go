@@ -133,6 +133,12 @@ func main() {
 			{
 				Name:  "run",
 				Usage: "Generate Aeon bytecode and execute it",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "debug",
+						Aliases: []string{"d"},
+					},
+				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					if c.Args().Len() != 1 {
 						return fmt.Errorf("must provide at least one aeon file or directory as argument")
@@ -175,7 +181,7 @@ func main() {
 						os.Exit(1)
 					}
 
-					runtime, err := xenon.NewRuntime(prog, xenon.DefaultExternFuncs(), 5, 16)
+					runtime, err := xenon.NewRuntime(prog, xenon.DefaultExternFuncs(), 5, 16, c.Bool("debug"))
 					if err != nil {
 						return err
 					}
@@ -190,7 +196,12 @@ func main() {
 						return err
 					}
 
-					return runtime.Run(ctx, "main.main")
+					err = runtime.Run(ctx, "main.main")
+					if err != nil {
+						return err
+					}
+
+					return nil
 				},
 			},
 		},

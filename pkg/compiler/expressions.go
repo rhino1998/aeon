@@ -1,6 +1,10 @@
 package compiler
 
-import "github.com/rhino1998/aeon/pkg/parser"
+import (
+	"strconv"
+
+	"github.com/rhino1998/aeon/pkg/parser"
+)
 
 type Expression interface {
 	Type() Type
@@ -21,6 +25,17 @@ func (e *DotExpression) Type() Type {
 		return UnknownType
 	case *MapType:
 		return typ.Value()
+	case *TupleType:
+		index, err := strconv.Atoi(e.Key)
+		if err != nil {
+			return UnknownType
+		}
+
+		if index >= len(typ.Elems()) {
+			return UnknownType
+		}
+
+		return typ.Elems()[index]
 	default:
 		return UnknownType
 	}

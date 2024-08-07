@@ -29,8 +29,8 @@ func (p *Program) Functions() []*Function {
 	return p.root.Functions()
 }
 
-func (p *Program) FrameSize() int {
-	return p.registers
+func (p *Program) FrameSize() AddrOffset {
+	return AddrOffset(p.registers)
 }
 
 func (p *Program) AddPackage(name string) *Package {
@@ -118,4 +118,12 @@ func (p *Package) SetAddr(addr Addr) {
 	if p.varinit != nil {
 		p.varinit.SetAddr(p.varinit.Addr() + addr)
 	}
+}
+
+func (p *Package) Globals() []*Variable {
+	return p.scope.Variables()
+}
+
+func (p *Package) Constants() []*Constant {
+	return p.scope.Constants()
 }

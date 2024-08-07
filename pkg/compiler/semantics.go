@@ -18,6 +18,10 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 			pkg.scope.put(SymbolStub(decl.Name))
 		case parser.ExternFunctionDeclaration:
 			pkg.scope.put(SymbolStub(decl.Name))
+		case parser.VarDeclaration:
+			pkg.scope.put(SymbolStub(decl.Name))
+		case parser.ConstDeclaration:
+			pkg.scope.put(SymbolStub(decl.Name))
 		}
 	}
 
@@ -53,6 +57,28 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 
 				return err
 			}
+		case parser.VarDeclaration:
+			err := c.compileVarDeclaration(pkg, pkg.scope, decl)
+			if err != nil {
+				var posError *parser.PositionError
+				if !errors.As(err, &posError) {
+					return FileError{File: filename, Err: err}
+				}
+
+				return err
+			}
+		case parser.ConstDeclaration:
+			err := c.compileConstDeclaration(pkg, pkg.scope, decl)
+			if err != nil {
+				var posError *parser.PositionError
+				if !errors.As(err, &posError) {
+					return FileError{File: filename, Err: err}
+				}
+
+				return err
+			}
+		default:
+			return decl.WrapError(fmt.Errorf("unrecognized declaration type: %T", decl))
 		}
 	}
 
@@ -90,6 +116,8 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 		}
 
 		f.ret = typ
+	} else {
+		f.ret = VoidType
 	}
 
 	p.prog.externFuncs[f.Name()] = f
@@ -109,6 +137,73 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 	}
 
 	return scope.put(t)
+}
+
+func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl parser.VarDeclaration) error {
+	v := &Variable{
+		name:   string(decl.Name),
+		global: true,
+	}
+	if decl.Type != nil {
+		typ, err := c.compileTypeReference(scope, *decl.Type)
+		if err != nil {
+			return err
+		}
+
+		v.typ = typ
+	}
+
+	if decl.Expr != nil {
+		expr, err := c.compileExpression(scope, *decl.Expr)
+		if err != nil {
+			return err
+		}
+
+		v.expr = expr
+
+		if v.typ == nil {
+			v.typ = expr.Type()
+		}
+	}
+
+	if v.typ == nil {
+		return decl.WrapError(fmt.Errorf("variable declaration must have a type or an expression"))
+	}
+
+	return scope.put(v)
+}
+
+func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl parser.ConstDeclaration) error {
+	v := &Constant{
+		name: string(decl.Name),
+	}
+	if decl.Type != nil {
+		typ, err := c.compileTypeReference(scope, *decl.Type)
+		if err != nil {
+			return err
+		}
+
+		v.typ = typ
+	}
+
+	if decl.Expr != nil {
+		expr, err := c.compileExpression(scope, *decl.Expr)
+		if err != nil {
+			return err
+		}
+
+		v.expr = expr
+
+		if v.typ == nil {
+			v.typ = expr.Type()
+		}
+	}
+
+	if v.typ == nil {
+		return decl.WrapError(fmt.Errorf("const declaration must have a type or an expression"))
+	}
+
+	return scope.put(v)
 }
 
 func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Type, error) {
@@ -200,6 +295,8 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 		}
 
 		f.ret = typ
+	} else {
+		f.ret = VoidType
 	}
 
 	f.symbols.put(f)
@@ -487,15 +584,15 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	switch expr := expr.(type) {
 	case parser.NumberLiteral:
 		if expr.IsInteger() {
-			return &Literal[int64]{
-				value: int64(expr.Value),
+			return &Literal[Int]{
+				value: Int(expr.Value),
 				typ:   KindType(KindInt),
 
 				Position: expr.Position,
 			}, nil
 		} else {
-			return &Literal[float64]{
-				value: expr.Value,
+			return &Literal[Float]{
+				value: Float(expr.Value),
 
 				typ: KindType(KindFloat),
 
@@ -503,16 +600,16 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 			}, nil
 		}
 	case parser.StringLiteral:
-		return &Literal[string]{
-			value: expr.Value,
+		return &Literal[String]{
+			value: String(expr.Value),
 
 			typ: KindType(KindString),
 
 			Position: expr.Position,
 		}, nil
 	case parser.BooleanLiteral:
-		return &Literal[bool]{
-			value: expr.Value,
+		return &Literal[Bool]{
+			value: Bool(expr.Value),
 
 			typ: KindType(KindBool),
 

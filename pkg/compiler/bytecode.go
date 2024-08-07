@@ -25,40 +25,11 @@ func (s *BytecodeSnippet) Add(bcs ...Bytecode) {
 	*s = append(*s, bcs...)
 }
 
-type OperandKind int
-
-const (
-	OperandKindImmediate OperandKind = 0
-	OperandKindRegister  OperandKind = 1
-	OperandKindIndirect  OperandKind = 2
-	OperandKindExtern    OperandKind = 3
-)
-
-func (s OperandKind) MarshalXenon() ([]byte, error) {
-	switch s {
-	case OperandKindImmediate:
-		return []byte("I"), nil
-	case OperandKindRegister:
-		return []byte("R"), nil
-	case OperandKindIndirect:
-		return []byte("*"), nil
-	default:
-		return nil, fmt.Errorf("invalid value source %x", s)
-	}
-}
-
-type Indirect struct {
-	Base   *Operand   `xc:"b"`
-	Offset AddrOffset `xc:"o"`
-}
-
-func (i Indirect) String() string {
-	return fmt.Sprintf("[%s %s]", i.Base, i.Offset)
-}
-
 type Int int64
 
 func (Int) immediate() {}
+
+func (Int) Kind() Kind { return KindInt }
 
 func (i Int) String() string {
 	return fmt.Sprintf("Int(%d)", int64(i))
@@ -68,9 +39,13 @@ type Float float64
 
 func (Float) immediate() {}
 
+func (Float) Kind() Kind { return KindFloat }
+
 type String string
 
 func (String) immediate() {}
+
+func (String) Kind() Kind { return KindString }
 
 func (s String) String() string {
 	return fmt.Sprintf("String(%v)", string(s))
@@ -79,6 +54,8 @@ func (s String) String() string {
 type Bool bool
 
 func (Bool) immediate() {}
+
+func (Bool) Kind() Kind { return KindBool }
 
 func (b Bool) String() string {
 	return fmt.Sprintf("Bool(%v)", bool(b))
@@ -108,6 +85,7 @@ func (o AddrOffset) String() string {
 
 type Immediate interface {
 	immediate()
+	Kind() Kind
 }
 
 type Struct map[string]any
@@ -148,9 +126,9 @@ func (Nop) Name() string {
 }
 
 type Mov struct {
-	Src  *Operand `xc:"s"`
-	Dst  *Operand `xc:"d"`
-	Size int      `xc:"c"`
+	Src  *Operand   `xc:"s"`
+	Dst  *Operand   `xc:"d"`
+	Size AddrOffset `xc:"c"`
 }
 
 func (m Mov) Name() string {
@@ -194,46 +172,6 @@ type Convert[To, From any] struct {
 type ConvertIntFloat = Convert[int64, float64]
 type ConvertFloatInt = Convert[float64, int64]
 
-type Operand struct {
-	Kind  OperandKind `xc:"k"`
-	Value any         `xc:"v"`
-}
-
-func (o *Operand) Offset(offset AddrOffset) *Operand {
-	if offset == 0 {
-		return o
-	}
-
-	return &Operand{
-		Kind: OperandKindIndirect,
-		Value: Indirect{
-			Base:   o.Value.(Indirect).Base,
-			Offset: o.Value.(Indirect).Offset + offset,
-		},
-	}
-}
-
-func (o *Operand) Dereference() *Operand {
-	return &Operand{
-		Kind: OperandKindIndirect,
-		Value: Indirect{
-			Base:   o,
-			Offset: 0,
-		},
-	}
-}
-
-func (o Operand) String() string {
-	return fmt.Sprintf("%s", o.Value)
-}
-
-func ImmediateOperand(imm Immediate) *Operand {
-	return &Operand{
-		Value: imm,
-		Kind:  OperandKindImmediate,
-	}
-}
-
 type UnOp struct {
 	Op  Operation `xc:"o"`
 	Dst *Operand  `xc:"d"`
@@ -263,34 +201,25 @@ func (o BinOp) String() string {
 	return fmt.Sprintf("BinOp(%s) %v = %v %v %v", o.Op, o.Dst, o.Left, o.Op, o.Right)
 }
 
-type Return struct{}
+type Return struct {
+	Args AddrOffset `xc:"s"`
+}
 
 func (r Return) Name() string {
 	return "ret"
 }
 
 func (r Return) String() string {
-	return fmt.Sprintf("RET")
-}
-
-type CallExtern struct {
-	Func string `xc:"f"`
-}
-
-func (e CallExtern) String() string {
-	return fmt.Sprintf("CALL %s", e.Func)
-}
-
-func (e CallExtern) Name() string {
-	return "ext"
+	return fmt.Sprintf("RET(%s)", r.Args)
 }
 
 type Call struct {
-	Func *Operand `xc:"f"`
+	Args AddrOffset `xc:"a"`
+	Func *Operand   `xc:"f"`
 }
 
 func (c Call) String() string {
-	return fmt.Sprintf("CALL %s", c.Func)
+	return fmt.Sprintf("CALL(%s) %s", c.Args, c.Func)
 }
 
 func (c Call) Name() string {

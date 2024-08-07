@@ -53,7 +53,7 @@ File <- pkg:Package __ decls:(Declaration)* EOF {
   }, nil
 }
 
-Keyword <- "map" / "func" / "if" / "else" / "for" / "package" / "var" / "extern"
+Keyword <- "map" / "func" / "if" / "else" / "for" / "package" / "var" / "extern" / "const"
 
 Package <- "package" _ name:Identifier {
   return Package{
@@ -61,7 +61,7 @@ Package <- "package" _ name:Identifier {
   }, nil
 }
 
-Declaration <- _ decl:(FunctionDeclaration / ExternFuncDeclaration / TypeDeclaration / VarDeclaration) __ {
+Declaration <- _ decl:(FunctionDeclaration / ExternFuncDeclaration / TypeDeclaration / VarDeclaration / ConstDeclaration) __ {
   return decl, nil
 }
 
@@ -69,6 +69,20 @@ TypeDeclaration <- "type" _ name:Identifier _ typ:Type {
   return TypeDeclaration{
     Name: name.(Identifier),
     Type: typ.(Type),
+  }, nil
+}
+
+ConstDeclaration <- "const" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
+  if typ == nil && exp == nil {
+    return nil, fmt.Errorf("var statement must have a type or an expression")
+  }
+
+  return ConstDeclaration{
+    Name: name.(Identifier),
+    Expr: maybePtr[Expr](exp),
+    Type: maybePtr[Type](typ),
+
+    Position: pos(c),
   }, nil
 }
 
@@ -92,6 +106,10 @@ TupleTypeList <- _ elem:Type _ rest:TupleTypeListComma? {
 
 TupleTypeListComma <- ',' rest:TupleTypeList {
   return rest, nil
+}
+
+TupleKey <- [0-9]+ {
+  return Identifier(c.text), nil
 }
 
 MapType <- "map" _ '[' _ key:Type _ ']' _ value:Type {
@@ -129,7 +147,7 @@ VarDeclaration <- "var" _ name:Identifier _ typ:Type? _ exp:VarDeclarationExpr? 
     return nil, fmt.Errorf("var statement must have a type or an expression")
   }
 
-  return &VarDeclaration{
+  return VarDeclaration{
     Name: name.(Identifier),
     Expr: maybePtr[Expr](exp),
     Type: maybePtr[Type](typ),
@@ -322,6 +340,7 @@ NumberLiteral <- '-' ? ( [0-9]+ / [0-9]+.[0-9]+) {
   }, nil
 }
 
+
 StringLiteral <- '"' ( !EscapedChar . / '\\' EscapeSequence )* '"' {
     c.text = bytes.Replace(c.text, []byte(`\/`), []byte(`/`), -1)
     str, err := strconv.Unquote(string(c.text))
@@ -375,7 +394,7 @@ CallArgumentListComma <- ',' rest:CallArgumentList {
   return rest, nil
 }
 
-DotExpr <- exp:Expr '.' ident:Identifier {
+DotExpr <- exp:Expr '.' ident:(Identifier / TupleKey) {
   return DotExpr{
     Expr:exp.(Expr),
     Key:ident.(Identifier),

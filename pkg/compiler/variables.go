@@ -7,7 +7,7 @@ import (
 type Variable struct {
 	name string
 	typ  Type
-	expr *any
+	expr Expression
 
 	global   bool
 	escaping bool
@@ -31,6 +31,20 @@ func (v *Variable) Escaping() bool {
 
 func (v *Variable) SetEscaping(escaping bool) {
 	v.escaping = true
+}
+
+type Constant struct {
+	name string
+	typ  Type
+	expr Expression
+}
+
+func (v *Constant) Name() string {
+	return v.name
+}
+
+func (v *Constant) Type() Type {
+	return v.typ
 }
 
 type SymbolReferenceExpression struct {

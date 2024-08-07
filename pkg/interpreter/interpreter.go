@@ -77,7 +77,7 @@ func (s *State) executeFunction(scope *Scope, f *compiler.Function, args ...Valu
 		err := s.executeStatement(scope, stmt, &ret)
 		if err != nil {
 			if errors.Is(err, ErrReturn) {
-				if ret != nil && f.Return() == nil {
+				if ret != nil && f.Return() == compiler.VoidType {
 					return nil, fmt.Errorf("unexpected return value in function %s", f.Name())
 				}
 
@@ -301,13 +301,13 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 
 func (s *State) executeExpression(scope *Scope, expr compiler.Expression) (Value, error) {
 	switch expr := expr.(type) {
-	case *compiler.Literal[int64]:
+	case *compiler.Literal[compiler.Int]:
 		return NewConstant(expr.Type(), expr.Value()), nil
-	case *compiler.Literal[string]:
+	case *compiler.Literal[compiler.String]:
 		return NewConstant(expr.Type(), expr.Value()), nil
-	case *compiler.Literal[float64]:
+	case *compiler.Literal[compiler.Float]:
 		return NewConstant(expr.Type(), expr.Value()), nil
-	case *compiler.Literal[bool]:
+	case *compiler.Literal[compiler.Bool]:
 		return NewConstant(expr.Type(), expr.Value()), nil
 	case *compiler.SymbolReferenceExpression:
 		val, ok := scope.Get(expr.Name())

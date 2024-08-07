@@ -58,10 +58,12 @@ type Runtime struct {
 	memPages [][PageSize]any
 }
 
-func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages int, registers int) (*Runtime, error) {
+func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages int, registers int, debug bool) (*Runtime, error) {
 	r := &Runtime{
 		prog:        prog,
 		externFuncs: externs,
+
+		debug: debug,
 
 		codePages: make([][PageSize]compiler.Bytecode, (len(prog.Bytecode())+PageSize-1)/PageSize),
 		memPages:  make([][PageSize]any, memPages),
@@ -284,8 +286,6 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 		return fmt.Errorf("failed to get entry point: %s", entryPoint)
 	}
 
-	r.debug = true
-
 	pc := f.Addr()
 
 	for {
@@ -318,8 +318,8 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			return fmt.Errorf("invalid nil bytecode: %w", err)
 		case compiler.Nop:
 		case compiler.Mov:
-			for i := 0; i < code.Size; i++ {
-				err := r.store(code.Dst.Offset(compiler.AddrOffset(i)))(r.load(code.Src.Offset(compiler.AddrOffset(i)))())
+			for i := AddrOffset(0); i < code.Size; i++ {
+				err := r.store(code.Dst.Offset(i))(r.load(code.Src.Offset(i))())
 				if err != nil {
 					return err
 				}
@@ -329,6 +329,8 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			if err != nil {
 				return fmt.Errorf("could not resolve function addr")
 			}
+
+			r.setSP(r.sp().Offset(code.Args))
 
 			switch funcType.(Int) {
 			case 0:
@@ -383,7 +385,6 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			//
 			// r.setFP(r.fp() - 1)
 			// pc = funcAddr.(compiler.Addr) // TODO: add proper pointer type
-		case compiler.CallExtern:
 		case compiler.Return:
 			pcInt, err := loadType[Int](r, r.fp())
 			if err != nil {
@@ -404,6 +405,8 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 				log.Printf("%v", r.registers[0])
 				return nil
 			}
+
+			r.setSP(r.sp().Offset(-code.Args))
 		case compiler.Jmp:
 			val, err := r.load(code.Dst)()
 			if err != nil {

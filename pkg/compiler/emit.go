@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
 )
 
 func (prog *Program) compileBytecode(ctx context.Context) error {
@@ -33,6 +34,22 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 
 func (pkg *Package) compileBytecode(ctx context.Context) error {
 	scope := NewValueScope(pkg.prog.registers, pkg.scope)
+
+	for _, constant := range pkg.Constants() {
+		// TODO: evaluate const exprs
+		switch expr := constant.expr.(type) {
+		case *Literal[String]:
+			scope.newConstant(constant.Name(), ImmediateOperand(expr.Value()))
+		case *Literal[Int]:
+			scope.newConstant(constant.Name(), ImmediateOperand(expr.Value()))
+		case *Literal[Bool]:
+			scope.newConstant(constant.Name(), ImmediateOperand(expr.Value()))
+		case *Literal[Float]:
+			scope.newConstant(constant.Name(), ImmediateOperand(expr.Value()))
+		default:
+			return expr.WrapError(fmt.Errorf("invalid constant type %T", expr))
+		}
+	}
 
 	varInitFunc, err := pkg.compileVarInit(ctx, scope)
 	if err != nil {
@@ -80,56 +97,69 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		Right: numLocals,
 	})
 
+	for _, global := range pkg.Globals() {
+		ptr := scope.newGlobal(global.Name(), global.Type())
+		if global.expr != nil {
+			exprBC, exprOp, err := pkg.prog.compileBCExpression(ctx, global.expr, scope, ptr)
+			if err != nil {
+				return nil, err
+			}
+
+			f.bytecode.Add(exprBC...)
+
+			if exprOp != ptr {
+				f.bytecode.Add(Mov{
+					Src:  exprOp,
+					Dst:  ptr,
+					Size: global.Type().Size(),
+				})
+			}
+		} else {
+			exprBC, exprOp, err := pkg.prog.compileBCZeroValue(ctx, global.Type(), scope, ptr)
+			if err != nil {
+				return nil, err
+			}
+
+			f.bytecode.Add(exprBC...)
+
+			if exprOp != ptr {
+				f.bytecode.Add(Mov{
+					Src:  exprOp,
+					Dst:  ptr,
+					Size: global.Type().Size(),
+				})
+			}
+		}
+	}
+
 	for _, externFunc := range pkg.ExternFunctions() {
 		ptr := scope.newGlobal(externFunc.Name(), externType)
-		f.bytecode.Add(
-			Mov{
-				Dst:  ptr,
-				Src:  ImmediateOperand(ExternFuncKindInt),
-				Size: 1,
-			},
-			Mov{
-				Dst:  ptr.Offset(1),
-				Src:  ImmediateOperand(String(externFunc.Name())),
-				Size: 1,
-			},
-			Mov{
-				Dst:  ptr.Offset(2),
-				Src:  ImmediateOperand(Int(0)),
-				Size: 1,
-			},
-			Mov{
-				Dst:  ptr.Offset(3),
-				Src:  ImmediateOperand(String(externFunc.Name())),
-				Size: 1,
-			},
-		)
+		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+			NewLiteral(Int(0)),
+			NewLiteral(String(externFunc.Name())),
+			NewLiteral(Int(0)),
+			NewLiteral(String(externFunc.Name())),
+		}, scope, ptr)
+		if err != nil {
+			return nil, err
+		}
+
+		f.bytecode.Add(hdrBC...)
 	}
 
 	for _, fun := range pkg.Functions() {
 		ptr := scope.newGlobal(fun.Name(), funcType)
-		f.bytecode.Add(
-			Mov{
-				Dst:  ptr,
-				Src:  ImmediateOperand(FuncKindInt),
-				Size: 1,
-			},
-			Mov{
-				Dst:  ptr.Offset(1),
-				Src:  ImmediateOperand(String(fun.Name())),
-				Size: 1,
-			},
-			Mov{
-				Dst:  ptr.Offset(2),
-				Src:  ImmediateOperand(Int(0)),
-				Size: 1,
-			},
-			Mov{
-				Dst:  ptr.Offset(3),
-				Src:  fun.AddrOp(),
-				Size: 1,
-			},
-		)
+		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+			NewLiteral(Int(0)),
+			NewLiteral(String(fun.Name())),
+			NewLiteral(Int(0)),
+			newOperandExpression(fun.AddrOp(), KindInt),
+		}, scope, ptr)
+		if err != nil {
+			return nil, err
+		}
+
+		f.bytecode.Add(hdrBC...)
 	}
 
 	f.bytecode.Add(Return{})
@@ -155,7 +185,7 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 		Right: numLocals,
 	})
 
-	offset := 1
+	var offset AddrOffset = 1
 	for _, param := range f.Parameters() {
 		if param.Name() == "" {
 			continue
@@ -203,13 +233,42 @@ func (prog *Program) compileBCGlobal(ctx context.Context, name string, expr Expr
 	return bc, nil
 }
 
-func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, vs *ValueScope) (BytecodeSnippet, *Operand, error) {
-	var bcs BytecodeSnippet
+func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *ValueScope) (BytecodeSnippet, *Operand, error) {
+	var bc BytecodeSnippet
 	switch expr := expr.(type) {
 	case *SymbolReferenceExpression:
-		var _ = bcs
-		return nil, vs.Get(expr.Name()), nil
+		op, ok := scope.Get(expr.Name())
+		if !ok {
+			return nil, nil, expr.WrapError(fmt.Errorf("cannot assign to unknown symbol %q", expr.Name()))
+		}
+		return nil, op, nil
+	case *ParenthesizedExpression:
+		return prog.compileBCLHS(ctx, expr, scope)
+	case *DotExpression:
+		receiverTmp := scope.allocTemp(expr.Receiver.Type())
+		defer scope.deallocTemp(receiverTmp)
+		receiverBC, receiverOp, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		if err != nil {
+			return nil, nil, err
+		}
 
+		bc.Add(receiverBC...)
+
+		switch typ := BaseType(expr.Receiver.Type()).(type) {
+		case *TupleType:
+			index, err := strconv.Atoi(expr.Key)
+			if err != nil {
+				return nil, nil, expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key))
+			}
+
+			if index >= len(typ.Elems()) {
+				return nil, nil, expr.WrapError(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", index, len(typ.Elems())))
+			}
+
+			return bc, receiverOp.Offset(typ.ElemOffset(index)), nil
+		default:
+			return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+		}
 	default:
 		return nil, nil, fmt.Errorf("invalid lhs %T", expr)
 	}
@@ -355,11 +414,17 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		return bc, nil
 	case *ReturnStatement:
-		if scope.function.Return() != nil {
+		var offset AddrOffset
+		offset += scope.function.Return().Size()
+		for _, param := range scope.function.Parameters() {
+			offset += param.Type().Size()
+		}
+
+		if scope.function.Return() != VoidType {
 			var exprBC []Bytecode
 			var err error
 
-			returnVar := scope.Get("__return")
+			returnVar, _ := scope.Get("__return")
 			exprBC, exprOp, err := prog.compileBCExpression(ctx, stmt.Expression, scope, returnVar)
 			if err != nil {
 				return nil, err
@@ -376,16 +441,18 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			}
 		}
 
-		bc.Add(Return{})
+		bc.Add(Return{
+			Args: offset,
+		})
 
 		return bc, nil
 	case *ForStatement:
-		forVS := scope.sub(stmt.Scope)
+		forScope := scope.sub(stmt.Scope)
 
 		var err error
 		var initBC []Bytecode
 		if stmt.Init != nil {
-			initBC, err = prog.compileBCStatement(ctx, stmt.Init, forVS)
+			initBC, err = prog.compileBCStatement(ctx, stmt.Init, forScope)
 			if err != nil {
 				return nil, err
 			}
@@ -393,7 +460,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		var bodyBC []Bytecode
 		for _, subStmt := range stmt.Body {
-			bodyStmtBC, err := prog.compileBCStatement(ctx, subStmt, forVS)
+			bodyStmtBC, err := prog.compileBCStatement(ctx, subStmt, forScope)
 			if err != nil {
 				return nil, err
 			}
@@ -403,7 +470,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		var stepBC []Bytecode
 		if stmt.Step != nil {
-			stepBC, err = prog.compileBCStatement(ctx, stmt.Step, forVS)
+			stepBC, err = prog.compileBCStatement(ctx, stmt.Step, forScope)
 			if err != nil {
 				return nil, err
 			}
@@ -411,17 +478,19 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		var condBC BytecodeSnippet
 		if stmt.Condition != nil {
-			condReg := forVS.allocTemp(stmt.Condition.Type())
-			defer forVS.deallocTemp(condReg)
+			condTmp := forScope.allocTemp(stmt.Condition.Type())
+			defer forScope.deallocTemp(condTmp)
 
-			condBC, condReg, err = prog.compileBCExpression(ctx, stmt.Condition, forVS, condReg)
+			var condOp *Operand
+
+			condBC, condOp, err = prog.compileBCExpression(ctx, stmt.Condition, forScope, condTmp)
 			if err != nil {
 				return nil, err
 			}
 
 			condBC.Add(JmpRC{
 				Invert: true,
-				Src:    condReg,
+				Src:    condOp,
 				Dst:    ImmediateOperand(Int(len(stepBC) + len(bodyBC) + 1)),
 			})
 		}
@@ -447,7 +516,6 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 			bc.Add(exprBC...)
 		} else {
-			log.Println(stmt.Expression.Type())
 			exprBC, _, err := prog.compileBCExpression(ctx, stmt.Expression, scope, nil)
 			if err != nil {
 				return nil, err
@@ -511,7 +579,9 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 	}
 }
 
-func (p *Program) compileBCZeroValue(ctx context.Context, typ Type, vs *ValueScope, dst *Operand) (BytecodeSnippet, *Operand, error) {
+func (p *Program) compileBCZeroValue(ctx context.Context, typ Type, scope *ValueScope, dst *Operand) (BytecodeSnippet, *Operand, error) {
+	var bc BytecodeSnippet
+
 	switch typ := BaseType(typ).(type) {
 	case *BasicType:
 		var imm Immediate
@@ -530,7 +600,30 @@ func (p *Program) compileBCZeroValue(ctx context.Context, typ Type, vs *ValueSco
 
 		return nil, ImmediateOperand(imm), nil
 	case *PointerType:
-		return nil, ImmediateOperand(Addr(0)), nil
+		return nil, ImmediateOperand(Int(0)), nil
+	case *TupleType:
+		var offset AddrOffset
+		for _, elem := range typ.Elems() {
+			dst := dst.Offset(offset)
+			elemBC, elemOp, err := p.compileBCZeroValue(ctx, elem, scope, dst)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			offset += elem.Size()
+
+			bc.Add(elemBC...)
+
+			if elemOp != dst {
+				bc.Add(Mov{
+					Src:  elemOp,
+					Dst:  dst,
+					Size: elem.Size(),
+				})
+			}
+		}
+
+		return bc, dst, nil
 	default:
 		return nil, nil, fmt.Errorf("unhandled zero value for type %s", typ)
 	}
@@ -539,17 +632,22 @@ func (p *Program) compileBCZeroValue(ctx context.Context, typ Type, vs *ValueSco
 func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, scope *ValueScope, dst *Operand) ([]Bytecode, *Operand, error) {
 	var bc BytecodeSnippet
 	switch expr := expr.(type) {
-	case *Literal[int64]:
-		return nil, ImmediateOperand(Int(expr.Value())), nil
-	case *Literal[float64]:
-		return nil, ImmediateOperand(Float(expr.Value())), nil
-	case *Literal[string]:
-		return nil, ImmediateOperand(String(expr.Value())), nil
-	case *Literal[bool]:
-		return nil, ImmediateOperand(Bool(expr.Value())), nil
+	case *Literal[Int]:
+		return nil, ImmediateOperand(expr.Value()), nil
+	case *Literal[Float]:
+		return nil, ImmediateOperand(expr.Value()), nil
+	case *Literal[String]:
+		return nil, ImmediateOperand(expr.Value()), nil
+	case *Literal[Bool]:
+		return nil, ImmediateOperand(expr.Value()), nil
+	case *OperandExpression:
+		return nil, expr.Operand, nil
 	case *SymbolReferenceExpression:
-		log.Printf("%v: %s", expr.Name(), scope.Get(expr.Name()))
-		return nil, scope.Get(expr.Name()), nil
+		sym, ok := scope.Get(expr.Name())
+		if !ok {
+			return nil, nil, expr.WrapError(fmt.Errorf("unknown symbol %q", expr.Name()))
+		}
+		return nil, sym, nil
 	case *ParenthesizedExpression:
 		return prog.compileBCExpression(ctx, expr.Expression, scope, dst)
 	case *BinaryExpression:
@@ -583,9 +681,14 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			// TODO: escape analysis
 			switch subExpr := expr.Expression.(type) {
 			case *SymbolReferenceExpression:
+				sym, ok := scope.Get(subExpr.Name())
+				if !ok {
+					return nil, nil, fmt.Errorf("cannot take the address of unknown symbol %q", subExpr.Name())
+				}
+
 				bc = append(bc, LAddr{
 					Dst: dst,
-					Src: scope.Get(subExpr.Name()),
+					Src: sym,
 				})
 
 				return bc, dst, nil
@@ -613,21 +716,15 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *CallExpression:
 		callScope := scope.sub(scope.symbols)
 
-		log.Println(expr.Function)
-
 		var offset AddrOffset
 		ftype := expr.Function.Type().(*FunctionType)
 		var retVar *Operand
-		if ftype.Return != nil {
-			retVar = callScope.newArg(offset)
-			offset += AddrOffset(ftype.Return.Size())
-		}
+		retVar = callScope.newArg(offset)
+		offset += ftype.Return.Size()
 
 		for _, arg := range expr.Args {
 			argVar := callScope.newArg(offset)
-			offset += AddrOffset(arg.Type().Size())
-
-			log.Println(offset)
+			offset += arg.Type().Size()
 
 			argBC, argOp, err := prog.compileBCExpression(ctx, arg, callScope, argVar)
 			if err != nil {
@@ -645,15 +742,6 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			}
 		}
 
-		bc.Add(BinOp{
-			Op:    BinaryOperation(KindInt, OperatorAddition, KindInt),
-			Dst:   OperandRegisterSP,
-			Left:  OperandRegisterSP,
-			Right: ImmediateOperand(Int(offset)),
-		})
-
-		log.Println(bc[len(bc)-1])
-
 		callReg := callScope.allocTemp(expr.Function.Type())
 		defer callScope.deallocTemp(callReg)
 
@@ -665,6 +753,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		bc.Add(callBC...)
 
 		bc.Add(Call{
+			Args: offset,
 			Func: callOp,
 		})
 
@@ -676,15 +765,58 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			})
 		}
 
-		bc.Add(BinOp{
-			Op:    BinaryOperation(KindInt, OperatorAddition, KindInt),
-			Dst:   OperandRegisterSP,
-			Left:  OperandRegisterSP,
-			Right: ImmediateOperand(Int(-offset)),
-		})
-
 		return bc, dst, nil
+	case *DotExpression:
+		receiverTmp := scope.allocTemp(expr.Receiver.Type())
+		defer scope.deallocTemp(receiverTmp)
+		receiverBC, receiverOp, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(receiverBC...)
+
+		switch typ := BaseType(expr.Receiver.Type()).(type) {
+		case *TupleType:
+			index, err := strconv.Atoi(expr.Key)
+			if err != nil {
+				return nil, nil, expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key))
+			}
+
+			if index >= len(typ.Elems()) {
+				return nil, nil, expr.WrapError(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", index, len(typ.Elems())))
+			}
+
+			return bc, receiverOp.Offset(typ.ElemOffset(index)), nil
+		default:
+			return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+		}
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
+}
+
+func (prog *Program) compileBCValuesLiteral(ctx context.Context, exprs []Expression, scope *ValueScope, dst *Operand) (BytecodeSnippet, error) {
+	var bc BytecodeSnippet
+	var offset AddrOffset
+	for _, expr := range exprs {
+		dst := dst.Offset(offset)
+		exprBC, exprOp, err := prog.compileBCExpression(ctx, expr, scope, dst)
+		if err != nil {
+			return nil, err
+		}
+
+		bc.Add(exprBC...)
+		if exprOp != dst {
+			bc.Add(Mov{
+				Src:  exprOp,
+				Dst:  dst,
+				Size: expr.Type().Size(),
+			})
+		}
+
+		offset += expr.Type().Size()
+	}
+
+	return bc, nil
 }

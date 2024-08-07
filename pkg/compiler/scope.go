@@ -3,7 +3,6 @@ package compiler
 import (
 	"cmp"
 	"fmt"
-	"log"
 	"maps"
 	"slices"
 )
@@ -61,10 +60,6 @@ func (s *SymbolScope) Functions() []*Function {
 		return cmp.Compare(a.Name(), b.Name())
 	})
 
-	for _, f := range funcs {
-		log.Println(f.Name())
-	}
-
 	return funcs
 }
 
@@ -118,6 +113,38 @@ func (s *SymbolScope) Package() *Package {
 	}
 
 	return s.parent.Package()
+}
+
+func (s *SymbolScope) Variables() []*Variable {
+	var funcs []*Variable
+	for _, val := range s.scope {
+		switch val := val.(type) {
+		case *Variable:
+			funcs = append(funcs, val)
+		}
+	}
+
+	slices.SortFunc(funcs, func(a, b *Variable) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return funcs
+}
+
+func (s *SymbolScope) Constants() []*Constant {
+	var funcs []*Constant
+	for _, val := range s.scope {
+		switch val := val.(type) {
+		case *Constant:
+			funcs = append(funcs, val)
+		}
+	}
+
+	slices.SortFunc(funcs, func(a, b *Constant) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return funcs
 }
 
 func (s *SymbolScope) get(name string) (Symbol, bool) {
@@ -253,6 +280,10 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 	}
 }
 
+func (vs *ValueScope) newConstant(name string, value *Operand) {
+	vs.variables[name] = value
+}
+
 func (vs *ValueScope) newGlobal(name string, typ Type) *Operand {
 	if vs.parent != nil {
 		return vs.parent.newGlobal(name, typ)
@@ -261,8 +292,7 @@ func (vs *ValueScope) newGlobal(name string, typ Type) *Operand {
 	op := &Operand{
 		Kind: OperandKindIndirect,
 		Value: Indirect{
-			Base:   OperandRegisterZero,
-			Offset: vs.nextGlobal,
+			Base: ImmediateOperand(Int(vs.nextGlobal)),
 		},
 	}
 	vs.variables[name] = op
@@ -345,10 +375,8 @@ func (vs *ValueScope) deallocTemp(o *Operand) {
 		if o.Value.(Indirect).Base == OperandRegisterFP {
 			offset := o.Value.(Indirect).Offset
 			typ := vs.localOffsetTypes[offset]
-			log.Printf("%s %s", offset, vs.nextLocal-AddrOffset(typ.Size()))
 			if typ != nil && offset == vs.nextLocal-AddrOffset(typ.Size()) {
 				vs.nextLocal -= AddrOffset(typ.Size())
-				log.Println("DEALLOCED")
 			}
 
 		}
@@ -367,6 +395,11 @@ func (vs *ValueScope) Push(name string, typ Type, value *Operand) Mov {
 	}
 }
 
-func (vs *ValueScope) Get(name string) *Operand {
-	return vs.variables[name]
+func (vs *ValueScope) Get(name string) (*Operand, bool) {
+	op, ok := vs.variables[name]
+	if !ok {
+		return nil, false
+	}
+
+	return op, true
 }

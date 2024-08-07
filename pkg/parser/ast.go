@@ -79,6 +79,7 @@ type Package struct {
 
 type Declaration interface {
 	declaration()
+	WrapError(error) error
 }
 
 type TypeDeclaration struct {
@@ -150,6 +151,16 @@ type ExternFunctionDeclaration struct {
 }
 
 type VarDeclaration struct {
+	baseDeclaration
+
+	Name Identifier
+	Type *Type
+	Expr *Expr
+
+	Position
+}
+
+type ConstDeclaration struct {
 	baseDeclaration
 
 	Name Identifier

@@ -5,22 +5,21 @@ import (
 	"strings"
 )
 
-type UnspecifiedKindType struct {
-	kind Kind
-}
-
-func (t UnspecifiedKindType) Kind() Kind     { return t.kind }
-func (t UnspecifiedKindType) Name() string   { return fmt.Sprintf("<unspecified %s>", t.kind) }
-func (t UnspecifiedKindType) String() string { return fmt.Sprintf("<unspecified %s>", t.kind) }
-
 var UnknownType = unknownType{}
 
 type unknownType struct{}
 
-func (unknownType) Name() string   { return "<unknown>" }
-func (unknownType) String() string { return "<unknown>" }
-func (unknownType) Kind() Kind     { return KindUnknown }
-func (unknownType) Size() int      { return 0 }
+func (unknownType) String() string   { return "<unknown>" }
+func (unknownType) Kind() Kind       { return KindUnknown }
+func (unknownType) Size() AddrOffset { return 0 }
+
+var VoidType = voidType{}
+
+type voidType struct{}
+
+func (voidType) String() string   { return "<void>" }
+func (voidType) Kind() Kind       { return KindVoid }
+func (voidType) Size() AddrOffset { return 0 }
 
 func BaseType(typ Type) Type {
 	switch typ := typ.(type) {
@@ -153,12 +152,14 @@ func (t KindType) Kind() Kind {
 	return Kind(t)
 }
 
-func (t KindType) Size() int {
+func (t KindType) Size() AddrOffset {
 	switch t.Kind() {
+	case KindVoid:
+		return 0
 	case KindBool, KindInt, KindFloat, KindString, KindPointer:
 		return 1
 	case KindFunction:
-		return 1
+		return 4
 	case KindSlice:
 		return 3
 	default:
@@ -170,6 +171,7 @@ type Kind int
 
 const (
 	KindUnknown Kind = iota
+	KindVoid
 	KindBool
 	KindInt
 	KindFloat
@@ -212,19 +214,19 @@ func (k Kind) String() string {
 type Type interface {
 	Kind() Kind
 	String() string
-	Size() int
+	Size() AddrOffset
 }
 
 type BasicType struct {
 	name string
 	kind Kind
-	size int
+	size AddrOffset
 }
 
-func (t BasicType) Kind() Kind     { return t.kind }
-func (t BasicType) Name() string   { return t.name }
-func (t BasicType) String() string { return t.name }
-func (t BasicType) Size() int      { return t.size }
+func (t BasicType) Kind() Kind       { return t.kind }
+func (t BasicType) Name() string     { return t.name }
+func (t BasicType) String() string   { return t.name }
+func (t BasicType) Size() AddrOffset { return t.size }
 
 type ReferencedType struct {
 	s    *SymbolScope
@@ -248,7 +250,7 @@ func (t ReferencedType) String() string {
 	return t.Dereference().String()
 }
 
-func (t ReferencedType) Size() int {
+func (t ReferencedType) Size() AddrOffset {
 	return t.Dereference().Size()
 }
 
@@ -272,7 +274,7 @@ func (t DerivedType) String() string {
 
 func (t DerivedType) Underlying() Type { return t.underlying }
 
-func (t DerivedType) Size() int {
+func (t DerivedType) Size() AddrOffset {
 	return t.underlying.Size()
 }
 
@@ -284,8 +286,8 @@ type PointerType struct {
 	pointee Type
 }
 
-func (PointerType) Kind() Kind { return KindPointer }
-func (PointerType) Size() int  { return 1 }
+func (PointerType) Kind() Kind       { return KindPointer }
+func (PointerType) Size() AddrOffset { return 1 }
 
 func (t PointerType) String() string {
 	return fmt.Sprintf("*%s", t.Pointee().String())
@@ -303,8 +305,8 @@ func (t SliceType) Kind() Kind { return KindSlice }
 
 func (t SliceType) String() string { return fmt.Sprintf("[]%s", t.elem.String()) }
 
-func (t SliceType) Elem() Type { return t.elem }
-func (SliceType) Size() int    { return 3 }
+func (t SliceType) Elem() Type     { return t.elem }
+func (SliceType) Size() AddrOffset { return 3 }
 
 type TupleType struct {
 	elems []Type
@@ -322,7 +324,17 @@ func (t TupleType) String() string {
 }
 
 func (t TupleType) Elems() []Type { return t.elems }
-func (t TupleType) Size() int     { return len(t.elems) }
+func (t TupleType) ElemOffset(index int) AddrOffset {
+	var size AddrOffset
+	for _, typ := range t.elems[:index] {
+		size += typ.Size()
+	}
+
+	return size
+}
+func (t TupleType) Size() AddrOffset {
+	return t.ElemOffset(len(t.elems))
+}
 
 type MapType struct {
 	key   Type
@@ -343,7 +355,7 @@ func (t *MapType) Value() Type {
 	return t.value
 }
 
-func (*MapType) Size() int {
+func (*MapType) Size() AddrOffset {
 	return 1
 }
 
@@ -383,6 +395,6 @@ func (t FunctionType) String() string {
 	return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), retStr)
 }
 
-func (FunctionType) Size() int {
+func (FunctionType) Size() AddrOffset {
 	return 4
 }

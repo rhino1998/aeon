@@ -10,8 +10,15 @@ extern func print(string)
 
 extern func add(a int, b int) int
 
-func init() {
+var x = "hello"
 
+var y (string,int)
+
+const g = "HJJJ"
+
+func init() {
+  print(x)
+  x = "there"
   return
 }
 
@@ -20,8 +27,18 @@ func main() {
 	//
 
   for i := 0; i < 5; i++ {
-    print("HELLO")
+    print(x)
   }
+
+  y.0 = "test"
+  y.1 = 5
+
+  x = "world"
+
+  print(x)
+  print(g)
+  print(y.0)
+
   add(1,2)
 
   return

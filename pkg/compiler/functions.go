@@ -74,7 +74,7 @@ func (f *Function) Addr() Addr {
 
 func (f *Function) SetAddr(addr Addr) {
 	f.addr = addr
-	f.addrOp.Value = f.addr
+	f.addrOp.Value = Int(f.addr)
 }
 
 func (f *Function) AddrOp() *Operand {
