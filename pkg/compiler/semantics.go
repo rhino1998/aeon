@@ -168,14 +168,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 }
 
 func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.FunctionDeclaration) error {
-	qualifiedName := fmt.Sprintf("%s.%s", scope.name, decl.Name)
-
-	f := &Function{
-		name:    string(decl.Name),
-		pkg:     p,
-		symbols: newScope(scope, qualifiedName),
-	}
-	f.symbols.function = f
+	f := newFunction(string(decl.Name), p)
 
 	for _, param := range decl.Parameters {
 		var paramName string

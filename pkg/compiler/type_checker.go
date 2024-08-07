@@ -6,13 +6,37 @@ import (
 )
 
 func (c *Compiler) resolveProgramTypes(prog *Program) error {
-	for _, f := range prog.Functions() {
+	for _, pkg := range prog.Packages() {
+		err := c.resolvePackageTypes(pkg)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (c *Compiler) resolvePackageTypes(pkg *Package) error {
+
+	for _, f := range pkg.ExternFunctions() {
+		err := c.resolveExternFunctionTypes(f)
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, f := range pkg.Functions() {
 		err := c.resolveFunctionTypes(f)
 		if err != nil {
 			return err
 		}
 	}
 
+	return nil
+
+}
+
+func (c *Compiler) resolveExternFunctionTypes(f *ExternFunction) error {
 	return nil
 }
 
@@ -356,6 +380,8 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 			return nil, expr.WrapError(fmt.Errorf("undefined name %s", expr.Name()))
 		}
 
+		log.Println(sym.Type())
+
 		return expr, nil
 	case *ParenthesizedExpression:
 		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, bound)
@@ -367,7 +393,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 		return expr, nil
 	case *BinaryExpression:
-		// TODO: operatore-aware bounds
+		// TODO: operator-aware bounds
 
 		left, err := c.resolveExpressionTypes(scope, expr.Left, nil)
 		if err != nil {

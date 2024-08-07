@@ -34,7 +34,12 @@ func (p *Program) FrameSize() int {
 }
 
 func (p *Program) AddPackage(name string) *Package {
-	pkg := NewPackage(p, name)
+	pkg, ok := p.packages[name]
+	if ok {
+		return pkg
+	}
+
+	pkg = NewPackage(p, name)
 
 	p.packages[name] = pkg
 
@@ -54,10 +59,16 @@ func (p *Program) ExternFuncs() []*ExternFunction {
 	return sortedMapByKey(p.externFuncs)
 }
 
+func (p *Program) GlobalSize() int {
+	return 20
+}
+
 type Package struct {
 	name  string
 	prog  *Program
 	scope *SymbolScope
+
+	varinit *Function
 
 	addr     Addr
 	bytecode BytecodeSnippet
@@ -94,9 +105,17 @@ func (p *Package) Addr() Addr {
 	return p.addr
 }
 
+func (p *Package) Bytecode() BytecodeSnippet {
+	return p.bytecode
+}
+
 func (p *Package) SetAddr(addr Addr) {
 	p.addr = addr
 	for _, fun := range p.Functions() {
 		fun.SetAddr(fun.Addr() + addr)
+	}
+
+	if p.varinit != nil {
+		p.varinit.SetAddr(p.varinit.Addr() + addr)
 	}
 }

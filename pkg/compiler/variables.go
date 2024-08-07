@@ -1,6 +1,8 @@
 package compiler
 
-import "github.com/rhino1998/aeon/pkg/parser"
+import (
+	"github.com/rhino1998/aeon/pkg/parser"
+)
 
 type Variable struct {
 	name string

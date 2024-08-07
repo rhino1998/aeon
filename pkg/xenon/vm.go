@@ -30,6 +30,12 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				panic(s[0])
 			},
 		},
+		"add": {
+			Args: 2,
+			Func: func(s []any) any {
+				return opAdd[Int](s[0], s[1])
+			},
+		},
 	}
 }
 
@@ -42,6 +48,8 @@ type RuntimeExternFunc func([]any) any
 type Runtime struct {
 	prog        *compiler.Program
 	externFuncs RuntimeExternFuncs
+
+	debug bool
 
 	codePages [][PageSize]compiler.Bytecode
 
@@ -64,17 +72,6 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages int
 		page, pageAddr := r.splitAddr(compiler.Addr(i))
 		r.codePages[page][pageAddr] = code
 	}
-	r.setSP(0)
-	for reg := range r.registers {
-		r.registers[reg] = Int(0)
-	}
-	for range registers - 2 {
-		r.push(Int(0))
-	}
-
-	r.push(compiler.Int(0))
-
-	r.setFP(r.sp() - 1)
 
 	return r, nil
 }
@@ -264,6 +261,19 @@ func (r *Runtime) store(operand *compiler.Operand) storeFunc {
 }
 
 func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
+	for reg := range r.registers {
+		r.registers[reg] = Int(0)
+	}
+
+	r.setSP(Addr(r.prog.GlobalSize()))
+	for range len(r.registers) - 2 {
+		r.push(Int(0))
+	}
+
+	r.push(compiler.Int(0))
+
+	r.setFP(r.sp() - 1)
+
 	parts := strings.Split(entryPoint, ".")
 	pkg, ok := r.prog.Package(parts[0])
 	if !ok {
@@ -273,6 +283,8 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 	if !ok {
 		return fmt.Errorf("failed to get entry point: %s", entryPoint)
 	}
+
+	r.debug = true
 
 	pc := f.Addr()
 
@@ -289,13 +301,15 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			return err
 		}
 
-		log.Println("--------------")
-		log.Printf("%s", code)
-		log.Printf("fp: %v", r.fp())
-		log.Printf("sp: %v", r.sp())
-		log.Printf("pc: %v", pc)
-		r.printRegisters()
-		r.printStack()
+		if r.debug {
+			log.Println("--------------")
+			log.Printf("%s", code)
+			log.Printf("fp: %v", r.fp())
+			log.Printf("sp: %v", r.sp())
+			log.Printf("pc: %v", pc)
+			r.printRegisters()
+			r.printStack()
+		}
 
 		pc++
 
@@ -325,7 +339,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 
 				entry, ok := r.externFuncs[string(externName.(String))]
 				if !ok {
-					return fmt.Errorf("undefined extern func %q", code.Func)
+					return fmt.Errorf("undefined extern func %q", string(externName.(String)))
 				}
 
 				args, err := r.loadArgs(r.sp(), entry.Args)
@@ -334,7 +348,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 				}
 				ret := entry.Func(args)
 				if ret != nil {
-					r.storeAddr(r.sp()-Addr(entry.Args-1), ret)
+					r.storeAddr(r.sp()-Addr(entry.Args+1), ret)
 				}
 
 				continue

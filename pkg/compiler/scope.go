@@ -255,7 +255,7 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 
 func (vs *ValueScope) newGlobal(name string, typ Type) *Operand {
 	if vs.parent != nil {
-		return vs.newGlobal(name, typ)
+		return vs.parent.newGlobal(name, typ)
 	}
 
 	op := &Operand{

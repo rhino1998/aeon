@@ -8,13 +8,21 @@ type B int
 
 extern func print(string)
 
+extern func add(a int, b int) int
+
+func init() {
+
+  return
+}
+
 func main() {
   // test comment
 	//
-  i := print
-	i("HELLO")
-	i("WORLD")
-	i("HELLO")
+
+  for i := 0; i < 5; i++ {
+    print("HELLO")
+  }
+  add(1,2)
 
   return
 }

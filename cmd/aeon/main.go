@@ -180,6 +180,16 @@ func main() {
 						return err
 					}
 
+					err = runtime.Run(ctx, "main.varinit")
+					if err != nil {
+						return err
+					}
+
+					err = runtime.Run(ctx, "main.init")
+					if err != nil {
+						return err
+					}
+
 					return runtime.Run(ctx, "main.main")
 				},
 			},

@@ -1,6 +1,8 @@
 package compiler
 
-import "github.com/rhino1998/aeon/pkg/parser"
+import (
+	"github.com/rhino1998/aeon/pkg/parser"
+)
 
 type Function struct {
 	name string
@@ -16,6 +18,22 @@ type Function struct {
 
 	addr   Addr
 	addrOp Operand
+}
+
+func newFunction(name string, pkg *Package) *Function {
+	f := &Function{
+		name: name,
+		pkg:  pkg,
+
+		symbols: newScope(pkg.scope, name),
+
+		addrOp: Operand{
+			Kind: OperandKindImmediate,
+		},
+	}
+	f.symbols.function = f
+
+	return f
 }
 
 func (f *Function) Package() *Package {
@@ -61,6 +79,10 @@ func (f *Function) SetAddr(addr Addr) {
 
 func (f *Function) AddrOp() *Operand {
 	return &f.addrOp
+}
+
+func (f *Function) Bytecode() BytecodeSnippet {
+	return f.bytecode
 }
 
 type CallExpression struct {

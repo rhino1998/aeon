@@ -9,7 +9,17 @@ type Bytecode interface {
 	Name() string
 }
 
+type Relocatable interface {
+	SetAddr(Addr)
+	Bytecode() BytecodeSnippet
+}
+
 type BytecodeSnippet []Bytecode
+
+func (s *BytecodeSnippet) Mount(rel Relocatable) {
+	rel.SetAddr(Addr(len(*s)))
+	s.Add(rel.Bytecode()...)
+}
 
 func (s *BytecodeSnippet) Add(bcs ...Bytecode) {
 	*s = append(*s, bcs...)

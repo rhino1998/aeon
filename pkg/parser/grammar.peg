@@ -282,7 +282,7 @@ ParameterUnnamed <- typ:Type {
   }, nil
 }
 
-ParameterNamed <- name:Identifier? _ typ:Type {
+ParameterNamed <- name:Identifier _ typ:Type {
   return Parameter{
     Name: maybePtr[Identifier](name),
     Type: typ.(Type),

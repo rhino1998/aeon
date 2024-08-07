@@ -25,8 +25,7 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 			return err
 		}
 
-		pkg.SetAddr(Addr(len(prog.bytecode)))
-		prog.bytecode.Add(pkg.bytecode...)
+		prog.bytecode.Mount(pkg)
 	}
 
 	return nil
@@ -34,9 +33,56 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 
 func (pkg *Package) compileBytecode(ctx context.Context) error {
 	scope := NewValueScope(pkg.prog.registers, pkg.scope)
+
+	varInitFunc, err := pkg.compileVarInit(ctx, scope)
+	if err != nil {
+		return err
+	}
+
+	pkg.bytecode.Mount(varInitFunc)
+
+	for _, fun := range pkg.Functions() {
+		err := fun.compileBytecode(ctx, scope)
+		if err != nil {
+			return err
+		}
+
+		pkg.bytecode.Mount(fun)
+	}
+
+	for i, bc := range pkg.bytecode {
+		log.Printf("%02x: %v", i, bc)
+	}
+
+	err = pkg.scope.put(varInitFunc)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Function, error) {
+	f := newFunction("varinit", pkg)
+
+	scope = scope.sub(pkg.scope)
+
+	f.bytecode.Add(scope.Push("__funcname", IntType, ImmediateOperand(
+		String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
+	)))
+
+	numLocals := ImmediateOperand(Int(0))
+
+	f.bytecode.Add(BinOp{
+		Op:    BinaryOperation(KindInt, OperatorAddition, KindInt),
+		Dst:   OperandRegisterSP,
+		Left:  OperandRegisterSP,
+		Right: numLocals,
+	})
+
 	for _, externFunc := range pkg.ExternFunctions() {
 		ptr := scope.newGlobal(externFunc.Name(), externType)
-		pkg.bytecode.Add(
+		f.bytecode.Add(
 			Mov{
 				Dst:  ptr,
 				Src:  ImmediateOperand(ExternFuncKindInt),
@@ -62,7 +108,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 
 	for _, fun := range pkg.Functions() {
 		ptr := scope.newGlobal(fun.Name(), funcType)
-		pkg.bytecode.Add(
+		f.bytecode.Add(
 			Mov{
 				Dst:  ptr,
 				Src:  ImmediateOperand(FuncKindInt),
@@ -86,17 +132,11 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 		)
 	}
 
-	for _, fun := range pkg.Functions() {
-		err := fun.compileBytecode(ctx, scope)
-		if err != nil {
-			return err
-		}
+	f.bytecode.Add(Return{})
 
-		fun.SetAddr(Addr(len(pkg.prog.bytecode)))
-		pkg.bytecode.Add(fun.bytecode...)
-	}
+	numLocals.Value = Int(*scope.maxLocal)
 
-	return nil
+	return f, nil
 }
 
 func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error {
@@ -382,7 +422,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			condBC.Add(JmpRC{
 				Invert: true,
 				Src:    condReg,
-				Dst:    ImmediateOperand(Int(len(stepBC) + len(bodyBC))),
+				Dst:    ImmediateOperand(Int(len(stepBC) + len(bodyBC) + 1)),
 			})
 		}
 
@@ -508,6 +548,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *Literal[bool]:
 		return nil, ImmediateOperand(Bool(expr.Value())), nil
 	case *SymbolReferenceExpression:
+		log.Printf("%v: %s", expr.Name(), scope.Get(expr.Name()))
 		return nil, scope.Get(expr.Name()), nil
 	case *ParenthesizedExpression:
 		return prog.compileBCExpression(ctx, expr.Expression, scope, dst)
@@ -572,6 +613,8 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *CallExpression:
 		callScope := scope.sub(scope.symbols)
 
+		log.Println(expr.Function)
+
 		var offset AddrOffset
 		ftype := expr.Function.Type().(*FunctionType)
 		var retVar *Operand
@@ -583,6 +626,8 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		for _, arg := range expr.Args {
 			argVar := callScope.newArg(offset)
 			offset += AddrOffset(arg.Type().Size())
+
+			log.Println(offset)
 
 			argBC, argOp, err := prog.compileBCExpression(ctx, arg, callScope, argVar)
 			if err != nil {
@@ -607,6 +652,8 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			Right: ImmediateOperand(Int(offset)),
 		})
 
+		log.Println(bc[len(bc)-1])
+
 		callReg := callScope.allocTemp(expr.Function.Type())
 		defer callScope.deallocTemp(callReg)
 
@@ -625,7 +672,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			bc.Add(Mov{
 				Src:  retVar,
 				Dst:  dst,
-				Size: expr.Function.Type().Size(),
+				Size: expr.Type().Size(),
 			})
 		}
 
