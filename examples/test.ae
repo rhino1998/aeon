@@ -8,29 +8,13 @@ type B int
 
 extern func print(string)
 
-func main() string {
+func main() {
   // test comment
 	//
-	i := 0
-	print("HELLO")
-	print(i)
-	print(h(1))
-	print(h(1))
+  i := print
+	i("HELLO")
+	i("WORLD")
+	i("HELLO")
 
-  return ""
+  return
 }
-
-
-func f(a ()) int {}
-
-func g(y int) int{
-	return 3
-}
-
-func h(x int) int {
-	return 3
-}
-
-func j() () {}
-
-func k() []map[string]string {}

@@ -42,6 +42,10 @@ type Indirect struct {
 	Offset AddrOffset `xc:"o"`
 }
 
+func (i Indirect) String() string {
+	return fmt.Sprintf("[%s %s]", i.Base, i.Offset)
+}
+
 type Int int64
 
 func (Int) immediate() {}
@@ -129,13 +133,14 @@ func (Nop) String() string {
 	return "NOP"
 }
 
-func (Nop) xenon() string {
+func (Nop) Name() string {
 	return "nop"
 }
 
 type Mov struct {
-	Src *Operand `xc:"s"`
-	Dst *Operand `xc:"d"`
+	Src  *Operand `xc:"s"`
+	Dst  *Operand `xc:"d"`
+	Size int      `xc:"c"`
 }
 
 func (m Mov) Name() string {
@@ -143,7 +148,7 @@ func (m Mov) Name() string {
 }
 
 func (m Mov) String() string {
-	return fmt.Sprintf("MOV %v = %v", m.Dst, m.Src)
+	return fmt.Sprintf("MOV(%v) %v = %v", m.Size, m.Dst, m.Src)
 }
 
 type Store struct {
@@ -182,6 +187,30 @@ type ConvertFloatInt = Convert[float64, int64]
 type Operand struct {
 	Kind  OperandKind `xc:"k"`
 	Value any         `xc:"v"`
+}
+
+func (o *Operand) Offset(offset AddrOffset) *Operand {
+	if offset == 0 {
+		return o
+	}
+
+	return &Operand{
+		Kind: OperandKindIndirect,
+		Value: Indirect{
+			Base:   o.Value.(Indirect).Base,
+			Offset: o.Value.(Indirect).Offset + offset,
+		},
+	}
+}
+
+func (o *Operand) Dereference() *Operand {
+	return &Operand{
+		Kind: OperandKindIndirect,
+		Value: Indirect{
+			Base:   o,
+			Offset: 0,
+		},
+	}
 }
 
 func (o Operand) String() string {

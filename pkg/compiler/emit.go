@@ -3,62 +3,134 @@ package compiler
 import (
 	"context"
 	"fmt"
+	"log"
 )
 
 func (prog *Program) compileBytecode(ctx context.Context) error {
 	// TODO: sort by import orderings
+	registerOperands := make([]*Operand, 0)
+
+	for reg := range Register(prog.registers) {
+		registerOperands[reg] = ImmediateOperand(Int(0))
+		prog.bytecode.Add(Mov{
+			Src:  registerOperands[reg],
+			Dst:  RegisterOperand(reg),
+			Size: 1,
+		})
+	}
 
 	for _, pkg := range prog.Packages() {
 		err := pkg.compileBytecode(ctx)
 		if err != nil {
 			return err
 		}
+
+		pkg.SetAddr(Addr(len(prog.bytecode)))
+		prog.bytecode.Add(pkg.bytecode...)
 	}
 
 	return nil
 }
 
 func (pkg *Package) compileBytecode(ctx context.Context) error {
-	for _, fun := range pkg.Functions() {
+	scope := NewValueScope(pkg.prog.registers, pkg.scope)
+	for _, externFunc := range pkg.ExternFunctions() {
+		ptr := scope.newGlobal(externFunc.Name(), externType)
+		pkg.bytecode.Add(
+			Mov{
+				Dst:  ptr,
+				Src:  ImmediateOperand(ExternFuncKindInt),
+				Size: 1,
+			},
+			Mov{
+				Dst:  ptr.Offset(1),
+				Src:  ImmediateOperand(String(externFunc.Name())),
+				Size: 1,
+			},
+			Mov{
+				Dst:  ptr.Offset(2),
+				Src:  ImmediateOperand(Int(0)),
+				Size: 1,
+			},
+			Mov{
+				Dst:  ptr.Offset(3),
+				Src:  ImmediateOperand(String(externFunc.Name())),
+				Size: 1,
+			},
+		)
+	}
 
-		err := fun.compileBytecode(ctx)
+	for _, fun := range pkg.Functions() {
+		ptr := scope.newGlobal(fun.Name(), funcType)
+		pkg.bytecode.Add(
+			Mov{
+				Dst:  ptr,
+				Src:  ImmediateOperand(FuncKindInt),
+				Size: 1,
+			},
+			Mov{
+				Dst:  ptr.Offset(1),
+				Src:  ImmediateOperand(String(fun.Name())),
+				Size: 1,
+			},
+			Mov{
+				Dst:  ptr.Offset(2),
+				Src:  ImmediateOperand(Int(0)),
+				Size: 1,
+			},
+			Mov{
+				Dst:  ptr.Offset(3),
+				Src:  fun.AddrOp(),
+				Size: 1,
+			},
+		)
+	}
+
+	for _, fun := range pkg.Functions() {
+		err := fun.compileBytecode(ctx, scope)
 		if err != nil {
 			return err
 		}
 
-		fun.addr = Addr(len(pkg.prog.bytecode))
-		pkg.prog.bytecode.Add(fun.bytecode...)
+		fun.SetAddr(Addr(len(pkg.prog.bytecode)))
+		pkg.bytecode.Add(fun.bytecode...)
 	}
 
 	return nil
 }
 
-func (f *Function) compileBytecode(ctx context.Context) error {
-	vs := NewValueScope(f.pkg.prog.registers, f.symbols)
+func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error {
+	scope = scope.sub(f.symbols)
 
-	f.bytecode.Add(vs.Push("__funcname", IntType, ImmediateOperand(
+	f.bytecode.Add(scope.Push("__funcname", IntType, ImmediateOperand(
 		String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
 	)))
 
-	numLocalsOperand := ImmediateOperand(Int(0))
+	numLocals := ImmediateOperand(Int(0))
 
 	f.bytecode.Add(BinOp{
-		Op:    BinaryOperation(KindPointer, OperatorAddition, KindInt),
+		Op:    BinaryOperation(KindInt, OperatorAddition, KindInt),
 		Dst:   OperandRegisterSP,
 		Left:  OperandRegisterSP,
-		Right: numLocalsOperand,
+		Right: numLocals,
 	})
 
-	for i, param := range f.Parameters() {
+	offset := 1
+	for _, param := range f.Parameters() {
 		if param.Name() == "" {
 			continue
 		}
 
-		vs.newParam(param.Name(), -AddrOffset(f.pkg.prog.FrameSize()+1+i))
+		scope.newParam(param.Name(), -AddrOffset(f.pkg.prog.FrameSize()+offset), param.Type())
+		offset += param.Type().Size()
+	}
+
+	if f.Return() != nil {
+		scope.newParam("__return", -AddrOffset(f.pkg.prog.FrameSize()+offset), f.Return())
 	}
 
 	for _, stmt := range f.Body() {
-		bcs, err := f.pkg.prog.compileBCStatement(ctx, stmt, vs)
+		bcs, err := f.pkg.prog.compileBCStatement(ctx, stmt, scope)
 		if err != nil {
 			return err
 		}
@@ -66,14 +138,12 @@ func (f *Function) compileBytecode(ctx context.Context) error {
 		f.bytecode.Add(bcs...)
 	}
 
-	numLocalsOperand.Value = Int(*vs.maxLocal)
-
-	f.bytecode.Add(Return{})
+	numLocals.Value = Int(*scope.maxLocal)
 
 	return nil
 }
 
-func (prog *Program) compileGlobal(ctx context.Context, name string, expr Expression, scope *ValueScope, dst *Operand) (BytecodeSnippet, error) {
+func (prog *Program) compileBCGlobal(ctx context.Context, name string, expr Expression, scope *ValueScope, dst *Operand) (BytecodeSnippet, error) {
 	var bc BytecodeSnippet
 	globBC, globOp, err := prog.compileBCExpression(ctx, expr, scope, dst)
 	if err != nil {
@@ -84,8 +154,9 @@ func (prog *Program) compileGlobal(ctx context.Context, name string, expr Expres
 
 	if globOp != dst {
 		bc.Add(Mov{
-			Src: globOp,
-			Dst: dst,
+			Src:  globOp,
+			Dst:  dst,
+			Size: expr.Type().Size(),
 		})
 	}
 
@@ -110,38 +181,50 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 	case *VarStatement:
 		var err error
 		var initBC []Bytecode
-
-		reg := scope.allocTemp(stmt.Type)
-		defer scope.deallocTemp(reg)
-
 		var rhsOp *Operand
+
+		local := scope.newLocal(stmt.Variable.Name(), stmt.Expression.Type())
+
 		if stmt.Expression != nil {
-			initBC, rhsOp, err = prog.compileBCExpression(ctx, stmt.Expression, scope, reg)
+			initBC, rhsOp, err = prog.compileBCExpression(ctx, stmt.Expression, scope, local)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			initBC, rhsOp, err = prog.compileBCZeroValue(ctx, stmt.Type, scope, reg)
+			initBC, rhsOp, err = prog.compileBCZeroValue(ctx, stmt.Type, scope, local)
 			if err != nil {
 				return nil, err
 			}
 		}
 
 		bc.Add(initBC...)
-		bc.Add(scope.Push(stmt.Variable.Name(), stmt.Type, rhsOp))
+
+		if rhsOp != local {
+			bc.Add(Mov{
+				Src:  rhsOp,
+				Dst:  local,
+				Size: stmt.Type.Size(),
+			})
+		}
 
 		return bc, nil
 	case *DeclarationStatement:
-		reg := scope.allocTemp(stmt.Expression.Type())
-		defer scope.deallocTemp(reg)
+		local := scope.newLocal(stmt.Variable.Name(), stmt.Expression.Type())
 
-		initBC, rhsOp, err := prog.compileBCExpression(ctx, stmt.Expression, scope, reg)
+		initBC, rhsOp, err := prog.compileBCExpression(ctx, stmt.Expression, scope, local)
 		if err != nil {
 			return nil, err
 		}
 
 		bc.Add(initBC...)
-		bc.Add(scope.Push(stmt.Variable.Name(), stmt.Expression.Type(), rhsOp))
+
+		if rhsOp != local {
+			bc.Add(Mov{
+				Src:  rhsOp,
+				Dst:  local,
+				Size: stmt.Expression.Type().Size(),
+			})
+		}
 
 		return bc, nil
 	case *AssignmentStatement:
@@ -159,8 +242,9 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		bc.Add(rhsBC...)
 		if lhsOp != rhsOp {
 			bc.Add(Mov{
-				Dst: lhsOp,
-				Src: rhsOp,
+				Dst:  lhsOp,
+				Src:  rhsOp,
+				Size: stmt.Right.Type().Size(),
 			})
 		}
 
@@ -234,17 +318,20 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		if scope.function.Return() != nil {
 			var exprBC []Bytecode
 			var err error
-			exprBC, exprOp, err := prog.compileBCExpression(ctx, stmt.Expression, scope, OperandRegisterReturn)
+
+			returnVar := scope.Get("__return")
+			exprBC, exprOp, err := prog.compileBCExpression(ctx, stmt.Expression, scope, returnVar)
 			if err != nil {
 				return nil, err
 			}
 
 			bc.Add(exprBC...)
 
-			if exprOp != OperandRegisterReturn {
+			if exprOp != returnVar {
 				bc.Add(Mov{
-					Dst: OperandRegisterReturn,
-					Src: exprOp,
+					Dst:  returnVar,
+					Src:  exprOp,
+					Size: stmt.Expression.Type().Size(),
 				})
 			}
 		}
@@ -320,6 +407,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 			bc.Add(exprBC...)
 		} else {
+			log.Println(stmt.Expression.Type())
 			exprBC, _, err := prog.compileBCExpression(ctx, stmt.Expression, scope, nil)
 			if err != nil {
 				return nil, err
@@ -485,36 +573,44 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		callScope := scope.sub(scope.symbols)
 
 		var offset AddrOffset
+		ftype := expr.Function.Type().(*FunctionType)
+		var retVar *Operand
+		if ftype.Return != nil {
+			retVar = callScope.newArg(offset)
+			offset += AddrOffset(ftype.Return.Size())
+		}
+
 		for _, arg := range expr.Args {
-			argReg := scope.newArg(offset)
+			argVar := callScope.newArg(offset)
 			offset += AddrOffset(arg.Type().Size())
 
-			argBC, argOp, err := prog.compileBCExpression(ctx, arg, callScope, argReg)
+			argBC, argOp, err := prog.compileBCExpression(ctx, arg, callScope, argVar)
 			if err != nil {
 				return nil, nil, err
 			}
 
 			bc.Add(argBC...)
 
-			if argReg != argOp {
+			if argVar != argOp {
 				bc.Add(Mov{
-					Src: argOp,
-					Dst: argReg,
+					Src:  argOp,
+					Dst:  argVar,
+					Size: arg.Type().Size(),
 				})
 			}
 		}
 
 		bc.Add(BinOp{
-			Op:    BinaryOperation(KindPointer, OperatorAddition, KindInt),
+			Op:    BinaryOperation(KindInt, OperatorAddition, KindInt),
 			Dst:   OperandRegisterSP,
 			Left:  OperandRegisterSP,
 			Right: ImmediateOperand(Int(offset)),
 		})
 
-		callReg := scope.allocTemp(expr.Function.Type())
-		defer scope.deallocTemp(callReg)
+		callReg := callScope.allocTemp(expr.Function.Type())
+		defer callScope.deallocTemp(callReg)
 
-		callBC, callOp, err := prog.compileBCExpression(ctx, expr.Function, scope, callReg)
+		callBC, callOp, err := prog.compileBCExpression(ctx, expr.Function, callScope, callReg)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -525,13 +621,16 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			Func: callOp,
 		})
 
-		bc.Add(Mov{
-			Src: OperandRegisterReturn,
-			Dst: dst,
-		})
+		if retVar != nil {
+			bc.Add(Mov{
+				Src:  retVar,
+				Dst:  dst,
+				Size: expr.Function.Type().Size(),
+			})
+		}
 
 		bc.Add(BinOp{
-			Op:    BinaryOperation(KindPointer, OperatorAddition, KindInt),
+			Op:    BinaryOperation(KindInt, OperatorAddition, KindInt),
 			Dst:   OperandRegisterSP,
 			Left:  OperandRegisterSP,
 			Right: ImmediateOperand(Int(-offset)),

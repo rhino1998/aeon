@@ -384,5 +384,5 @@ func (t FunctionType) String() string {
 }
 
 func (FunctionType) Size() int {
-	return 1
+	return 4
 }

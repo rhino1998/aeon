@@ -94,6 +94,22 @@ func (s *SymbolScope) Packages() []*Package {
 	return pkgs
 }
 
+func (s *SymbolScope) ExternFunctions() []*ExternFunction {
+	var externs []*ExternFunction
+	for _, val := range s.scope {
+		switch val := val.(type) {
+		case *ExternFunction:
+			externs = append(externs, val)
+		}
+	}
+
+	slices.SortFunc(externs, func(a, b *ExternFunction) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return externs
+}
+
 func (s *SymbolScope) Package() *Package {
 	if s.pkg != nil {
 		return s.pkg
@@ -193,9 +209,13 @@ type ValueScope struct {
 	function *Function
 	symbols  *SymbolScope
 
-	variables map[string]*Operand
-	nextLocal AddrOffset
-	maxLocal  *AddrOffset
+	nextGlobal AddrOffset
+
+	variables        map[string]*Operand
+	variableTypes    map[string]Type
+	localOffsetTypes map[AddrOffset]Type
+	nextLocal        AddrOffset
+	maxLocal         *AddrOffset
 
 	usedRegisters map[Register]bool
 	numRegisters  int
@@ -203,13 +223,16 @@ type ValueScope struct {
 
 func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
 	return &ValueScope{
-		symbols:       symbols,
-		function:      symbols.function,
-		variables:     make(map[string]*Operand),
-		nextLocal:     1,
-		maxLocal:      new(AddrOffset),
-		usedRegisters: make(map[Register]bool),
-		numRegisters:  regs,
+		symbols:          symbols,
+		function:         symbols.function,
+		variables:        make(map[string]*Operand),
+		variableTypes:    make(map[string]Type),
+		localOffsetTypes: make(map[AddrOffset]Type),
+		nextGlobal:       1,
+		nextLocal:        1,
+		maxLocal:         new(AddrOffset),
+		usedRegisters:    make(map[Register]bool),
+		numRegisters:     regs,
 	}
 }
 
@@ -218,14 +241,35 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 		parent:  vs,
 		symbols: scope,
 
-		function:  scope.function,
-		variables: maps.Clone(vs.variables),
-		maxLocal:  vs.maxLocal,
-		nextLocal: vs.nextLocal,
+		function:         scope.function,
+		variables:        maps.Clone(vs.variables),
+		variableTypes:    maps.Clone(vs.variableTypes),
+		localOffsetTypes: maps.Clone(vs.localOffsetTypes),
+		maxLocal:         vs.maxLocal,
+		nextLocal:        vs.nextLocal,
 
 		usedRegisters: maps.Clone(vs.usedRegisters),
 		numRegisters:  vs.numRegisters,
 	}
+}
+
+func (vs *ValueScope) newGlobal(name string, typ Type) *Operand {
+	if vs.parent != nil {
+		return vs.newGlobal(name, typ)
+	}
+
+	op := &Operand{
+		Kind: OperandKindIndirect,
+		Value: Indirect{
+			Base:   OperandRegisterZero,
+			Offset: vs.nextGlobal,
+		},
+	}
+	vs.variables[name] = op
+	vs.variableTypes[name] = typ
+
+	vs.nextGlobal += AddrOffset(typ.Size())
+	return op
 }
 
 func (vs *ValueScope) newArg(offset AddrOffset) *Operand {
@@ -240,7 +284,7 @@ func (vs *ValueScope) newArg(offset AddrOffset) *Operand {
 	return op
 }
 
-func (vs *ValueScope) newParam(name string, offset AddrOffset) {
+func (vs *ValueScope) newParam(name string, offset AddrOffset, typ Type) {
 	vs.variables[name] = &Operand{
 		Kind: OperandKindIndirect,
 		Value: Indirect{
@@ -248,6 +292,7 @@ func (vs *ValueScope) newParam(name string, offset AddrOffset) {
 			Offset: offset,
 		},
 	}
+	vs.variableTypes[name] = typ
 }
 
 func (vs *ValueScope) newLocal(name string, typ Type) *Operand {
@@ -260,6 +305,8 @@ func (vs *ValueScope) newLocal(name string, typ Type) *Operand {
 	}
 
 	vs.variables[name] = o
+	vs.variableTypes[name] = typ
+	vs.localOffsetTypes[vs.nextLocal] = typ
 
 	if *vs.maxLocal < vs.nextLocal {
 		*vs.maxLocal = vs.nextLocal
@@ -274,7 +321,7 @@ func (vs *ValueScope) allocTemp(typ Type) *Operand {
 	if typ.Size() == 1 {
 		for reg := range Register(vs.numRegisters) {
 			switch reg {
-			case RegisterZero, RegisterFP, RegisterSP, RegisterReturn:
+			case RegisterZero, RegisterFP, RegisterSP:
 				continue
 			default:
 				if !vs.usedRegisters[reg] {
@@ -295,8 +342,15 @@ func (vs *ValueScope) allocTemp(typ Type) *Operand {
 
 func (vs *ValueScope) deallocTemp(o *Operand) {
 	if o.Kind != OperandKindRegister {
-		if o.Value.(Indirect).Offset == vs.nextLocal-1 {
-			vs.nextLocal -= o.Value.(Indirect).Offset
+		if o.Value.(Indirect).Base == OperandRegisterFP {
+			offset := o.Value.(Indirect).Offset
+			typ := vs.localOffsetTypes[offset]
+			log.Printf("%s %s", offset, vs.nextLocal-AddrOffset(typ.Size()))
+			if typ != nil && offset == vs.nextLocal-AddrOffset(typ.Size()) {
+				vs.nextLocal -= AddrOffset(typ.Size())
+				log.Println("DEALLOCED")
+			}
+
 		}
 
 		return
@@ -307,8 +361,9 @@ func (vs *ValueScope) deallocTemp(o *Operand) {
 
 func (vs *ValueScope) Push(name string, typ Type, value *Operand) Mov {
 	return Mov{
-		Src: value,
-		Dst: vs.newLocal(name, typ),
+		Src:  value,
+		Dst:  vs.newLocal(name, typ),
+		Size: typ.Size(),
 	}
 }
 

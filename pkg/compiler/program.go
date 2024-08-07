@@ -58,6 +58,9 @@ type Package struct {
 	name  string
 	prog  *Program
 	scope *SymbolScope
+
+	addr     Addr
+	bytecode BytecodeSnippet
 }
 
 func NewPackage(prog *Program, name string) *Package {
@@ -81,4 +84,19 @@ func (p *Package) Functions() []*Function {
 
 func (p *Package) Function(name string) (*Function, bool) {
 	return p.scope.getFunction(name)
+}
+
+func (p *Package) ExternFunctions() []*ExternFunction {
+	return p.scope.ExternFunctions()
+}
+
+func (p *Package) Addr() Addr {
+	return p.addr
+}
+
+func (p *Package) SetAddr(addr Addr) {
+	p.addr = addr
+	for _, fun := range p.Functions() {
+		fun.SetAddr(fun.Addr() + addr)
+	}
 }

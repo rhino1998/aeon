@@ -14,7 +14,8 @@ type Function struct {
 
 	bytecode BytecodeSnippet
 
-	addr Addr
+	addr   Addr
+	addrOp Operand
 }
 
 func (f *Function) Package() *Package {
@@ -51,6 +52,15 @@ func (f *Function) Body() []Statement {
 
 func (f *Function) Addr() Addr {
 	return f.addr
+}
+
+func (f *Function) SetAddr(addr Addr) {
+	f.addr = addr
+	f.addrOp.Value = f.addr
+}
+
+func (f *Function) AddrOp() *Operand {
+	return &f.addrOp
 }
 
 type CallExpression struct {
@@ -91,4 +101,36 @@ func (f *ExternFunction) Type() Type {
 		Parameters: paramTypes,
 		Return:     f.ret,
 	}
+}
+
+const (
+	ExternFuncKindInt Int = 0
+	FuncKindInt       Int = 1
+)
+
+var externType = TupleType{
+	elems: []Type{
+		IntType,
+		StringType,
+		IntType,
+		StringType,
+	},
+}
+
+var funcType = TupleType{
+	elems: []Type{
+		IntType,
+		StringType,
+		IntType,
+		KindType(KindPointer),
+	},
+}
+
+var closureType = TupleType{
+	elems: []Type{
+		IntType,
+		StringType,
+		IntType, // currently unused
+		KindType(KindPointer),
+	},
 }
