@@ -348,6 +348,9 @@ func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ
 		}
 
 		return expr, nil
+	case *StructType:
+		// TODO:
+		return nil, expr.WrapError(fmt.Errorf("struct type not yet implemented"))
 	case *PointerType:
 		return c.resolveLHSDotExpressionReceiverTypes(expr, typ.Pointee())
 	default:
@@ -611,6 +614,9 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 		}
 
 		return expr, nil
+	case *StructType:
+		// TODO:
+		return nil, expr.WrapError(fmt.Errorf("struct type not yet implemented"))
 	case *PointerType:
 		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), bound)
 	default:

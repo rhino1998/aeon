@@ -297,6 +297,9 @@ func (prog *Program) compileBCLHSDotExpression(ctx context.Context, expr *DotExp
 		}
 
 		return nil, elemLoc, nil
+	case *StructType:
+		// TODO:
+		return nil, nil, expr.WrapError(fmt.Errorf("struct type not yet implemented"))
 	case *PointerType:
 		receiverLocValue, err := receiverLoc.Dereference()
 		if err != nil {
