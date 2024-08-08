@@ -195,14 +195,30 @@ func (r *Runtime) loadIndirect(indirect compiler.Indirect) loadFunc {
 	return r.loadIndirectWithOffset(indirect, 0)
 }
 
-func (r *Runtime) loadIndirectWithOffset(indirect compiler.Indirect, offset AddrOffset) loadFunc {
+func (r *Runtime) loadOffset(offset compiler.Offset) loadFunc {
 	return loadFunc(func() (any, error) {
-		base, err := r.load(indirect.Base)()
+		a, err := r.load(offset.A)()
 		if err != nil {
 			return nil, err
 		}
 
-		return r.loadAddr(Addr(base.(compiler.Int)).Offset(indirect.Offset).Offset(offset))
+		b, err := r.load(offset.B)()
+		if err != nil {
+			return nil, err
+		}
+
+		return a.(Int) + b.(Int), nil
+	})
+}
+
+func (r *Runtime) loadIndirectWithOffset(indirect compiler.Indirect, offset AddrOffset) loadFunc {
+	return loadFunc(func() (any, error) {
+		base, err := r.load(indirect.Ptr)()
+		if err != nil {
+			return nil, err
+		}
+
+		return r.loadAddr(Addr(base.(compiler.Int)).Offset(offset))
 	})
 }
 
@@ -220,6 +236,8 @@ func (r *Runtime) load(operand *compiler.Operand) loadFunc {
 		return r.loadIndirect(operand.Value.(compiler.Indirect))
 	case compiler.OperandKindRegister:
 		return r.loadRegister(operand.Value.(compiler.Register))
+	case compiler.OperandKindOffset:
+		return r.loadOffset(operand.Value.(compiler.Offset))
 	default:
 		return nil
 	}
@@ -231,12 +249,12 @@ func (r *Runtime) storeIndirect(indirect compiler.Indirect) storeFunc {
 			return err
 		}
 
-		base, err := r.load(indirect.Base)()
+		ptr, err := r.load(indirect.Ptr)()
 		if err != nil {
 			return err
 		}
 
-		return r.storeAddr(Addr(base.(compiler.Int)).Offset(indirect.Offset), val)
+		return r.storeAddr(Addr(ptr.(compiler.Int)), val)
 	})
 }
 
@@ -296,6 +314,10 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 		default:
 		}
 
+		if r.sp() > 0x1000 {
+			return fmt.Errorf("stack overflow")
+		}
+
 		code, err := r.fetch(pc)
 		if err != nil {
 			return err
@@ -319,7 +341,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 		case compiler.Nop:
 		case compiler.Mov:
 			for i := AddrOffset(0); i < code.Size; i++ {
-				err := r.store(code.Dst.Offset(i))(r.load(code.Src.Offset(i))())
+				err := r.store(code.Dst.OffsetReference(i))(r.load(code.Src.OffsetReference(i))())
 				if err != nil {
 					return err
 				}
@@ -336,7 +358,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			case 0:
 				externName, err := r.loadIndirectWithOffset(code.Func.Value.(compiler.Indirect), 3)()
 				if err != nil {
-					return fmt.Errorf("could not resolve function addr")
+					return fmt.Errorf("could not resolve extern function name")
 				}
 
 				entry, ok := r.externFuncs[string(externName.(String))]
@@ -353,60 +375,76 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 					r.storeAddr(r.sp()-Addr(entry.Args+1), ret)
 				}
 
+				if r.debug {
+					var argStrs []string
+					for _, arg := range args {
+						argStrs = append(argStrs, fmt.Sprintf("%v", arg))
+
+					}
+					log.Printf("extern call %s = %s(%s)", ret, string(externName.(String)), strings.Join(argStrs, ", "))
+				}
+
 				continue
 			case 1:
-			case 2:
+				faddr, err := r.loadIndirectWithOffset(code.Func.Value.(compiler.Indirect), 3)()
+				if err != nil {
+					return fmt.Errorf("could not resolve function addr")
+				}
+
+				frameSize := Addr(len(r.registers))
+
+				for i := len(r.registers) - 1; i >= 1; i-- {
+					reg := Register(i)
+					err := r.storeAddr(r.sp()+frameSize-Addr(i)-1, r.registers[reg])
+					if err != nil {
+						return fmt.Errorf("failed to push %s", compiler.Register(reg))
+					}
+				}
+
+				err = r.storeAddr(r.sp()+frameSize-1, Int(pc))
+				if err != nil {
+					return fmt.Errorf("failed to push next pc: %w", err)
+				}
+
+				r.setSP(r.sp() + frameSize)
+				r.setFP(r.sp() - 1)
+				pc = Addr(faddr.(Int))
+				continue
 			}
 
 			return fmt.Errorf("unhandled function type")
-
-			// sp := r.sp()
-			// for reg, val := range r.registers[2:] {
-			// 	err := r.push(val)
-			// 	if err != nil {
-			// 		return fmt.Errorf("failed to push %s", compiler.Register(reg))
-			// 	}
-			// }
-			//
-			// err = r.push(sp)
-			// if err != nil {
-			// 	return fmt.Errorf("failed to push sp: %w", err)
-			// }
-			//
-			// err = r.push(r.fp)
-			// if err != nil {
-			// 	return fmt.Errorf("failed to push sp: %w", err)
-			// }
-			//
-			// err = r.push(pc)
-			// if err != nil {
-			// 	return fmt.Errorf("failed to push next pc: %w", err)
-			// }
-			//
-			// r.setFP(r.fp() - 1)
-			// pc = funcAddr.(compiler.Addr) // TODO: add proper pointer type
 		case compiler.Return:
-			pcInt, err := loadType[Int](r, r.fp())
+			fp := r.fp()
+
+			pcInt, err := loadType[Int](r, fp)
 			if err != nil {
 				return fmt.Errorf("failed to load pc from fp: %w", err)
 			}
 
 			pc = Addr(pcInt)
 
-			for reg := range r.registers[2:] {
-				r.registers[reg+2], err = r.loadAddr(r.fp() - 1 + Addr(reg))
+			for reg := range r.registers[1:] {
+				r.registers[reg+1], err = r.loadAddr(fp.Offset(-1).Offset(-compiler.AddrOffset(reg)))
 				if err != nil {
 					return fmt.Errorf("failed to push %s", Register(reg))
 				}
 			}
 
+			r.setSP(r.sp().Offset(-code.Args))
+
 			// exit completely
 			if r.fp() == 0 {
-				log.Printf("%v", r.registers[0])
+				if r.debug {
+					log.Println("--------------")
+					log.Printf("EXIT")
+					log.Printf("fp: %v", r.fp())
+					log.Printf("sp: %v", r.sp())
+					log.Printf("pc: %v", pc)
+					r.printRegisters()
+					r.printStack()
+				}
 				return nil
 			}
-
-			r.setSP(r.sp().Offset(-code.Args))
 		case compiler.Jmp:
 			val, err := r.load(code.Dst)()
 			if err != nil {

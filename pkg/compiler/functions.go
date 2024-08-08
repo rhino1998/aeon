@@ -130,29 +130,28 @@ const (
 	FuncKindInt       Int = 1
 )
 
-var externType = TupleType{
-	elems: []Type{
-		IntType,
-		StringType,
-		IntType,
-		StringType,
-	},
+var externType = NewTupleType(
+	IntType,
+	StringType,
+	NewPointerType(VoidType),
+	StringType,
+)
+
+var funcType = NewTupleType(
+	IntType,
+	StringType,
+	NewPointerType(VoidType),
+	NewPointerType(VoidType),
+)
+
+type CompilerFunctionReferenceExpression struct {
+	Function *Function
 }
 
-var funcType = TupleType{
-	elems: []Type{
-		IntType,
-		StringType,
-		IntType,
-		KindType(KindPointer),
-	},
+func (*CompilerFunctionReferenceExpression) Type() Type {
+	return KindType(KindInt)
 }
 
-var closureType = TupleType{
-	elems: []Type{
-		IntType,
-		StringType,
-		IntType, // currently unused
-		KindType(KindPointer),
-	},
+func (*CompilerFunctionReferenceExpression) WrapError(err error) error {
+	return err
 }

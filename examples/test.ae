@@ -14,11 +14,10 @@ var x = "hello"
 
 var y (string,int)
 
-const g = "HJJJ"
-
 func init() {
   print(x)
   x = "there"
+	y.0 = "test"
   return
 }
 
@@ -26,20 +25,26 @@ func main() {
   // test comment
 	//
 
-  for i := 0; i < 5; i++ {
-    print(x)
-  }
+	print(y.0)
+	f(&y.0)
+	print(y.0)
 
-  y.0 = "test"
-  y.1 = 5
+	z := &y
+	z.0 = "hello"
 
-  x = "world"
+	print(y.0)
 
-  print(x)
-  print(g)
-  print(y.0)
+	h := &z
 
-  add(1,2)
+	h.0 = "hello2"
 
+	print(y.0)
+
+
+  return
+}
+
+func f(x *string) {
+	*x = "test3"
   return
 }

@@ -25,6 +25,23 @@ func (s *BytecodeSnippet) Add(bcs ...Bytecode) {
 	*s = append(*s, bcs...)
 }
 
+func (s *BytecodeSnippet) BinOp(dst *Location, left *Location, operator Operator, right *Location) {
+	s.Add(BinOp{
+		Op:    BinaryOperation(left.Type.Kind(), operator, right.Type.Kind()),
+		Dst:   dst.Operand,
+		Left:  left.Operand,
+		Right: right.Operand,
+	})
+}
+
+func (s *BytecodeSnippet) Mov(dst, src *Location) {
+	s.Add(Mov{
+		Dst:  dst.Operand,
+		Src:  src.Operand,
+		Size: min(dst.Type.Size(), src.Type.Size()),
+	})
+}
+
 type Int int64
 
 func (Int) immediate() {}
@@ -327,17 +344,4 @@ type SetIndex struct {
 
 func (SetIndex) xenon() string {
 	return "set"
-}
-
-type LAddr struct {
-	Dst *Operand `xc:"d"`
-	Src *Operand `xc:"s"`
-}
-
-func (LAddr) Name() string {
-	return "laddr"
-}
-
-func (a LAddr) String() string {
-	return fmt.Sprintf("LADDR %s", a.Src)
 }

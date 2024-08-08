@@ -38,7 +38,7 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 				return err
 			}
 		case parser.TypeDeclaration:
-			err := c.compileTypeDeclaration(pkg, pkg.scope, decl)
+			err := c.compileTypeDeclaration(pkg.scope, decl)
 			if err != nil {
 				var posError *parser.PositionError
 				if !errors.As(err, &posError) {
@@ -58,7 +58,7 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 				return err
 			}
 		case parser.VarDeclaration:
-			err := c.compileVarDeclaration(pkg, pkg.scope, decl)
+			err := c.compileVarDeclaration(pkg.scope, decl)
 			if err != nil {
 				var posError *parser.PositionError
 				if !errors.As(err, &posError) {
@@ -68,7 +68,7 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 				return err
 			}
 		case parser.ConstDeclaration:
-			err := c.compileConstDeclaration(pkg, pkg.scope, decl)
+			err := c.compileConstDeclaration(pkg.scope, decl)
 			if err != nil {
 				var posError *parser.PositionError
 				if !errors.As(err, &posError) {
@@ -125,7 +125,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 	return scope.put(f)
 }
 
-func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl parser.TypeDeclaration) error {
+func (c *Compiler) compileTypeDeclaration(scope *SymbolScope, decl parser.TypeDeclaration) error {
 	underlying, err := c.compileTypeReference(scope, decl.Type)
 	if err != nil {
 		return err
@@ -139,7 +139,7 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 	return scope.put(t)
 }
 
-func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl parser.VarDeclaration) error {
+func (c *Compiler) compileVarDeclaration(scope *SymbolScope, decl parser.VarDeclaration) error {
 	v := &Variable{
 		name:   string(decl.Name),
 		global: true,
@@ -173,7 +173,7 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 	return scope.put(v)
 }
 
-func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl parser.ConstDeclaration) error {
+func (c *Compiler) compileConstDeclaration(scope *SymbolScope, decl parser.ConstDeclaration) error {
 	v := &Constant{
 		name: string(decl.Name),
 	}
@@ -682,16 +682,9 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 			return nil, err
 		}
 
-		typ, err := validateUnaryExpression(exp.Type(), Operator(expr.Operator))
-		if err != nil {
-			return nil, expr.Position.WrapError(err)
-		}
-
 		return &UnaryExpression{
 			Expression: exp,
 			Operator:   Operator(expr.Operator),
-
-			typ: typ,
 
 			Position: expr.Position,
 		}, nil

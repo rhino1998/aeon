@@ -131,6 +131,8 @@ func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
 		}
 
 		return BaseType(expr).(*PointerType).Pointee(), nil
+	} else if operator == OperatorAddress {
+		return NewPointerType(expr), nil
 	}
 
 	kind := unaryOperatorKinds[UnaryOperatorKinds{Operator: operator, Operand: expr.Kind()}]
@@ -191,6 +193,10 @@ type UnaryExpression struct {
 func (e *UnaryExpression) Type() Type {
 	// TODO: resolve
 	return e.typ
+}
+
+func (e *UnaryExpression) SetType(typ Type) {
+	e.typ = typ
 }
 
 type BinaryOperatorKinds struct {

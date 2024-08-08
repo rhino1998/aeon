@@ -16,6 +16,7 @@ func newProgram() *Program {
 
 		externFuncs: make(map[string]*ExternFunction),
 		packages:    make(map[string]*Package),
+		registers:   16,
 	}
 
 	return p

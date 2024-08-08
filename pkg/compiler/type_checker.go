@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 )
 
@@ -303,8 +304,18 @@ func (c *Compiler) resolveLHSTypes(scope *SymbolScope, expr Expression) (_ Expre
 	case *BinaryExpression:
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to binary expression"))
 	case *UnaryExpression:
-		// TODO: deref
-		return expr, expr.WrapError(fmt.Errorf("cannot assign to unary expression"))
+		switch expr.Operator {
+		case OperatorDereference:
+			subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, nil)
+			if err != nil {
+				errs.Add(err)
+			}
+
+			expr.Expression = subExpr
+			return expr, nil
+		default:
+			return expr, expr.WrapError(fmt.Errorf("cannot assign to unary expression"))
+		}
 	case *DotExpression:
 		receiver, err := c.resolveExpressionTypes(scope, expr.Receiver, nil)
 		if err != nil {
@@ -312,23 +323,35 @@ func (c *Compiler) resolveLHSTypes(scope *SymbolScope, expr Expression) (_ Expre
 		}
 
 		expr.Receiver = receiver
-		switch typ := BaseType(expr.Receiver.Type()).(type) {
-		case *TupleType:
-			index, err := strconv.Atoi(expr.Key)
-			if err != nil {
-				errs.Add(expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key)))
-			}
 
-			if index >= len(typ.Elems()) {
-				errs.Add(expr.WrapError(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", index, len(typ.Elems()))))
-			}
-
-			return expr, nil
-		default:
-			return expr, expr.WrapError(fmt.Errorf("cannot dot index assign receiver type: %T", expr.Receiver))
-		}
+		return c.resolveLHSDotExpressionReceiverTypes(expr, expr.Receiver.Type())
 	default:
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to expression type: %T", expr))
+	}
+}
+
+func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ Type) (_ Expression, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	switch typ := typ.(type) {
+	case *TupleType:
+		index, err := strconv.Atoi(expr.Key)
+		if err != nil {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key)))
+		}
+
+		if index >= len(typ.Elems()) {
+			errs.Add(expr.WrapError(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", index, len(typ.Elems()))))
+		}
+
+		return expr, nil
+	case *PointerType:
+		return c.resolveLHSDotExpressionReceiverTypes(expr, typ.Pointee())
+	default:
+		return expr, expr.WrapError(fmt.Errorf("cannot dot index assign receiver type: %T", expr.Receiver))
 	}
 }
 
@@ -374,7 +397,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 				Position: expr.Position,
 			}, nil
 		default:
-			return nil, expr.WrapError(fmt.Errorf("cannot coerce int literal into %s", bound))
+			return expr, expr.WrapError(fmt.Errorf("cannot coerce int literal into %s", bound))
 		}
 	case *Literal[Float]:
 		if bound == nil && IsUnspecified(expr.Type()) {
@@ -411,7 +434,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 				Position: expr.Position,
 			}, nil
 		default:
-			return nil, expr.WrapError(fmt.Errorf("cannot coerce float literal into %s", bound))
+			return expr, expr.WrapError(fmt.Errorf("cannot coerce float literal into %s", bound))
 		}
 	case *Literal[String]:
 		if bound == nil && IsUnspecified(expr.Type()) {
@@ -437,7 +460,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 				Position: expr.Position,
 			}, nil
 		default:
-			return nil, expr.WrapError(fmt.Errorf("cannot coerce string literal into %s", bound))
+			return expr, expr.WrapError(fmt.Errorf("cannot coerce string literal into %s", bound))
 		}
 	case *Literal[Bool]:
 		if bound == nil && IsUnspecified(expr.Type()) {
@@ -462,7 +485,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 				Position: expr.Position,
 			}, nil
 		default:
-			return nil, expr.WrapError(fmt.Errorf("cannot coerce bool literal into %s", bound))
+			return expr, expr.WrapError(fmt.Errorf("cannot coerce bool literal into %s", bound))
 		}
 	case *SymbolReferenceExpression:
 		sym := expr.Dereference()
@@ -497,8 +520,9 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 		expr.Right = right
 
-		typ, err := validateBinaryExpression(expr.Left.Type(), expr.Operator, expr.Right.Type())
+		log.Printf("%#v %#v", left, right)
 
+		typ, err := validateBinaryExpression(expr.Left.Type(), expr.Operator, expr.Right.Type())
 		if err != nil {
 			errs.Add(expr.WrapError(err))
 		}
@@ -509,12 +533,19 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 	case *UnaryExpression:
 		// TODO: operatore-aware bounds
 
-		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, bound)
+		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, nil)
 		if err != nil {
 			errs.Add(err)
 		}
 
 		expr.Expression = subExpr
+
+		typ, err := validateUnaryExpression(expr.Expression.Type(), expr.Operator)
+		if err != nil {
+			errs.Add(expr.WrapError(err))
+		}
+
+		expr.SetType(typ)
 
 		return expr, nil
 	case *CallExpression:
@@ -552,22 +583,37 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 		}
 		expr.Receiver = receiver
 
-		switch typ := BaseType(expr.Receiver.Type()).(type) {
-		case *TupleType:
-			index, err := strconv.Atoi(expr.Key)
-			if err != nil {
-				return expr, expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key))
+		return c.resolveDotExpressionReceiverTypes(expr, expr.Receiver.Type(), bound)
+	default:
+		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %T", expr))
+	}
+}
+
+func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Type, bound Type) (_ Expression, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	switch typ := typ.(type) {
+	case *TupleType:
+		index, err := strconv.Atoi(expr.Key)
+		if err != nil {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key)))
+		} else {
+			if !IsUnspecified(bound) && !TypesEqual(typ.Elems()[index], bound) {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot use tuple element at index %d of type %v as type %v", index, typ.Elems()[index], bound)))
 			}
 
 			if index >= len(typ.Elems()) {
-				return expr, expr.WrapError(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", index, len(typ.Elems())))
+				errs.Add(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", index, len(typ.Elems())))
 			}
-
-			return expr, nil
-		default:
-			return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", typ))
 		}
+
+		return expr, nil
+	case *PointerType:
+		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), bound)
 	default:
-		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %T", expr))
+		return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", typ))
 	}
 }

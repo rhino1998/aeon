@@ -47,6 +47,8 @@ func typesEqual(t1, t2 Type) bool {
 	}
 
 	switch t1 := t1.(type) {
+	case KindType:
+		return t1 == t2
 	case *BasicType:
 		switch t2 := t2.(type) {
 		case *BasicType:
@@ -254,9 +256,12 @@ func (t ReferencedType) Size() AddrOffset {
 	return t.Dereference().Size()
 }
 
+type MethodSet map[string]*FunctionType
+
 type DerivedType struct {
 	name       string
 	scope      string
+	methods    MethodSet
 	underlying Type
 }
 
@@ -286,6 +291,10 @@ type PointerType struct {
 	pointee Type
 }
 
+func NewPointerType(pointee Type) *PointerType {
+	return &PointerType{pointee: pointee}
+}
+
 func (PointerType) Kind() Kind       { return KindPointer }
 func (PointerType) Size() AddrOffset { return 1 }
 
@@ -308,8 +317,18 @@ func (t SliceType) String() string { return fmt.Sprintf("[]%s", t.elem.String())
 func (t SliceType) Elem() Type     { return t.elem }
 func (SliceType) Size() AddrOffset { return 3 }
 
+var sliceHeader = NewTupleType(
+	IntType,
+	IntType,
+	NewPointerType(VoidType),
+)
+
 type TupleType struct {
 	elems []Type
+}
+
+func NewTupleType(elems ...Type) *TupleType {
+	return &TupleType{elems: elems}
 }
 
 func (t TupleType) Kind() Kind { return KindTuple }

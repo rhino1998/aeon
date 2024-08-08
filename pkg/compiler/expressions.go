@@ -20,7 +20,11 @@ type DotExpression struct {
 }
 
 func (e *DotExpression) Type() Type {
-	switch typ := resolveType(e.Receiver.Type()).(type) {
+	return resolveDotExpressionType(e, BaseType(e.Receiver.Type()))
+}
+
+func resolveDotExpressionType(e *DotExpression, typ Type) Type {
+	switch typ := typ.(type) {
 	case *StructType:
 		return UnknownType
 	case *MapType:
@@ -36,9 +40,12 @@ func (e *DotExpression) Type() Type {
 		}
 
 		return typ.Elems()[index]
+	case *PointerType:
+		return resolveDotExpressionType(e, typ.Pointee())
 	default:
 		return UnknownType
 	}
+
 }
 
 type ParenthesizedExpression struct {

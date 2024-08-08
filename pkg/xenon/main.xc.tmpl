@@ -3,6 +3,9 @@
 function @print($s:text)
 	print($s)
 
+function @add($a:number, $b:number):number
+	return $a + $b
+
 
 const $PAGE_SIZE = {{.PageSize}}
 
@@ -64,26 +67,27 @@ function @aeon_mem_store($addr:number, $v:text):text
 function @aeon_mem_init()
 	{{range $page := loop 0 .NumMemPages}}$aeon_mem_page_{{$page}}_c.fill($PAGE_SIZE, ""){{"\n\t"}}{{end}}
 
-function @aeon_load($op:text, $fp:number):text
-	if ($op.s == "M")
-		return @aeon_mem_load($op.v:number)
-	elseif ($op.s == "R")
-		return @aeon_reg_load($op.v:number)
-	elseif ($op.s == "L")
-		return @aeon_mem_load($op.v:number + $fp)
-	elseif ($op.s == "I")
+recursive function @aeon_load($op:text):text
+	if ($op.k == "I")
 		return $op.v
+	elseif ($op.k == "R")
+		return @aeon_reg_load($op.v:number)
+	elseif ($op.k == "*")
+		var $indirect = $op.v
+		return @aeon_mem_load(recurse($indirect.p):number)
+	elseif ($op.k == "*")
+		var $offset = $op.v
+		return recurse($offset.a):number + recurse($offset.b):number
 	else
 		print(text("bad operand for load {}", $op))
 		@aeon_fatal()
 
-function @aeon_store($op:text, $fp:number, $v:text)
-	if ($op.s == "M")
-		@aeon_mem_store($op.v:number, $v)
-	elseif ($op.s == "R")
+function @aeon_store($op:text, $v:text)
+	if ($op.s == "R")
 		@aeon_reg_store($op.v:number, $v)
-	elseif ($op.s == "L")
-		@aeon_mem_store($op.v:number + $fp, $v)
+	elseif ($op.s == "*")
+		var $indirect = $op.v
+		@aeon_mem_store(@aeon_load($indirect.p), $v)
 	else
 		print(text("bad operand for store {}", $op))
 		@aeon_fatal()
@@ -154,9 +158,9 @@ function @aeon_call_extern($bc:text, $sp:number):text
 		{{if $entry.HasReturn}}return{{end}} @{{$entry.Name}}({{range $i, $t := $entry.ArgTypes}}{{if $i }},{{end}}@aeon_mem_load($sp-{{len $entry.ArgTypes}}+{{$i}}){{$t}}{{end}})
 	{{ end }}
 
-function @aeon_bop($op:text, $a:text, $b:text, $fp:number):text
-	var $av = @aeon_load($a, $fp)
-	var $bv = @aeon_load($b, $fp)
+function @aeon_bop($op:text, $a:text, $b:text):text
+	var $av = @aeon_load($a)
+	var $bv = @aeon_load($b)
 
 	if ($op == "I+I")
 		return @aeon_add_int($av, $bv)
@@ -246,12 +250,12 @@ function @aeon_run($pc:number):text
 		if ($bc.t == "nop")
 			continue
 		elseif ($bc.t == "push")
-			@aeon_mem_store($sp, @aeon_load($bc.s, $fp))
+			@aeon_mem_store($sp, @aeon_load($bc.s))
 			$sp++
 		elseif ($bc.t == "bop")
-			@aeon_store($bc.d, $fp, @aeon_bop($bc.o, $bc.l, $bc.r, $fp))
+			@aeon_store($bc.d, $fp, @aeon_bop($bc.o, $bc.l, $bc.r))
 		elseif ($bc.t == "mov")
-			@aeon_store($bc.d, $fp, @aeon_load($bc.s, $fp))
+			@aeon_store($bc.d, $fp, @aeon_load($bc.s))
 		elseif ($bc.t == "jmp")
 			$pc = @aeon_load($bc.s, $fp):number
 		elseif ($bc.t == "jmpr")
@@ -263,8 +267,7 @@ function @aeon_run($pc:number):text
 		elseif ($bc.t == "popn")
 			$sp -= @aeon_load($bc.s, $fp):number
 		elseif ($bc.t == "ext")
-			@aeon_reg_store(0, @aeon_call_extern($bc, $sp))
-			$sp -= @aeon_extern_args($bc)
+			@aeon_call_extern($bc, $sp)
 		elseif ($bc.t == "call")
 			foreach $aeon_reg ($reg, $val)
 				if $reg != 0

@@ -230,6 +230,76 @@ func (s *SymbolScope) getTypedSymbol(name string) (TypedSymbol, bool) {
 	return t, true
 }
 
+type LocationKind int
+
+const (
+	LocationKindConstant LocationKind = iota
+	LocationKindRegister
+	LocationKindGlobal
+	LocationKindLocal
+	LocationKindArg
+	LocationKindParam
+	LocationKindHeap
+)
+
+type Location struct {
+	Kind LocationKind
+	Name string
+	Type Type
+	*Operand
+}
+
+func (l *Location) AddressOf() *Location {
+	return &Location{
+		Kind:    l.Kind,
+		Name:    fmt.Sprintf("&%s", l.Name),
+		Type:    NewPointerType(l.Type),
+		Operand: l.Operand.AddressOf(),
+	}
+}
+
+func (l *Location) Dereference() (*Location, error) {
+	typ := BaseType(l.Type).(*PointerType)
+
+	return &Location{
+		Kind: l.Kind,
+
+		Name:    fmt.Sprintf("*%s", l.Name),
+		Type:    typ.Pointee(),
+		Operand: l.Operand.Dereference(),
+	}, nil
+}
+
+func (l *Location) IndexTuple(index int) (*Location, error) {
+	typ := BaseType(l.Type).(*TupleType)
+
+	if index >= len(typ.Elems()) {
+		return nil, fmt.Errorf("compile-time tuple index %d out of bounds", index)
+	}
+
+	return &Location{
+		Kind:    l.Kind,
+		Name:    fmt.Sprintf("%s.%d", l.Name, index),
+		Type:    typ.Elems()[index],
+		Operand: l.Operand.AddressOf().ConstOffset(typ.ElemOffset(index)).Dereference(),
+	}, nil
+}
+
+func (l *Location) IndexSlice(index *Location) (*Location, error) {
+	typ := BaseType(l.Type).(*SliceType)
+
+	if index.Type.Kind() != KindInt {
+		return nil, fmt.Errorf("invalid type for slice index %s", index.Type)
+	}
+
+	return &Location{
+		Kind:    LocationKindHeap,
+		Name:    fmt.Sprintf("%s[%s]", l.Name, index.Name),
+		Type:    typ.Elem(),
+		Operand: l.Operand.AddressOf().ConstOffset(2).Dereference().Offset(index.Operand).Dereference(),
+	}, nil
+}
+
 type ValueScope struct {
 	parent *ValueScope
 
@@ -238,11 +308,9 @@ type ValueScope struct {
 
 	nextGlobal AddrOffset
 
-	variables        map[string]*Operand
-	variableTypes    map[string]Type
-	localOffsetTypes map[AddrOffset]Type
-	nextLocal        AddrOffset
-	maxLocal         *AddrOffset
+	variables map[string]*Location
+	nextLocal AddrOffset
+	maxLocal  *AddrOffset
 
 	usedRegisters map[Register]bool
 	numRegisters  int
@@ -250,16 +318,14 @@ type ValueScope struct {
 
 func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
 	return &ValueScope{
-		symbols:          symbols,
-		function:         symbols.function,
-		variables:        make(map[string]*Operand),
-		variableTypes:    make(map[string]Type),
-		localOffsetTypes: make(map[AddrOffset]Type),
-		nextGlobal:       1,
-		nextLocal:        1,
-		maxLocal:         new(AddrOffset),
-		usedRegisters:    make(map[Register]bool),
-		numRegisters:     regs,
+		symbols:       symbols,
+		function:      symbols.function,
+		variables:     make(map[string]*Location),
+		nextGlobal:    1,
+		nextLocal:     1,
+		maxLocal:      new(AddrOffset),
+		usedRegisters: make(map[Register]bool),
+		numRegisters:  regs,
 	}
 }
 
@@ -268,75 +334,88 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 		parent:  vs,
 		symbols: scope,
 
-		function:         scope.function,
-		variables:        maps.Clone(vs.variables),
-		variableTypes:    maps.Clone(vs.variableTypes),
-		localOffsetTypes: maps.Clone(vs.localOffsetTypes),
-		maxLocal:         vs.maxLocal,
-		nextLocal:        vs.nextLocal,
+		function:  scope.function,
+		variables: maps.Clone(vs.variables),
+		maxLocal:  vs.maxLocal,
+		nextLocal: vs.nextLocal,
 
 		usedRegisters: maps.Clone(vs.usedRegisters),
 		numRegisters:  vs.numRegisters,
 	}
 }
 
-func (vs *ValueScope) newConstant(name string, value *Operand) {
-	vs.variables[name] = value
+func (vs *ValueScope) newFunctionRef(fun *Function) *Location {
+	return &Location{
+		Kind:    LocationKindConstant,
+		Name:    fun.Name(),
+		Type:    KindType(KindInt),
+		Operand: fun.AddrOp(),
+	}
 }
 
-func (vs *ValueScope) newGlobal(name string, typ Type) *Operand {
+func (vs *ValueScope) newImmediate(imm Immediate) *Location {
+	return &Location{
+		Kind:    LocationKindConstant,
+		Operand: ImmediateOperand(imm),
+		Type:    KindType(imm.Kind()),
+	}
+}
+
+func (vs *ValueScope) newConstant(name string, typ Type, imm Immediate) {
+	vs.variables[name] = &Location{
+		Kind:    LocationKindConstant,
+		Name:    name,
+		Type:    typ,
+		Operand: ImmediateOperand(imm),
+	}
+}
+
+func (vs *ValueScope) newGlobal(name string, typ Type) *Location {
 	if vs.parent != nil {
 		return vs.parent.newGlobal(name, typ)
 	}
-
-	op := &Operand{
-		Kind: OperandKindIndirect,
-		Value: Indirect{
-			Base: ImmediateOperand(Int(vs.nextGlobal)),
-		},
+	loc := &Location{
+		Kind:    LocationKindGlobal,
+		Name:    name,
+		Type:    typ,
+		Operand: ImmediateOperand(Int(vs.nextGlobal)).Dereference(),
 	}
-	vs.variables[name] = op
-	vs.variableTypes[name] = typ
+
+	vs.variables[name] = loc
 
 	vs.nextGlobal += AddrOffset(typ.Size())
-	return op
+	return loc
 }
 
-func (vs *ValueScope) newArg(offset AddrOffset) *Operand {
-	op := &Operand{
-		Kind: OperandKindIndirect,
-		Value: Indirect{
-			Base:   OperandRegisterSP,
-			Offset: offset,
-		},
+func (vs *ValueScope) newArg(name string, offset AddrOffset, typ Type) *Location {
+	loc := &Location{
+		Kind:    LocationKindArg,
+		Name:    fmt.Sprintf("arg_%s", name),
+		Type:    typ,
+		Operand: OperandRegisterSP.ConstOffset(offset).Dereference(),
 	}
-	vs.variables[fmt.Sprintf("arg_%d", int(offset))] = op
-	return op
+	vs.variables[loc.Name] = loc
+	return loc
 }
 
 func (vs *ValueScope) newParam(name string, offset AddrOffset, typ Type) {
-	vs.variables[name] = &Operand{
-		Kind: OperandKindIndirect,
-		Value: Indirect{
-			Base:   OperandRegisterFP,
-			Offset: offset,
-		},
+	vs.variables[name] = &Location{
+		Name:    name,
+		Kind:    LocationKindParam,
+		Type:    typ,
+		Operand: OperandRegisterFP.ConstOffset(offset).Dereference(),
 	}
-	vs.variableTypes[name] = typ
 }
 
-func (vs *ValueScope) newLocal(name string, typ Type) *Operand {
-	o := &Operand{
-		Kind: OperandKindIndirect,
-		Value: Indirect{
-			Base:   OperandRegisterFP,
-			Offset: vs.nextLocal,
-		},
+func (vs *ValueScope) newLocal(name string, typ Type) *Location {
+	loc := &Location{
+		Kind:    LocationKindLocal,
+		Name:    name,
+		Type:    typ,
+		Operand: OperandRegisterFP.ConstOffset(vs.nextLocal).Dereference(),
 	}
 
-	vs.variables[name] = o
-	vs.variableTypes[name] = typ
-	vs.localOffsetTypes[vs.nextLocal] = typ
+	vs.variables[name] = loc
 
 	if *vs.maxLocal < vs.nextLocal {
 		*vs.maxLocal = vs.nextLocal
@@ -344,10 +423,10 @@ func (vs *ValueScope) newLocal(name string, typ Type) *Operand {
 
 	vs.nextLocal += AddrOffset(typ.Size())
 
-	return o
+	return loc
 }
 
-func (vs *ValueScope) allocTemp(typ Type) *Operand {
+func (vs *ValueScope) allocTemp(typ Type) *Location {
 	if typ.Size() == 1 {
 		for reg := range Register(vs.numRegisters) {
 			switch reg {
@@ -357,9 +436,14 @@ func (vs *ValueScope) allocTemp(typ Type) *Operand {
 				if !vs.usedRegisters[reg] {
 					vs.usedRegisters[reg] = true
 
-					return &Operand{
-						Kind:  OperandKindRegister,
-						Value: reg,
+					return &Location{
+						Kind: LocationKindRegister,
+						Name: reg.String(),
+						Type: typ,
+						Operand: &Operand{
+							Kind:  OperandKindRegister,
+							Value: reg,
+						},
 					}
 				}
 			}
@@ -370,32 +454,32 @@ func (vs *ValueScope) allocTemp(typ Type) *Operand {
 	return vs.newLocal(fmt.Sprintf("__local_tmp_%d", int(vs.nextLocal)), typ)
 }
 
-func (vs *ValueScope) deallocTemp(o *Operand) {
-	if o.Kind != OperandKindRegister {
-		if o.Value.(Indirect).Base == OperandRegisterFP {
-			offset := o.Value.(Indirect).Offset
-			typ := vs.localOffsetTypes[offset]
-			if typ != nil && offset == vs.nextLocal-AddrOffset(typ.Size()) {
-				vs.nextLocal -= AddrOffset(typ.Size())
-			}
+func (vs *ValueScope) deallocTemp(l *Location) {
+	switch l.Kind {
+	case LocationKindLocal:
+		offset := AddrOffset(l.Value.(Indirect).Ptr.Value.(Offset).B.Value.(Int))
+		if offset == vs.nextLocal-l.Type.Size() {
+			vs.nextLocal -= l.Type.Size()
 
 		}
-
-		return
+	case LocationKindRegister:
+		vs.usedRegisters[l.Value.(Register)] = false
 	}
-
-	vs.usedRegisters[o.Value.(Register)] = false
 }
 
-func (vs *ValueScope) Push(name string, typ Type, value *Operand) Mov {
+func (vs *ValueScope) Push(name string, value *Location) Mov {
+	return vs.Mov(value, vs.newLocal(name, value.Type))
+}
+
+func (vs *ValueScope) Mov(src, dst *Location) Mov {
 	return Mov{
-		Src:  value,
-		Dst:  vs.newLocal(name, typ),
-		Size: typ.Size(),
+		Src:  src.Operand,
+		Dst:  dst.Operand,
+		Size: min(src.Type.Size(), dst.Type.Size()),
 	}
 }
 
-func (vs *ValueScope) Get(name string) (*Operand, bool) {
+func (vs *ValueScope) Get(name string) (*Location, bool) {
 	op, ok := vs.variables[name]
 	if !ok {
 		return nil, false

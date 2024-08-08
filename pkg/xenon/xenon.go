@@ -71,7 +71,7 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program) error {
 		}
 		xeCtx.ExternFuncs = append(xeCtx.ExternFuncs, ExternFuncEntry{
 			ArgTypes:  argTypes,
-			HasReturn: ftype.Return != nil,
+			HasReturn: ftype.Return.Kind() != compiler.KindVoid,
 			Name:      extern.Name(),
 		})
 	}
