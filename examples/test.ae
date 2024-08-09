@@ -30,9 +30,10 @@ func main() {
 	print(y.0)
 
 	z := &y
-	z.0 = string("hello")
+	z.0 = ("hello")
 
 	print(y.0)
+
 
 	h := &z
 

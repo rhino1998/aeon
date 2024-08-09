@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 )
 
@@ -149,6 +148,10 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 				errs.Add(expr.WrapError(fmt.Errorf("cannot declare variable of type void")))
 			}
 
+			if expr.Type().Kind() == KindTypeConversion {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot use type conversion as a value")))
+			}
+
 			stmt.Expression = expr
 			stmt.Variable.SetType(expr.Type())
 		}
@@ -162,6 +165,10 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 
 		if expr.Type() == VoidType {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot declare variable of type void")))
+		}
+
+		if expr.Type().Kind() == KindTypeConversion {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot use type conversion as a value")))
 		}
 
 		stmt.Expression = expr
@@ -573,9 +580,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 		return expr, nil
 	case *BinaryExpression:
-		// TODO: operator-aware bounds
-
-		left, err := c.resolveExpressionTypes(scope, expr.Left, nil)
+		left, err := c.resolveExpressionTypes(scope, expr.Left, expr.Right.Type())
 		if err != nil {
 			errs.Add(err)
 		}
@@ -589,32 +594,33 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 		expr.Right = right
 
-		log.Printf("%#v %#v", left, right)
-
-		typ, err := validateBinaryExpression(expr.Left.Type(), expr.Operator, expr.Right.Type())
+		_, err = validateBinaryExpression(expr.Left.Type(), expr.Operator, expr.Right.Type())
 		if err != nil {
 			errs.Add(expr.WrapError(err))
 		}
 
-		expr.SetType(typ)
-
 		return expr, nil
 	case *UnaryExpression:
-		// TODO: operatore-aware bounds
+		switch expr.Operator {
+		case OperatorDereference:
+			bound = NewPointerType(bound)
+		case OperatorAddress:
+			if ptr, ok := bound.(*PointerType); ok {
+				bound = ptr.Pointee()
+			}
+		}
 
-		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, nil)
+		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, bound)
 		if err != nil {
 			errs.Add(err)
 		}
 
 		expr.Expression = subExpr
 
-		typ, err := validateUnaryExpression(expr.Expression.Type(), expr.Operator)
+		_, err = validateUnaryExpression(expr.Expression.Type(), expr.Operator)
 		if err != nil {
 			errs.Add(expr.WrapError(err))
 		}
-
-		expr.SetType(typ)
 
 		return expr, nil
 	case *CallExpression:

@@ -161,17 +161,16 @@ type BinaryExpression struct {
 	Operator Operator
 	Right    Expression
 
-	typ Type
-
 	parser.Position
 }
 
 func (e *BinaryExpression) Type() Type {
-	return e.typ
-}
+	typ, err := validateBinaryExpression(e.Left.Type(), e.Operator, e.Right.Type())
+	if err != nil {
+		return UnknownType
+	}
 
-func (e *BinaryExpression) SetType(typ Type) {
-	e.typ = typ
+	return typ
 }
 
 type AssignmentOperatorStatement struct {
@@ -185,18 +184,17 @@ type AssignmentOperatorStatement struct {
 type UnaryExpression struct {
 	Expression Expression
 	Operator   Operator
-	typ        Type
 
 	parser.Position
 }
 
 func (e *UnaryExpression) Type() Type {
-	// TODO: resolve
-	return e.typ
-}
+	typ, err := validateUnaryExpression(e.Expression.Type(), e.Operator)
+	if err != nil {
+		return UnknownType
+	}
 
-func (e *UnaryExpression) SetType(typ Type) {
-	e.typ = typ
+	return typ
 }
 
 type BinaryOperatorKinds struct {

@@ -25,6 +25,10 @@ func (voidType) Kind() Kind       { return KindVoid }
 func (voidType) Size() AddrOffset { return 0 }
 
 func IsAssignableTo(v, to Type) bool {
+	if v.Kind() == KindTypeConversion {
+		return false
+	}
+
 	if to == nil {
 		return true
 	}
@@ -48,6 +52,10 @@ func IsAssignableTo(v, to Type) bool {
 func IsConvertibleTo(v, to Type) bool {
 	if IsAssignableTo(v, to) {
 		return true
+	}
+
+	if v.Kind() == KindTypeConversion {
+		return false
 	}
 
 	if v.Kind().IsNumeric() && to.Kind().IsNumeric() {
