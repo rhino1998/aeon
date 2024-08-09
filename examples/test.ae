@@ -37,6 +37,8 @@ func main() {
 
 	h := &z
 
+  var x any = 5
+
 	(**h).0 = "hello2"
 
 	print(y.0)

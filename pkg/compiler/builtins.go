@@ -25,7 +25,10 @@ var (
 		size: 1,
 	}
 
-	AnyType = &InterfaceType{}
+	AnyType = &DerivedType{
+		name:       "any",
+		underlying: &InterfaceType{},
+	}
 )
 
 func BuiltinsSymbols() *SymbolScope {
@@ -35,6 +38,7 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(BoolType)
 	s.put(StringType)
 	s.put(FloatType)
+	s.put(AnyType)
 
 	return s
 }

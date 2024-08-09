@@ -84,7 +84,12 @@ func BaseType(typ Type) Type {
 func resolveType(typ Type) Type {
 	switch typ := typ.(type) {
 	case *ReferencedType:
-		return resolveType(typ.Dereference())
+		res := resolveType(typ.Dereference())
+		if res == UnknownType {
+			return typ
+		}
+
+		return res
 	default:
 		return typ
 	}
@@ -106,12 +111,7 @@ func typesEqual(t1, t2 Type) bool {
 			return false
 		}
 	case *DerivedType:
-		switch t2 := t2.(type) {
-		case *DerivedType:
-			return t1.name == t2.name && t1.scope == t2.scope && TypesEqual(t1.Underlying(), t2.Underlying())
-		default:
-			return false
-		}
+		return t1 == t2
 	case *SliceType:
 		switch t2 := t2.(type) {
 		case *SliceType:
@@ -176,6 +176,14 @@ func IsTypeResolvable(s *SymbolScope, typ Type) bool {
 
 		if typ.Return != nil {
 			if !IsTypeResolvable(s, typ.Return) {
+				return false
+			}
+		}
+
+		return true
+	case *InterfaceType:
+		for _, method := range typ.Methods() {
+			if !IsTypeResolvable(s, method) {
 				return false
 			}
 		}
@@ -290,6 +298,7 @@ func (t BasicType) Size() Size     { return t.size }
 type ReferencedType struct {
 	s    *SymbolScope
 	name string
+	pkg  string
 }
 
 func (t ReferencedType) Kind() Kind {
@@ -306,7 +315,7 @@ func (t ReferencedType) Dereference() Type {
 }
 
 func (t ReferencedType) String() string {
-	return t.Dereference().String()
+	return t.name
 }
 
 func (t ReferencedType) Size() Size {
@@ -336,33 +345,29 @@ func (m MethodSet) Subset(o MethodSet) bool {
 
 type DerivedType struct {
 	name       string
-	scope      string
 	methods    MethodSet
 	underlying Type
 }
 
-func (t DerivedType) Name() string {
+func (t *DerivedType) Name() string {
 	return t.name
 }
 
-func (t DerivedType) Kind() Kind {
+func (t *DerivedType) Kind() Kind {
 	return t.underlying.Kind()
 }
 
-func (t DerivedType) String() string {
-	return fmt.Sprintf("%s.%s", t.scope, t.name)
+func (t *DerivedType) String() string {
+	return t.name
 }
 
-func (t DerivedType) Underlying() Type { return t.underlying }
+func (t *DerivedType) Underlying() Type { return t.underlying }
 
-func (t DerivedType) Size() Size {
+func (t *DerivedType) Size() Size {
 	return t.underlying.Size()
 }
 
-func (t DerivedType) Scope() string {
-	return t.scope
-}
-func (t DerivedType) Methods(ptr bool) MethodSet {
+func (t *DerivedType) Methods(ptr bool) MethodSet {
 	m := make(MethodSet)
 	for k, v := range t.methods {
 		if v.Receiver.Kind() == KindPointer && !ptr {
@@ -548,6 +553,11 @@ func (t *InterfaceType) Kind() Kind {
 func (*InterfaceType) Size() Size {
 	return 2
 }
+
+var interfaceTuple = NewTupleType(
+	IntType,
+	NewPointerType(VoidType),
+)
 
 func (t *InterfaceType) ImplementedBy(i Type) bool {
 	switch i := resolveType(i).(type) {

@@ -461,6 +461,18 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 				Position: expr.Position,
 			}, nil
+		case KindInterface:
+			err := c.checkInterfaceTypeCoercion(expr, bound)
+			if err != nil {
+				errs.Add(err)
+			}
+
+			return &Literal[Int]{
+				value: expr.value,
+				typ:   IntType,
+
+				Position: expr.Position,
+			}, nil
 		default:
 			return expr, expr.WrapError(fmt.Errorf("cannot coerce int literal into %s", bound))
 		}
@@ -498,6 +510,18 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 				Position: expr.Position,
 			}, nil
+		case KindInterface:
+			err := c.checkInterfaceTypeCoercion(expr, bound)
+			if err != nil {
+				errs.Add(err)
+			}
+
+			return &Literal[Float]{
+				value: expr.value,
+				typ:   FloatType,
+
+				Position: expr.Position,
+			}, nil
 		default:
 			return expr, expr.WrapError(fmt.Errorf("cannot coerce float literal into %s", bound))
 		}
@@ -524,6 +548,18 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 				Position: expr.Position,
 			}, nil
+		case KindInterface:
+			err := c.checkInterfaceTypeCoercion(expr, bound)
+			if err != nil {
+				errs.Add(err)
+			}
+
+			return &Literal[String]{
+				value: expr.value,
+				typ:   StringType,
+
+				Position: expr.Position,
+			}, nil
 		default:
 			return expr, expr.WrapError(fmt.Errorf("cannot coerce string literal into %s", bound))
 		}
@@ -546,6 +582,18 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 			return &Literal[Bool]{
 				value: expr.value,
 				typ:   bound,
+
+				Position: expr.Position,
+			}, nil
+		case KindInterface:
+			err := c.checkInterfaceTypeCoercion(expr, bound)
+			if err != nil {
+				errs.Add(err)
+			}
+
+			return &Literal[Bool]{
+				value: expr.value,
+				typ:   BoolType,
 
 				Position: expr.Position,
 			}, nil
@@ -703,4 +751,23 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 	default:
 		return expr, expr.WrapError(fmt.Errorf("a cannot dot index receiver type %T", typ))
 	}
+}
+
+func (c *Compiler) checkInterfaceTypeCoercion(expr Expression, bound Type) (err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	ifaceType, ok := BaseType(bound).(*InterfaceType)
+	if !ok {
+		errs.Add(expr.WrapError(fmt.Errorf("cannot resolve interface %v", bound)))
+	}
+
+	if !ifaceType.ImplementedBy(expr.Type()) {
+		// TODO: explanation of missing methods
+		errs.Add(expr.WrapError(fmt.Errorf("cannot use value of type %v as interface type %v", expr.Type(), bound)))
+	}
+
+	return nil
 }
