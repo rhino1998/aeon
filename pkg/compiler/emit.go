@@ -689,6 +689,18 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			tmp := scope.allocTemp(expr.Expression.Type())
 			defer scope.deallocTemp(tmp)
 
+			srcBC, srcLoc, err := prog.compileBCExpression(ctx, expr.Expression, scope, tmp)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			bc.Add(srcBC...)
+
+			return bc, srcLoc.AddressOf(), nil
+		case OperatorDereference:
+			tmp := scope.allocTemp(expr.Expression.Type())
+			defer scope.deallocTemp(tmp)
+
 			srcBC, srcOp, err := prog.compileBCExpression(ctx, expr.Expression, scope, tmp)
 			if err != nil {
 				return nil, nil, err
@@ -696,7 +708,12 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			bc.Add(srcBC...)
 
-			return bc, srcOp.AddressOf(), nil
+			srcLocValue, err := srcOp.Dereference()
+			if err != nil {
+				return nil, nil, err
+			}
+
+			return bc, srcLocValue, nil
 		default:
 			srcBC, srcOp, err := prog.compileBCExpression(ctx, expr.Expression, scope, dst)
 			if err != nil {

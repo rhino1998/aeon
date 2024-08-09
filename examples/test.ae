@@ -39,7 +39,7 @@ func main() {
 
 	h := &z
 
-	h.0 = "hello2"
+	(**h).0 = "hello2"
 
 	print(y.0)
 

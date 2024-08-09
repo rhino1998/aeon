@@ -483,20 +483,6 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			)
 		case compiler.UnOp:
 			switch code.Op {
-			case "*P":
-				addr, err := r.load(code.Src)()
-				if err != nil {
-					return err
-				}
-
-				if addr.(Addr) == 0 {
-					return fmt.Errorf("nil pointer dereference")
-				}
-
-				err = r.store(code.Dst)(r.loadAddr(addr.(Addr)))
-				if err != nil {
-					return err
-				}
 			default:
 				return fmt.Errorf("unrecognized unary operator %q", code.Op)
 			}
