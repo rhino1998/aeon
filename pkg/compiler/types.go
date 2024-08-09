@@ -38,8 +38,13 @@ func IsAssignableTo(v, to Type) bool {
 	}
 
 	if v.Kind() == to.Kind() {
-		_, ok := v.(TypeKind)
-		return ok
+		if _, ok := v.(TypeKind); ok {
+			return true
+		}
+
+		if _, ok := to.(TypeKind); ok {
+			return true
+		}
 	}
 
 	if to, ok := to.(*InterfaceType); ok {

@@ -771,32 +771,44 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *DotExpression:
 		receiverTmp := scope.allocTemp(expr.Receiver.Type())
 		defer scope.deallocTemp(receiverTmp)
-		receiverBC, receiverOp, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		receiverBC, receiverLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		bc.Add(receiverBC...)
 
-		switch BaseType(expr.Receiver.Type()).(type) {
-		case *TupleType:
-			index, err := strconv.Atoi(expr.Key)
-			if err != nil {
-				return nil, nil, expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key))
-			}
-
-			elemLoc, err := receiverOp.IndexTuple(index)
-			if err != nil {
-				return nil, nil, expr.WrapError(err)
-			}
-
-			return bc, elemLoc, nil
-		default:
-			return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
-		}
+		return prog.compileBCDotExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc)
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
+}
+
+func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
+	switch typ := BaseType(typ).(type) {
+	case *TupleType:
+		index, err := strconv.Atoi(expr.Key)
+		if err != nil {
+			return nil, nil, expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key))
+		}
+
+		elemLoc, err := receiverLoc.IndexTuple(index)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		return nil, elemLoc, nil
+	case *PointerType:
+		receiverLocValue, err := receiverLoc.Dereference()
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		return prog.compileBCDotExpression(ctx, expr, typ.Pointee(), scope, receiverLocValue)
+	default:
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+	}
+
 }
 
 func (prog *Program) compileBCValuesLiteral(ctx context.Context, exprs []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, error) {

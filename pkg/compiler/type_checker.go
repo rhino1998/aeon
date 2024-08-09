@@ -701,6 +701,6 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 	case *PointerType:
 		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), bound)
 	default:
-		return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", typ))
+		return expr, expr.WrapError(fmt.Errorf("a cannot dot index receiver type %T", typ))
 	}
 }

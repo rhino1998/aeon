@@ -34,6 +34,8 @@ func main() {
 
 	print(y.0)
 
+  y.0 = z.0 + "there"
+
 
 	h := &z
 
