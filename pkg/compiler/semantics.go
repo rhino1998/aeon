@@ -586,7 +586,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 		if expr.IsInteger() {
 			return &Literal[Int]{
 				value: Int(expr.Value),
-				typ:   KindType(KindInt),
+				typ:   TypeKind(KindInt),
 
 				Position: expr.Position,
 			}, nil
@@ -594,7 +594,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 			return &Literal[Float]{
 				value: Float(expr.Value),
 
-				typ: KindType(KindFloat),
+				typ: TypeKind(KindFloat),
 
 				Position: expr.Position,
 			}, nil
@@ -603,7 +603,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 		return &Literal[String]{
 			value: String(expr.Value),
 
-			typ: KindType(KindString),
+			typ: TypeKind(KindString),
 
 			Position: expr.Position,
 		}, nil
@@ -611,7 +611,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 		return &Literal[Bool]{
 			value: Bool(expr.Value),
 
-			typ: KindType(KindBool),
+			typ: TypeKind(KindBool),
 
 			Position: expr.Position,
 		}, nil

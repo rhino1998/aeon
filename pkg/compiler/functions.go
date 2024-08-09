@@ -93,7 +93,14 @@ type CallExpression struct {
 }
 
 func (e *CallExpression) Type() Type {
-	return BaseType(e.Function.Type()).(*FunctionType).Return
+	switch ftype := e.Function.Type().(type) {
+	case *FunctionType:
+		return ftype.Return
+	case *TypeConversionType:
+		return ftype.Type
+	default:
+		return UnknownType
+	}
 }
 
 type ReturnStatement struct {
@@ -149,7 +156,7 @@ type CompilerFunctionReferenceExpression struct {
 }
 
 func (*CompilerFunctionReferenceExpression) Type() Type {
-	return KindType(KindInt)
+	return TypeKind(KindInt)
 }
 
 func (*CompilerFunctionReferenceExpression) WrapError(err error) error {

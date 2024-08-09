@@ -12,7 +12,7 @@ type Literal[T Immediate] struct {
 func NewLiteral[T Immediate](imm T) *Literal[T] {
 	return &Literal[T]{
 		value: imm,
-		typ:   KindType(imm.Kind()),
+		typ:   TypeKind(imm.Kind()),
 	}
 }
 

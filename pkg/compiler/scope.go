@@ -348,7 +348,7 @@ func (vs *ValueScope) newFunctionRef(fun *Function) *Location {
 	return &Location{
 		Kind:    LocationKindConstant,
 		Name:    fun.Name(),
-		Type:    KindType(KindInt),
+		Type:    TypeKind(KindInt),
 		Operand: fun.AddrOp(),
 	}
 }
@@ -357,7 +357,7 @@ func (vs *ValueScope) newImmediate(imm Immediate) *Location {
 	return &Location{
 		Kind:    LocationKindConstant,
 		Operand: ImmediateOperand(imm),
-		Type:    KindType(imm.Kind()),
+		Type:    TypeKind(imm.Kind()),
 	}
 }
 

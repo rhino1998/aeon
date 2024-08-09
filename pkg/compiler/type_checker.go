@@ -76,7 +76,7 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 	if g.Type() != nil {
 		typ := resolveType(g.Type())
 
-		if kindType, ok := typ.(KindType); ok {
+		if kindType, ok := typ.(TypeKind); ok {
 			switch kindType.Kind() {
 			case KindInt:
 				typ = IntType
@@ -119,7 +119,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		if stmt.Type != nil {
 			typ := resolveType(stmt.Type)
 
-			if kindType, ok := typ.(KindType); ok {
+			if kindType, ok := typ.(TypeKind); ok {
 				switch kindType.Kind() {
 				case KindInt:
 					typ = IntType
@@ -221,7 +221,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		return nil
 	case *IfStatement:
 		if stmt.Condition != nil {
-			cond, err := c.resolveExpressionTypes(scope, stmt.Condition, KindType(KindBool))
+			cond, err := c.resolveExpressionTypes(scope, stmt.Condition, TypeKind(KindBool))
 			if err != nil {
 				errs.Add(err)
 			}
@@ -257,7 +257,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		}
 
 		if stmt.Condition != nil {
-			cond, err := c.resolveExpressionTypes(stmt.Scope, stmt.Condition, KindType(KindBool))
+			cond, err := c.resolveExpressionTypes(stmt.Scope, stmt.Condition, TypeKind(KindBool))
 			if err != nil {
 				errs.Add(err)
 			}
@@ -555,8 +555,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 		case *Variable:
 			return expr, nil
 		case Type:
-			// TODO:
-			return expr, expr.WrapError(fmt.Errorf("invalid"))
+			return expr, nil
 		case *Function:
 			return expr, nil
 		case *ExternFunction:
@@ -626,23 +625,32 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 		expr.Function = fExpr
 
-		if fExpr.Type().Kind() != KindFunction {
-			errs.Add(expr.WrapError(fmt.Errorf("cannot call non-function type %v", fExpr.Type())))
-		}
-
-		baseFType := BaseType(fExpr.Type()).(*FunctionType)
-
-		if len(baseFType.Parameters) != len(expr.Args) {
-			errs.Add(expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(baseFType.Parameters), len(expr.Args))))
-		}
-
-		for i := range min(len(expr.Args), len(baseFType.Parameters)) {
-			arg, err := c.resolveExpressionTypes(scope, expr.Args[i], baseFType.Parameters[i])
-			if err != nil {
-				errs.Add(err)
+		switch ftype := BaseType(expr.Function.Type()).(type) {
+		case *FunctionType:
+			if len(ftype.Parameters) != len(expr.Args) {
+				errs.Add(expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(ftype.Parameters), len(expr.Args))))
 			}
 
-			expr.Args[i] = arg
+			for i := range min(len(expr.Args), len(ftype.Parameters)) {
+				arg, err := c.resolveExpressionTypes(scope, expr.Args[i], ftype.Parameters[i])
+				if err != nil {
+					errs.Add(err)
+				}
+
+				expr.Args[i] = arg
+			}
+		case *TypeConversionType:
+			if len(expr.Args) != 1 {
+				errs.Add(expr.WrapError(fmt.Errorf("type conversion expects 1 parameter, got %d", len(expr.Args))))
+			}
+
+			if len(expr.Args) > 0 && !IsConvertibleTo(expr.Args[0].Type(), ftype.Type) {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot convert type %v to %v", expr.Args[0].Type(), ftype.Type)))
+			}
+
+			return expr, nil
+		default:
+			errs.Add(expr.WrapError(fmt.Errorf("cannot call non-function type %v", fExpr.Type())))
 		}
 
 		return expr, nil

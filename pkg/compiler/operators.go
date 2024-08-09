@@ -63,7 +63,7 @@ func validateBinaryExpression(left Type, operator Operator, right Type) (Type, e
 	}
 
 	if left.Kind() != kind {
-		return KindType(kind), nil
+		return TypeKind(kind), nil
 	}
 
 	return left, nil
@@ -141,7 +141,7 @@ func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
 	}
 
 	if expr.Kind() != kind {
-		return KindType(kind), nil
+		return TypeKind(kind), nil
 	}
 
 	return expr, nil

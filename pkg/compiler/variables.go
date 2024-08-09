@@ -61,12 +61,22 @@ func (e *SymbolReferenceExpression) Name() string {
 }
 
 func (e *SymbolReferenceExpression) Type() Type {
-	v, ok := e.scope.getTypedSymbol(e.name)
+	v, ok := e.scope.get(e.name)
 	if !ok {
 		return UnknownType
 	}
 
-	return v.Type()
+	switch v := v.(type) {
+	case Type:
+		return &TypeConversionType{
+			Type: v,
+		}
+	case TypedSymbol:
+		return v.Type()
+	default:
+		return UnknownType
+	}
+
 }
 
 func (e *SymbolReferenceExpression) Dereference() Symbol {

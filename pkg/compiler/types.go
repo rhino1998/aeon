@@ -34,7 +34,7 @@ func IsAssignableTo(v, to Type) bool {
 	}
 
 	if v.Kind() == to.Kind() {
-		_, ok := v.(KindType)
+		_, ok := v.(TypeKind)
 		return ok
 	}
 
@@ -83,7 +83,7 @@ func typesEqual(t1, t2 Type) bool {
 	}
 
 	switch t1 := t1.(type) {
-	case KindType:
+	case TypeKind:
 		return t1 == t2
 	case *BasicType:
 		switch t2 := t2.(type) {
@@ -127,13 +127,13 @@ func IsUnspecified(typ Type) bool {
 		return true
 	}
 
-	_, ok := resolveType(typ).(KindType)
+	_, ok := resolveType(typ).(TypeKind)
 	return ok
 }
 
 func IsTypeResolvable(s *SymbolScope, typ Type) bool {
 	switch typ := resolveType(typ).(type) {
-	case KindType:
+	case TypeKind:
 		return false
 	case *BasicType:
 		_, ok := s.getType(typ.String())
@@ -176,21 +176,21 @@ func IsTypeResolvable(s *SymbolScope, typ Type) bool {
 
 }
 
-type KindType Kind
+type TypeKind Kind
 
-func (t KindType) String() string {
+func (t TypeKind) String() string {
 	return t.Name()
 }
 
-func (t KindType) Name() string {
+func (t TypeKind) Name() string {
 	return fmt.Sprintf("<kind %s>", t.Kind())
 }
 
-func (t KindType) Kind() Kind {
+func (t TypeKind) Kind() Kind {
 	return Kind(t)
 }
 
-func (t KindType) Size() AddrOffset {
+func (t TypeKind) Size() AddrOffset {
 	switch t.Kind() {
 	case KindVoid:
 		return 0
@@ -221,6 +221,7 @@ const (
 	KindSlice
 	KindFunction
 	KindInterface
+	KindTypeConversion
 )
 
 func (k Kind) String() string {
@@ -245,6 +246,8 @@ func (k Kind) String() string {
 		return "function"
 	case KindInterface:
 		return "interface"
+	case KindTypeConversion:
+		return "type conversion"
 	default:
 		return "<unknown>"
 	}
@@ -548,3 +551,11 @@ func (t *InterfaceType) ImplementedBy(i Type) bool {
 		return len(t.Methods()) == 0
 	}
 }
+
+type TypeConversionType struct {
+	Type Type
+}
+
+func (*TypeConversionType) Kind() Kind       { return KindTypeConversion }
+func (*TypeConversionType) Size() AddrOffset { return 0 }
+func (t *TypeConversionType) String() string { return fmt.Sprintf("%s()", t.Type) }

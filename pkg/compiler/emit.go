@@ -716,50 +716,58 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *CallExpression:
 		callScope := scope.sub(scope.symbols)
 
-		var offset AddrOffset
-		ftype := expr.Function.Type().(*FunctionType)
-		retVar := callScope.newArg("__return", offset, ftype.Return)
-		offset += ftype.Return.Size()
+		switch ftype := BaseType(expr.Function.Type()).(type) {
+		case *FunctionType:
+			var offset AddrOffset
 
-		for i, arg := range expr.Args {
-			argVar := callScope.newArg(fmt.Sprintf("%d", i), offset, ftype.Parameters[i])
-			offset += arg.Type().Size()
+			retVar := callScope.newArg("__return", offset, ftype.Return)
+			offset += ftype.Return.Size()
 
-			argBC, argLoc, err := prog.compileBCExpression(ctx, arg, callScope, argVar)
+			for i, arg := range expr.Args {
+				argVar := callScope.newArg(fmt.Sprintf("%d", i), offset, ftype.Parameters[i])
+				offset += arg.Type().Size()
+
+				argBC, argLoc, err := prog.compileBCExpression(ctx, arg, callScope, argVar)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				bc.Add(argBC...)
+
+				if argVar != argLoc {
+					bc.Mov(
+						argVar,
+						argLoc,
+					)
+				}
+			}
+
+			callReg := callScope.allocTemp(expr.Function.Type())
+			defer callScope.deallocTemp(callReg)
+
+			callBC, callLoc, err := prog.compileBCExpression(ctx, expr.Function, callScope, callReg)
 			if err != nil {
 				return nil, nil, err
 			}
 
-			bc.Add(argBC...)
+			bc.Add(callBC...)
 
-			if argVar != argLoc {
-				bc.Mov(
-					argVar,
-					argLoc,
-				)
+			bc.Add(Call{
+				Args: offset,
+				Func: callLoc.Operand,
+			})
+
+			if retVar.Type.Size() > 0 {
+				bc.Mov(dst, retVar)
 			}
+
+			return bc, dst, nil
+		case *TypeConversionType:
+			// TODO
+			return nil, nil, expr.WrapError(fmt.Errorf("type conversions not yet implemented"))
+		default:
+			return nil, nil, expr.WrapError(fmt.Errorf("cannot call non-function type %v", ftype))
 		}
-
-		callReg := callScope.allocTemp(expr.Function.Type())
-		defer callScope.deallocTemp(callReg)
-
-		callBC, callLoc, err := prog.compileBCExpression(ctx, expr.Function, callScope, callReg)
-		if err != nil {
-			return nil, nil, err
-		}
-
-		bc.Add(callBC...)
-
-		bc.Add(Call{
-			Args: offset,
-			Func: callLoc.Operand,
-		})
-
-		if retVar.Type.Size() > 0 {
-			bc.Mov(dst, retVar)
-		}
-
-		return bc, dst, nil
 	case *DotExpression:
 		receiverTmp := scope.allocTemp(expr.Receiver.Type())
 		defer scope.deallocTemp(receiverTmp)
