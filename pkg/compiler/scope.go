@@ -306,11 +306,11 @@ type ValueScope struct {
 	function *Function
 	symbols  *SymbolScope
 
-	nextGlobal AddrOffset
+	nextGlobal Size
 
 	variables map[string]*Location
-	nextLocal AddrOffset
-	maxLocal  *AddrOffset
+	nextLocal Size
+	maxLocal  *Size
 
 	usedRegisters map[Register]bool
 	numRegisters  int
@@ -323,7 +323,7 @@ func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
 		variables:     make(map[string]*Location),
 		nextGlobal:    1,
 		nextLocal:     1,
-		maxLocal:      new(AddrOffset),
+		maxLocal:      new(Size),
 		usedRegisters: make(map[Register]bool),
 		numRegisters:  regs,
 	}
@@ -383,11 +383,11 @@ func (vs *ValueScope) newGlobal(name string, typ Type) *Location {
 
 	vs.variables[name] = loc
 
-	vs.nextGlobal += AddrOffset(typ.Size())
+	vs.nextGlobal += Size(typ.Size())
 	return loc
 }
 
-func (vs *ValueScope) newArg(name string, offset AddrOffset, typ Type) *Location {
+func (vs *ValueScope) newArg(name string, offset Size, typ Type) *Location {
 	loc := &Location{
 		Kind:    LocationKindArg,
 		Name:    fmt.Sprintf("arg_%s", name),
@@ -398,7 +398,7 @@ func (vs *ValueScope) newArg(name string, offset AddrOffset, typ Type) *Location
 	return loc
 }
 
-func (vs *ValueScope) newParam(name string, offset AddrOffset, typ Type) {
+func (vs *ValueScope) newParam(name string, offset Size, typ Type) {
 	vs.variables[name] = &Location{
 		Name:    name,
 		Kind:    LocationKindParam,
@@ -421,7 +421,7 @@ func (vs *ValueScope) newLocal(name string, typ Type) *Location {
 		*vs.maxLocal = vs.nextLocal
 	}
 
-	vs.nextLocal += AddrOffset(typ.Size())
+	vs.nextLocal += Size(typ.Size())
 
 	return loc
 }
@@ -457,7 +457,7 @@ func (vs *ValueScope) allocTemp(typ Type) *Location {
 func (vs *ValueScope) deallocTemp(l *Location) {
 	switch l.Kind {
 	case LocationKindLocal:
-		offset := AddrOffset(l.Value.(Indirect).Ptr.Value.(Offset).B.Value.(Int))
+		offset := Size(l.Value.(Indirect).Ptr.Value.(Offset).B.Value.(Int))
 		if offset == vs.nextLocal-l.Type.Size() {
 			vs.nextLocal -= l.Type.Size()
 

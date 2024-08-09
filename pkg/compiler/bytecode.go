@@ -82,21 +82,23 @@ type Addr uint64
 
 func (Addr) immediate() {}
 
+func (Addr) Kind() Kind { return KindPointer }
+
 func (a Addr) String() string {
 	return fmt.Sprintf("0x%08x", uint64(a))
 }
 
-func (a Addr) Offset(o AddrOffset) Addr {
+func (a Addr) Offset(o Size) Addr {
 	return Addr(int64(a) + int64(o))
 }
 
-type AddrOffset int64
+type Size int64
 
-func (o AddrOffset) String() string {
+func (o Size) String() string {
 	if o < 0 {
-		return fmt.Sprintf("-0x%04x", int64(-o))
+		return fmt.Sprintf("-0x%02x", int64(-o))
 	} else {
-		return fmt.Sprintf("+0x%04x", int64(o))
+		return fmt.Sprintf("+0x%02x", int64(o))
 	}
 }
 
@@ -143,9 +145,9 @@ func (Nop) Name() string {
 }
 
 type Mov struct {
-	Src  *Operand   `xc:"s"`
-	Dst  *Operand   `xc:"d"`
-	Size AddrOffset `xc:"c"`
+	Src  *Operand `xc:"s"`
+	Dst  *Operand `xc:"d"`
+	Size Size     `xc:"c"`
 }
 
 func (m Mov) Name() string {
@@ -219,7 +221,7 @@ func (o BinOp) String() string {
 }
 
 type Return struct {
-	Args AddrOffset `xc:"s"`
+	Args Size `xc:"s"`
 }
 
 func (r Return) Name() string {
@@ -231,8 +233,8 @@ func (r Return) String() string {
 }
 
 type Call struct {
-	Args AddrOffset `xc:"a"`
-	Func *Operand   `xc:"f"`
+	Args Size     `xc:"a"`
+	Func *Operand `xc:"f"`
 }
 
 func (c Call) String() string {

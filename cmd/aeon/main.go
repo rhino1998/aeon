@@ -38,7 +38,14 @@ func main() {
 						return fmt.Errorf("invalid path: %w", err)
 					}
 
+					logger := slog.Default()
+
 					config := compiler.Config{}
+
+					compiler, err := compiler.New(logger, config)
+					if err != nil {
+						return fmt.Errorf("failed to initialize compiler: %w", err)
+					}
 
 					if stat.IsDir() {
 						files, err := filepath.Glob(filepath.Join(path, "*.ae"))
@@ -47,20 +54,20 @@ func main() {
 						}
 
 						for _, file := range files {
-							config.Files = append(config.Files, filepath.Base(file))
+							f, err := os.Open(file)
+							if err != nil {
+								return fmt.Errorf("failed to open file: %w", err)
+							}
+
+							compiler.AddFile(file, f)
+						}
+					} else {
+						f, err := os.Open(path)
+						if err != nil {
+							return fmt.Errorf("failed to open file: %w", err)
 						}
 
-						config.Src = os.DirFS(path)
-					} else {
-						config.Src = os.DirFS(filepath.Dir(path))
-						config.Files = []string{filepath.Base(path)}
-					}
-
-					logger := slog.Default()
-
-					compiler, err := compiler.New(logger, config)
-					if err != nil {
-						return fmt.Errorf("failed to initialize compiler: %w", err)
+						compiler.AddFile(path, f)
 					}
 
 					prog, err := compiler.Compile(ctx)
@@ -96,7 +103,14 @@ func main() {
 						return fmt.Errorf("invalid path: %w", err)
 					}
 
+					logger := slog.Default()
+
 					config := compiler.Config{}
+
+					compiler, err := compiler.New(logger, config)
+					if err != nil {
+						return fmt.Errorf("failed to initialize compiler: %w", err)
+					}
 
 					if stat.IsDir() {
 						files, err := filepath.Glob(filepath.Join(path, "*.ae"))
@@ -105,20 +119,20 @@ func main() {
 						}
 
 						for _, file := range files {
-							config.Files = append(config.Files, filepath.Base(file))
+							f, err := os.Open(file)
+							if err != nil {
+								return fmt.Errorf("failed to open file: %w", err)
+							}
+
+							compiler.AddFile(file, f)
+						}
+					} else {
+						f, err := os.Open(path)
+						if err != nil {
+							return fmt.Errorf("failed to open file: %w", err)
 						}
 
-						config.Src = os.DirFS(path)
-					} else {
-						config.Src = os.DirFS(filepath.Dir(path))
-						config.Files = []string{filepath.Base(path)}
-					}
-
-					logger := slog.Default()
-
-					compiler, err := compiler.New(logger, config)
-					if err != nil {
-						return fmt.Errorf("failed to initialize compiler: %w", err)
+						compiler.AddFile(path, f)
 					}
 
 					prog, err := compiler.Compile(ctx)
@@ -150,7 +164,14 @@ func main() {
 						return fmt.Errorf("invalid path: %w", err)
 					}
 
+					logger := slog.Default()
+
 					config := compiler.Config{}
+
+					compiler, err := compiler.New(logger, config)
+					if err != nil {
+						return fmt.Errorf("failed to initialize compiler: %w", err)
+					}
 
 					if stat.IsDir() {
 						files, err := filepath.Glob(filepath.Join(path, "*.ae"))
@@ -159,20 +180,20 @@ func main() {
 						}
 
 						for _, file := range files {
-							config.Files = append(config.Files, filepath.Base(file))
+							f, err := os.Open(file)
+							if err != nil {
+								return fmt.Errorf("failed to open file: %w", err)
+							}
+
+							compiler.AddFile(file, f)
+						}
+					} else {
+						f, err := os.Open(path)
+						if err != nil {
+							return fmt.Errorf("failed to open file: %w", err)
 						}
 
-						config.Src = os.DirFS(path)
-					} else {
-						config.Src = os.DirFS(filepath.Dir(path))
-						config.Files = []string{filepath.Base(path)}
-					}
-
-					logger := slog.Default()
-
-					compiler, err := compiler.New(logger, config)
-					if err != nil {
-						return fmt.Errorf("failed to initialize compiler: %w", err)
+						compiler.AddFile(path, f)
 					}
 
 					prog, err := compiler.Compile(ctx)

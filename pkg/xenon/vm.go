@@ -129,7 +129,7 @@ func (r *Runtime) loadAddr(addr compiler.Addr) (any, error) {
 func (r *Runtime) loadArgs(sp compiler.Addr, num int) ([]any, error) {
 	var args []any
 	for i := 0; i < num; i++ {
-		arg, err := r.loadAddr(sp.Offset(compiler.AddrOffset(-(i + 1))))
+		arg, err := r.loadAddr(sp.Offset(compiler.Size(-(i + 1))))
 		if err != nil {
 			return nil, err
 		}
@@ -424,7 +424,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			pc = Addr(pcInt)
 
 			for reg := range r.registers[1:] {
-				r.registers[reg+1], err = r.loadAddr(fp.Offset(-1).Offset(-compiler.AddrOffset(reg)))
+				r.registers[reg+1], err = r.loadAddr(fp.Offset(-1).Offset(-compiler.Size(reg)))
 				if err != nil {
 					return fmt.Errorf("failed to push %s", Register(reg))
 				}
@@ -535,7 +535,7 @@ type Int = compiler.Int
 type String = compiler.String
 type Bool = compiler.Bool
 type Addr = compiler.Addr
-type AddrOffset = compiler.AddrOffset
+type AddrOffset = compiler.Size
 type Register = compiler.Register
 
 var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{

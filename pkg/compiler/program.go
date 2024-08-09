@@ -30,8 +30,8 @@ func (p *Program) Functions() []*Function {
 	return p.root.Functions()
 }
 
-func (p *Program) FrameSize() AddrOffset {
-	return AddrOffset(p.registers)
+func (p *Program) FrameSize() Size {
+	return Size(p.registers)
 }
 
 func (p *Program) AddPackage(name string) *Package {

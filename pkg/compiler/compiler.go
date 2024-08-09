@@ -3,26 +3,30 @@ package compiler
 import (
 	"context"
 	"fmt"
-	"io/fs"
+	"io"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
 type Config struct {
-	Src   fs.FS
-	Files []string
 }
 
 func (c *Config) Validate(logger *slog.Logger) error {
 	return nil
 }
 
+type fileEntry struct {
+	name string
+	f    io.Reader
+}
+
 type Compiler struct {
 	logger *slog.Logger
 	Config Config
 
-	typeKinds map[string]Kind
+	files []fileEntry
 }
 
 func New(logger *slog.Logger, config Config) (*Compiler, error) {
@@ -44,19 +48,14 @@ func (c *Compiler) Compile(ctx context.Context) (_ *Program, err error) {
 	}()
 
 	prog := newProgram()
-	for _, file := range c.Config.Files {
-		f, err := c.Config.Src.Open(file)
-		if err != nil {
-			errs.Add(err)
-			continue
-		}
-		ast, err := parser.ParseReader(file, f, parser.InitState("filename", file))
+	for _, file := range c.files {
+		ast, err := parser.ParseReader(file.name, file.f, parser.InitState("filename", file.name))
 		if err != nil {
 			errs.Add(err)
 			continue
 		}
 
-		err = c.compileFile(prog, file, ast.(parser.File))
+		err = c.compileFile(prog, file.name, ast.(parser.File))
 		if err != nil {
 			errs.Add(err)
 			continue
@@ -76,4 +75,11 @@ func (c *Compiler) Compile(ctx context.Context) (_ *Program, err error) {
 	}
 
 	return prog, nil
+}
+
+func (c *Compiler) AddFile(name string, f io.Reader) {
+	c.files = append(c.files, fileEntry{
+		name: filepath.Base(name),
+		f:    f,
+	})
 }

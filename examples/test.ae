@@ -23,7 +23,6 @@ func init() {
 
 func main() {
   // test comment
-	//
 
 	print(y.0)
 	f(&y.0)
@@ -35,7 +34,6 @@ func main() {
 	print(y.0)
 
   y.0 = z.0 + "there"
-
 
 	h := &z
 

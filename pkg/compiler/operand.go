@@ -48,7 +48,7 @@ type Operand struct {
 	Value any         `xc:"v"`
 }
 
-func (o *Operand) OffsetReference(offset AddrOffset) *Operand {
+func (o *Operand) OffsetReference(offset Size) *Operand {
 	if offset == 0 {
 		return o
 	}
@@ -56,7 +56,7 @@ func (o *Operand) OffsetReference(offset AddrOffset) *Operand {
 	return o.AddressOf().ConstOffset(offset).Dereference()
 }
 
-func (o *Operand) ConstOffset(offset AddrOffset) *Operand {
+func (o *Operand) ConstOffset(offset Size) *Operand {
 	if offset == 0 {
 		return o
 	}

@@ -12,17 +12,17 @@ var UnknownType = unknownType{}
 
 type unknownType struct{}
 
-func (unknownType) String() string   { return "<unknown>" }
-func (unknownType) Kind() Kind       { return KindUnknown }
-func (unknownType) Size() AddrOffset { return 0 }
+func (unknownType) String() string { return "<unknown>" }
+func (unknownType) Kind() Kind     { return KindUnknown }
+func (unknownType) Size() Size     { return 0 }
 
 var VoidType = voidType{}
 
 type voidType struct{}
 
-func (voidType) String() string   { return "<void>" }
-func (voidType) Kind() Kind       { return KindVoid }
-func (voidType) Size() AddrOffset { return 0 }
+func (voidType) String() string { return "<void>" }
+func (voidType) Kind() Kind     { return KindVoid }
+func (voidType) Size() Size     { return 0 }
 
 func IsAssignableTo(v, to Type) bool {
 	if v.Kind() == KindTypeConversion {
@@ -203,7 +203,7 @@ func (t TypeKind) Kind() Kind {
 	return Kind(t)
 }
 
-func (t TypeKind) Size() AddrOffset {
+func (t TypeKind) Size() Size {
 	switch t.Kind() {
 	case KindVoid:
 		return 0
@@ -273,19 +273,19 @@ func (k Kind) IsNumeric() bool {
 type Type interface {
 	Kind() Kind
 	String() string
-	Size() AddrOffset
+	Size() Size
 }
 
 type BasicType struct {
 	name string
 	kind Kind
-	size AddrOffset
+	size Size
 }
 
-func (t BasicType) Kind() Kind       { return t.kind }
-func (t BasicType) Name() string     { return t.name }
-func (t BasicType) String() string   { return t.name }
-func (t BasicType) Size() AddrOffset { return t.size }
+func (t BasicType) Kind() Kind     { return t.kind }
+func (t BasicType) Name() string   { return t.name }
+func (t BasicType) String() string { return t.name }
+func (t BasicType) Size() Size     { return t.size }
 
 type ReferencedType struct {
 	s    *SymbolScope
@@ -309,7 +309,7 @@ func (t ReferencedType) String() string {
 	return t.Dereference().String()
 }
 
-func (t ReferencedType) Size() AddrOffset {
+func (t ReferencedType) Size() Size {
 	return t.Dereference().Size()
 }
 
@@ -355,7 +355,7 @@ func (t DerivedType) String() string {
 
 func (t DerivedType) Underlying() Type { return t.underlying }
 
-func (t DerivedType) Size() AddrOffset {
+func (t DerivedType) Size() Size {
 	return t.underlying.Size()
 }
 
@@ -382,8 +382,8 @@ func NewPointerType(pointee Type) *PointerType {
 	return &PointerType{pointee: pointee}
 }
 
-func (PointerType) Kind() Kind       { return KindPointer }
-func (PointerType) Size() AddrOffset { return 1 }
+func (PointerType) Kind() Kind { return KindPointer }
+func (PointerType) Size() Size { return 1 }
 
 func (t PointerType) String() string {
 	return fmt.Sprintf("*%s", t.Pointee().String())
@@ -401,8 +401,8 @@ func (t SliceType) Kind() Kind { return KindSlice }
 
 func (t SliceType) String() string { return fmt.Sprintf("[]%s", t.elem.String()) }
 
-func (t SliceType) Elem() Type     { return t.elem }
-func (SliceType) Size() AddrOffset { return 3 }
+func (t SliceType) Elem() Type { return t.elem }
+func (SliceType) Size() Size   { return 3 }
 
 var sliceHeader = NewTupleType(
 	IntType,
@@ -430,15 +430,15 @@ func (t TupleType) String() string {
 }
 
 func (t TupleType) Elems() []Type { return t.elems }
-func (t TupleType) ElemOffset(index int) AddrOffset {
-	var size AddrOffset
+func (t TupleType) ElemOffset(index int) Size {
+	var size Size
 	for _, typ := range t.elems[:index] {
 		size += typ.Size()
 	}
 
 	return size
 }
-func (t TupleType) Size() AddrOffset {
+func (t TupleType) Size() Size {
 	return t.ElemOffset(len(t.elems))
 }
 
@@ -461,7 +461,7 @@ func (t *MapType) Value() Type {
 	return t.value
 }
 
-func (*MapType) Size() AddrOffset {
+func (*MapType) Size() Size {
 	return 1
 }
 
@@ -516,7 +516,7 @@ func (t *FunctionType) String() string {
 	return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), retStr)
 }
 
-func (FunctionType) Size() AddrOffset {
+func (FunctionType) Size() Size {
 	return 4
 }
 
@@ -545,7 +545,7 @@ func (t *InterfaceType) Kind() Kind {
 	return KindInterface
 }
 
-func (*InterfaceType) Size() AddrOffset {
+func (*InterfaceType) Size() Size {
 	return 2
 }
 
@@ -570,5 +570,5 @@ type TypeConversionType struct {
 }
 
 func (*TypeConversionType) Kind() Kind       { return KindTypeConversion }
-func (*TypeConversionType) Size() AddrOffset { return 0 }
+func (*TypeConversionType) Size() Size       { return 0 }
 func (t *TypeConversionType) String() string { return fmt.Sprintf("%s()", t.Type) }

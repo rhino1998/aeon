@@ -181,17 +181,17 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 		Right: numLocals,
 	})
 
-	var offset AddrOffset = 0
+	var offset Size = 0
 	for _, param := range f.Parameters() {
 		if param.Name() == "" {
 			continue
 		}
 
-		scope.newParam(param.Name(), -AddrOffset(f.pkg.prog.FrameSize()+offset), param.Type())
+		scope.newParam(param.Name(), -Size(f.pkg.prog.FrameSize()+offset), param.Type())
 		offset += param.Type().Size()
 	}
 
-	scope.newParam("__return", -AddrOffset(f.pkg.prog.FrameSize()+offset), f.Return())
+	scope.newParam("__return", -Size(f.pkg.prog.FrameSize()+offset), f.Return())
 	offset += f.Return().Size()
 
 	for _, stmt := range f.Body() {
@@ -431,7 +431,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		return bc, nil
 	case *ReturnStatement:
-		var offset AddrOffset
+		var offset Size
 		offset += scope.function.Return().Size()
 		for _, param := range scope.function.Parameters() {
 			offset += param.Type().Size()
@@ -615,7 +615,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, typ Type, scope *Value
 	case *PointerType:
 		return nil, scope.newImmediate(Int(0)), nil
 	case *TupleType:
-		var offset AddrOffset
+		var offset Size
 		for i, elem := range typ.Elems() {
 			elemDst, err := dst.IndexTuple(i)
 			if err != nil {
@@ -735,7 +735,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 		switch ftype := BaseType(expr.Function.Type()).(type) {
 		case *FunctionType:
-			var offset AddrOffset
+			var offset Size
 
 			retVar := callScope.newArg("__return", offset, ftype.Return)
 			offset += ftype.Return.Size()
@@ -830,7 +830,7 @@ func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpres
 
 func (prog *Program) compileBCValuesLiteral(ctx context.Context, exprs []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, error) {
 	var bc BytecodeSnippet
-	var offset AddrOffset
+	var offset Size
 
 	for i, expr := range exprs {
 		elemDst, err := dst.IndexTuple(i)
