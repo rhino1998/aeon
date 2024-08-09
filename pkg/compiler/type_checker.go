@@ -551,7 +551,19 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 			errs.Add(expr.WrapError(fmt.Errorf("undefined name %s", expr.Name())))
 		}
 
-		return expr, nil
+		switch sym := sym.(type) {
+		case *Variable:
+			return expr, nil
+		case Type:
+			// TODO:
+			return expr, expr.WrapError(fmt.Errorf("invalid"))
+		case *Function:
+			return expr, nil
+		case *ExternFunction:
+			return expr, nil
+		default:
+			return expr, expr.WrapError(fmt.Errorf("unhandled symbol type %T", sym))
+		}
 	case *ParenthesizedExpression:
 		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, bound)
 		if err != nil {

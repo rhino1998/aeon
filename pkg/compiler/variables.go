@@ -69,8 +69,8 @@ func (e *SymbolReferenceExpression) Type() Type {
 	return v.Type()
 }
 
-func (e *SymbolReferenceExpression) Dereference() TypedSymbol {
-	v, ok := e.scope.getTypedSymbol(e.name)
+func (e *SymbolReferenceExpression) Dereference() Symbol {
+	v, ok := e.scope.get(e.name)
 	if !ok {
 		return nil
 	}
