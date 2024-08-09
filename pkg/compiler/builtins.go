@@ -24,15 +24,23 @@ var (
 		name: "float",
 		size: 1,
 	}
+
+	AnyType = &InterfaceType{}
 )
 
-func builtins() *SymbolScope {
+func BuiltinsSymbols() *SymbolScope {
 	s := newScope(nil, "builtins")
 
 	s.put(IntType)
 	s.put(BoolType)
 	s.put(StringType)
 	s.put(FloatType)
+
+	return s
+}
+
+func BuiltinValues(regs int, symbols *SymbolScope) *ValueScope {
+	s := NewValueScope(regs, symbols)
 
 	return s
 }

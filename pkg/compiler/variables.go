@@ -11,6 +11,8 @@ type Variable struct {
 
 	global   bool
 	escaping bool
+
+	parser.Position
 }
 
 func (v *Variable) Name() string {

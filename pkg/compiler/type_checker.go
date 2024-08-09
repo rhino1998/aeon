@@ -23,6 +23,13 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 		err = errs.Defer(err)
 	}()
 
+	for _, g := range pkg.Globals() {
+		err := c.resolveGlobalTypes(pkg, g)
+		if err != nil {
+			errs.Add(err)
+		}
+	}
+
 	for _, f := range pkg.ExternFunctions() {
 		err := c.resolveExternFunctionTypes(f)
 		if err != nil {
@@ -60,6 +67,47 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 	return nil
 }
 
+func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	if g.Type() != nil {
+		typ := resolveType(g.Type())
+
+		if kindType, ok := typ.(KindType); ok {
+			switch kindType.Kind() {
+			case KindInt:
+				typ = IntType
+			case KindFloat:
+				typ = FloatType
+			case KindString:
+				typ = StringType
+			case KindBool:
+				typ = BoolType
+			}
+		}
+
+		if !IsTypeResolvable(pkg.scope, typ) {
+			errs.Add(g.WrapError(fmt.Errorf("type %s is unknown", typ)))
+		}
+
+		g.SetType(typ)
+	}
+
+	if g.expr != nil {
+		expr, err := c.resolveExpressionTypes(pkg.scope, g.expr, g.Type())
+		if err != nil {
+			errs.Add(err)
+		}
+
+		g.expr = expr
+	}
+
+	return nil
+}
+
 func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (err error) {
 	errs := newErrorSet()
 	defer func() {
@@ -85,7 +133,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 			}
 
 			if !IsTypeResolvable(scope, typ) {
-				return stmt.WrapError(fmt.Errorf("type %s is unknown", typ))
+				errs.Add(stmt.WrapError(fmt.Errorf("type %s is unknown", typ)))
 			}
 
 			stmt.Type = typ
@@ -135,7 +183,10 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 
 		stmt.Right = right
 
-		// TODO: validate by operator
+		_, err = validateBinaryExpression(left.Type(), stmt.Operator, right.Type())
+		if err != nil {
+			errs.Add(err)
+		}
 
 		return nil
 	case *AssignmentStatement:
@@ -152,6 +203,10 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		}
 
 		stmt.Right = right
+
+		if !IsAssignableTo(right.Type(), left.Type()) {
+			errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable of type %v", right.Type(), left.Type())))
+		}
 
 		return nil
 	case *PostfixStatement:
@@ -604,7 +659,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 		if err != nil {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key)))
 		} else {
-			if !IsUnspecified(bound) && !TypesEqual(typ.Elems()[index], bound) {
+			if !IsAssignableTo(typ.Elems()[index], bound) {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot use tuple element at index %d of type %v as type %v", index, typ.Elems()[index], bound)))
 			}
 

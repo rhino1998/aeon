@@ -33,7 +33,7 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 }
 
 func (pkg *Package) compileBytecode(ctx context.Context) error {
-	scope := NewValueScope(pkg.prog.registers, pkg.scope)
+	scope := BuiltinValues(pkg.prog.registers, pkg.scope)
 
 	for _, constant := range pkg.Constants() {
 		// TODO: evaluate const exprs

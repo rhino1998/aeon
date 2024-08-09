@@ -2,7 +2,10 @@ package compiler
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+
+	"golang.org/x/exp/maps"
 )
 
 var UnknownType = unknownType{}
@@ -20,6 +23,39 @@ type voidType struct{}
 func (voidType) String() string   { return "<void>" }
 func (voidType) Kind() Kind       { return KindVoid }
 func (voidType) Size() AddrOffset { return 0 }
+
+func IsAssignableTo(v, to Type) bool {
+	if to == nil {
+		return true
+	}
+
+	if TypesEqual(v, to) {
+		return true
+	}
+
+	if v.Kind() == to.Kind() {
+		_, ok := v.(KindType)
+		return ok
+	}
+
+	if to, ok := to.(*InterfaceType); ok {
+		return to.ImplementedBy(v)
+	}
+
+	return false
+}
+
+func IsConvertibleTo(v, to Type) bool {
+	if IsAssignableTo(v, to) {
+		return true
+	}
+
+	if v.Kind().IsNumeric() && to.Kind().IsNumeric() {
+		return true
+	}
+
+	return TypesEqual(BaseType(v), BaseType(to))
+}
 
 func BaseType(typ Type) Type {
 	switch typ := typ.(type) {
@@ -184,8 +220,7 @@ const (
 	KindTuple
 	KindSlice
 	KindFunction
-
-	// TODO: KindInterface
+	KindInterface
 )
 
 func (k Kind) String() string {
@@ -208,9 +243,15 @@ func (k Kind) String() string {
 		return "tuple"
 	case KindSlice:
 		return "function"
+	case KindInterface:
+		return "interface"
 	default:
 		return "<unknown>"
 	}
+}
+
+func (k Kind) IsNumeric() bool {
+	return k == KindInt || k == KindFloat
 }
 
 type Type interface {
@@ -258,6 +299,25 @@ func (t ReferencedType) Size() AddrOffset {
 
 type MethodSet map[string]*FunctionType
 
+func (m MethodSet) Equal(o MethodSet) bool {
+	return maps.EqualFunc(m, o, (*FunctionType).MethodEqual)
+}
+
+func (m MethodSet) Subset(o MethodSet) bool {
+	for k, v := range m {
+		ov, ok := o[k]
+		if !ok {
+			return false
+		}
+
+		if !v.MethodEqual(ov) {
+			return false
+		}
+	}
+
+	return true
+}
+
 type DerivedType struct {
 	name       string
 	scope      string
@@ -285,6 +345,17 @@ func (t DerivedType) Size() AddrOffset {
 
 func (t DerivedType) Scope() string {
 	return t.scope
+}
+func (t DerivedType) Methods(ptr bool) MethodSet {
+	m := make(MethodSet)
+	for k, v := range t.methods {
+		if v.Receiver.Kind() == KindPointer && !ptr {
+			continue
+		}
+
+		m[k] = v
+	}
+	return m
 }
 
 type PointerType struct {
@@ -394,13 +465,28 @@ type StructField struct {
 }
 
 type FunctionType struct {
+	Receiver   Type
 	Parameters []Type
 	Return     Type
 }
 
-func (t FunctionType) Kind() Kind { return KindFunction }
+func (t *FunctionType) MethodEqual(o *FunctionType) bool {
+	if len(t.Parameters) != len(o.Parameters) {
+		return false
+	}
 
-func (t FunctionType) String() string {
+	for i := range len(t.Parameters) {
+		if !TypesEqual(t.Parameters[i], o.Parameters[i]) {
+			return false
+		}
+	}
+
+	return TypesEqual(t.Return, o.Return)
+}
+
+func (t *FunctionType) Kind() Kind { return KindFunction }
+
+func (t *FunctionType) String() string {
 	params := make([]string, 0, len(t.Parameters))
 	for _, param := range t.Parameters {
 		params = append(params, param.String())
@@ -416,4 +502,49 @@ func (t FunctionType) String() string {
 
 func (FunctionType) Size() AddrOffset {
 	return 4
+}
+
+type InterfaceType struct {
+	methods MethodSet
+}
+
+func (t *InterfaceType) String() string {
+	methods := t.Methods()
+	names := maps.Keys(methods)
+	slices.Sort(names)
+
+	var parts []string
+	for _, name := range names {
+		parts = append(parts, fmt.Sprintf("%s %s", name, methods[name]))
+	}
+
+	return fmt.Sprintf("interface{%s}", strings.Join(parts, "; "))
+}
+
+func (t *InterfaceType) Methods() MethodSet {
+	return t.methods
+}
+
+func (t *InterfaceType) Kind() Kind {
+	return KindInterface
+}
+
+func (*InterfaceType) Size() AddrOffset {
+	return 2
+}
+
+func (t *InterfaceType) ImplementedBy(i Type) bool {
+	switch i := resolveType(i).(type) {
+	case *DerivedType:
+		return t.Methods().Subset(i.Methods(false))
+	case *PointerType:
+		switch pointee := i.Pointee().(type) {
+		case *DerivedType:
+			return t.Methods().Subset(pointee.Methods(true))
+		default:
+			return len(t.Methods()) == 0
+		}
+	default:
+		return len(t.Methods()) == 0
+	}
 }

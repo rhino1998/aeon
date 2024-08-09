@@ -12,7 +12,7 @@ type Program struct {
 
 func newProgram() *Program {
 	p := &Program{
-		root: builtins(),
+		root: BuiltinsSymbols(),
 
 		externFuncs: make(map[string]*ExternFunction),
 		packages:    make(map[string]*Package),
