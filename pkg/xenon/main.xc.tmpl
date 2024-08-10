@@ -46,9 +46,6 @@ function @aeon_reg_store($reg:number, $v:text):text
 
 function @aeon_reg_init()
 	$aeon_reg.fill({{.NumRegisters}}, "")
-	@aeon_reg_store(0, "0")
-	@aeon_reg_store(1, "0")
-	@aeon_reg_store(2, "0")
 
 function @aeon_mem_load($addr:number):text
 	var $page = @aeon_trunc($addr / $PAGE_SIZE)
@@ -72,7 +69,7 @@ function @aeon_mem_init()
 
 {{ range $i := loop 0 .MaxLoadDepth}}
 function @aeon_load_{{$i}}($op:text):text
-	print(text("load: {}", $op))
+	;print(text("load: {}", $op))
 	if ($op.k == "I")
 		return $op.v
 	elseif ($op.k == "R")
@@ -92,10 +89,10 @@ function @aeon_load($op:text):text
 	return @aeon_load_{{sub .MaxLoadDepth 1}}($op)
 
 function @aeon_load_field($op:text, $offset:number):text
-	return @aeon_load(@aeon_load($op):number + $offset)
+	return @aeon_mem_load(@aeon_load($op):number + $offset)
 
 function @aeon_store($op:text, $v:text)
-	print(text("store: {}", $op))
+	;print(text("store: {}", $op))
 	if ($op.k == "R")
 		@aeon_reg_store($op.v:number, $v)
 	elseif ($op.k == "*")
@@ -240,6 +237,16 @@ function @aeon_bop($op:text, $a:text, $b:text):text
 
 function @aeon_run($pc:number):text
 	@aeon_reg_init()
+	@aeon_reg_store(1, "32") ; TODO
+	repeat {{.NumRegisters}} ($reg)
+		if ($reg == 0)
+			continue
+		@aeon_mem_store(@aeon_reg_store(1):number, "0")
+		@aeon_reg_store(1, (@aeon_reg_load(1):number+1):text)
+	@aeon_reg_store(2, (@aeon_reg_load(1):number - 1):text)
+
+
+
 
 	var $i = 0
 
@@ -248,7 +255,7 @@ function @aeon_run($pc:number):text
 
 		var $bc = @aeon_code($pc)
 		$pc++
-		print(text("{} {} {}", $i, $pc, $bc))
+		print(text("{} {} {} {} {}", $i, $pc, @aeon_reg_load(1), @aeon_reg_load(2), $bc))
 
 		if ($bc.t == "nop")
 			continue
@@ -266,7 +273,7 @@ function @aeon_run($pc:number):text
 				$pc += @aeon_load($bc.d):number
 		elseif ($bc.t == "call")
 			var $ftype = @aeon_load_field($bc.f, 0):number
-			@aeon_reg_store(1, @aeon_reg_load(1):number + $bc.a:number)
+			@aeon_reg_store(1, (@aeon_reg_load(1):number + $bc.a:number):text)
 			if ($ftype == 0)
 				var $fname = @aeon_load_field($bc.f, 3)
 			 	print("extern")
@@ -274,8 +281,18 @@ function @aeon_run($pc:number):text
 				print("unrecognized call function type")
 				@aeon_fatal()
 		elseif ($bc.t == "ret")
-			print("TODO")
-			@aeon_fatal()
+			var $fp = @aeon_reg_load(2):number
+			$pc = @aeon_mem_load($fp):number
+			repeat {{$.NumRegisters}} ($reg)
+				if ($reg == 0)
+					continue
+				@aeon_reg_store($reg, @aeon_mem_load($fp-1-$reg))
+
+			@aeon_reg_store(1, (@aeon_reg_load(1):number - $bc.a:number):text)
+
+			if (@aeon_reg_load(1):number == 0) {
+				return
+			}
 		else
 			print("fail", $bc)
 			@aeon_fatal()
