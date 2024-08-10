@@ -3,6 +3,9 @@
 function @print($s:text)
 	print($s)
 
+function @print3($a:text, $b:text, $c:text)
+	print(text("print3 {} {} {}", $a, $b, $c))
+
 function @add($a:number, $b:number):number
 	return $a + $b
 
@@ -165,9 +168,10 @@ function @aeon_extern_args($bc:text):number
 		return {{len $entry.ArgTypes}}
 	{{ end }}
 
-function @aeon_call_extern($bc:text, $sp:number):text
+function @aeon_call_extern($fname:text):text
+	var $sp = @aeon_reg_load(1):number
 	{{ range $entry := .ExternFuncs }}
-	if ($bc.f == "{{$entry.Name}}")
+	if ($fname == "{{$entry.Name}}")
 		{{if $entry.HasReturn}}return{{end}} @{{$entry.Name}}({{range $i, $t := $entry.ArgTypes}}{{if $i }},{{end}}@aeon_mem_load($sp-{{len $entry.ArgTypes}}+{{$i}}){{$t}}{{end}})
 	{{ end }}
 
@@ -255,7 +259,7 @@ function @aeon_run($pc:number):text
 
 		var $bc = @aeon_code($pc)
 		$pc++
-		print(text("{} {} {} {} {}", $i, $pc, @aeon_reg_load(1), @aeon_reg_load(2), $bc))
+		{{if .Debug}}print(text("{} {} {} {} {}", $i, $pc, @aeon_reg_load(1), @aeon_reg_load(2), $bc)){{end}}
 
 		if ($bc.t == "nop")
 			continue
@@ -276,7 +280,8 @@ function @aeon_run($pc:number):text
 			@aeon_reg_store(1, (@aeon_reg_load(1):number + $bc.a:number):text)
 			if ($ftype == 0)
 				var $fname = @aeon_load_field($bc.f, 3)
-			 	print("extern")
+			 	{{if .Debug}}print(text("extern {}", $fname)){{end}}
+				@aeon_call_extern($fname)
 			else
 				print("unrecognized call function type")
 				@aeon_fatal()
@@ -302,7 +307,7 @@ init
 	@aeon_reg_init()
 	@aeon_code_init()
 	@aeon_mem_init()
-	print(@aeon_run({{.VarInitFunc}}))
-	print(@aeon_run({{.InitFunc}}))
-	print(@aeon_run({{.MainFunc}}))
+	@aeon_run({{.VarInitFunc}})
+	@aeon_run({{.InitFunc}})
+	@aeon_run({{.MainFunc}})
 	print("hello")

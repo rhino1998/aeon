@@ -29,6 +29,13 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				return nil
 			},
 		},
+		"print3": {
+			ArgSize: 3,
+			Func: func(s []any) any {
+				log.Println(s[0])
+				return nil
+			},
+		},
 		"panic": {
 			ArgSize: 1,
 			Func: func(s []any) any {
@@ -134,12 +141,14 @@ func (r *Runtime) loadAddr(addr compiler.Addr) (any, error) {
 func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]any, error) {
 	var args []any
 	for offset := Size(0); offset < size; offset++ {
-		arg, err := r.loadAddr(sp.Offset(-(offset + 1)))
+		arg, err := r.loadAddr(sp.Offset(offset - size))
 		if err != nil {
 			return nil, err
 		}
 
 		args = append(args, arg)
+
+		log.Println(args)
 	}
 
 	return args, nil

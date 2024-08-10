@@ -38,6 +38,7 @@ type xenonContext struct {
 	NumMemPages  int
 	NumRegisters int
 	MaxLoadDepth int
+	Debug        bool
 }
 
 func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Function, error) {

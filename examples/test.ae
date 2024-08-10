@@ -8,6 +8,8 @@ type B int
 
 extern func print(string)
 
+extern func print3(a string, b string, c string)
+
 extern func add(a int, b int) int
 
 var x = "hello"
@@ -24,7 +26,7 @@ func init() {
 func main() {
   // test comment
 
-	print(y.0)
+	print3("a", "b", "c")
 
   return
 
