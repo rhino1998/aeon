@@ -11,27 +11,27 @@ import (
 )
 
 type RuntimeExternFuncEntry struct {
-	Args int
-	Func RuntimeExternFunc
+	ArgSize Size
+	Func    RuntimeExternFunc
 }
 
 func DefaultExternFuncs() RuntimeExternFuncs {
 	return RuntimeExternFuncs{
 		"print": {
-			Args: 1,
+			ArgSize: 1,
 			Func: func(s []any) any {
 				log.Println(s[0])
 				return nil
 			},
 		},
 		"panic": {
-			Args: 1,
+			ArgSize: 1,
 			Func: func(s []any) any {
 				panic(s[0])
 			},
 		},
 		"add": {
-			Args: 2,
+			ArgSize: 2,
 			Func: func(s []any) any {
 				return opAdd[Int](s[0], s[1])
 			},
@@ -126,10 +126,10 @@ func (r *Runtime) loadAddr(addr compiler.Addr) (any, error) {
 	return r.memPages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadArgs(sp compiler.Addr, num int) ([]any, error) {
+func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]any, error) {
 	var args []any
-	for i := 0; i < num; i++ {
-		arg, err := r.loadAddr(sp.Offset(compiler.Size(-(i + 1))))
+	for offset := Size(0); offset < size; offset++ {
+		arg, err := r.loadAddr(sp.Offset(-(offset + 1)))
 		if err != nil {
 			return nil, err
 		}
@@ -211,7 +211,7 @@ func (r *Runtime) loadOffset(offset compiler.Offset) loadFunc {
 	})
 }
 
-func (r *Runtime) loadIndirectWithOffset(indirect compiler.Indirect, offset AddrOffset) loadFunc {
+func (r *Runtime) loadIndirectWithOffset(indirect compiler.Indirect, offset Size) loadFunc {
 	return loadFunc(func() (any, error) {
 		base, err := r.load(indirect.Ptr)()
 		if err != nil {
@@ -340,7 +340,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			return fmt.Errorf("invalid nil bytecode: %w", err)
 		case compiler.Nop:
 		case compiler.Mov:
-			for i := AddrOffset(0); i < code.Size; i++ {
+			for i := Size(0); i < code.Size; i++ {
 				err := r.store(code.Dst.OffsetReference(i))(r.load(code.Src.OffsetReference(i))())
 				if err != nil {
 					return err
@@ -366,13 +366,13 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 					return fmt.Errorf("undefined extern func %q", string(externName.(String)))
 				}
 
-				args, err := r.loadArgs(r.sp(), entry.Args)
+				args, err := r.loadArgs(r.sp(), entry.ArgSize)
 				if err != nil {
-					return fmt.Errorf("failed to load %d args for extern %q", entry.Args, code.Func)
+					return fmt.Errorf("failed to load %d args for extern %q", entry.ArgSize, code.Func)
 				}
 				ret := entry.Func(args)
 				if ret != nil {
-					r.storeAddr(r.sp()-Addr(entry.Args+1), ret)
+					r.storeAddr(r.sp()-Addr(entry.ArgSize+1), ret)
 				}
 
 				if r.debug {
@@ -458,7 +458,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 				return err
 			}
 
-			pc = pc.Offset(AddrOffset(val.(Int)))
+			pc = pc.Offset(Size(val.(Int)))
 		case compiler.JmpRC:
 			cond, err := r.load(code.Src)()
 			if err != nil {
@@ -471,7 +471,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 					return err
 				}
 
-				pc = pc.Offset(AddrOffset(val.(Int)))
+				pc = pc.Offset(Size(val.(Int)))
 			}
 		case compiler.BinOp:
 			err = r.store(code.Dst)(
@@ -535,7 +535,7 @@ type Int = compiler.Int
 type String = compiler.String
 type Bool = compiler.Bool
 type Addr = compiler.Addr
-type AddrOffset = compiler.Size
+type Size = compiler.Size
 type Register = compiler.Register
 
 var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{

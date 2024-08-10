@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"cmp"
 	"fmt"
 	"slices"
 	"strings"
@@ -322,20 +323,57 @@ func (t ReferencedType) Size() Size {
 	return t.Dereference().Size()
 }
 
-type MethodSet map[string]*FunctionType
+type MethodSetEntry struct {
+	Name       string
+	Parameters []Type
+	Return     Type
+}
+
+func (e MethodSetEntry) Equal(o MethodSetEntry) bool {
+	if e.Name != o.Name {
+		return false
+	}
+
+	if !slices.EqualFunc(e.Parameters, o.Parameters, TypesEqual) {
+		return false
+	}
+
+	if !TypesEqual(e.Return, o.Return) {
+		return false
+	}
+
+	return true
+}
+
+type MethodSet []MethodSetEntry
+
+func (m *MethodSet) Add(name string, params []Type, ret Type) error {
+	entry := MethodSetEntry{
+		Name:       name,
+		Parameters: params,
+		Return:     ret,
+	}
+
+	if slices.ContainsFunc(*m, entry.Equal) {
+		return fmt.Errorf("method set already contains method %q", name)
+	}
+
+	*m = append(*m, entry)
+
+	slices.SortStableFunc(*m, func(a, b MethodSetEntry) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+
+	return nil
+}
 
 func (m MethodSet) Equal(o MethodSet) bool {
-	return maps.EqualFunc(m, o, (*FunctionType).MethodEqual)
+	return slices.EqualFunc(m, o, MethodSetEntry.Equal)
 }
 
 func (m MethodSet) Subset(o MethodSet) bool {
-	for k, v := range m {
-		ov, ok := o[k]
-		if !ok {
-			return false
-		}
-
-		if !v.MethodEqual(ov) {
+	for _, entry := range m {
+		if !slices.ContainsFunc(o, entry.Equal) {
 			return false
 		}
 	}

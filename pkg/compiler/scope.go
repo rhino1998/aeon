@@ -73,6 +73,22 @@ func (s *SymbolScope) Function() *Function {
 	return s.parent.Function()
 }
 
+func (s *SymbolScope) Types() []*DerivedType {
+	var typs []*DerivedType
+	for _, val := range s.scope {
+		switch val := val.(type) {
+		case *DerivedType:
+			typs = append(typs, val)
+		}
+	}
+
+	slices.SortFunc(typs, func(a, b *DerivedType) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return typs
+}
+
 func (s *SymbolScope) Packages() []*Package {
 	var pkgs []*Package
 	for _, val := range s.scope {

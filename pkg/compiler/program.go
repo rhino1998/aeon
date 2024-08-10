@@ -102,6 +102,10 @@ func (p *Package) ExternFunctions() []*ExternFunction {
 	return p.scope.ExternFunctions()
 }
 
+func (p *Package) Types() []*DerivedType {
+	return p.scope.Types()
+}
+
 func (p *Package) Addr() Addr {
 	return p.addr
 }
