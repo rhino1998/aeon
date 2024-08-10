@@ -10,6 +10,11 @@ import (
 	"github.com/rhino1998/aeon/pkg/compiler"
 )
 
+const (
+	RuntimeFuncTypeExtern = 0
+	RuntimeFuncTypeFunc   = 1
+)
+
 type RuntimeExternFuncEntry struct {
 	ArgSize Size
 	Func    RuntimeExternFunc
@@ -192,7 +197,7 @@ func (r *Runtime) loadImmediate(imm compiler.Immediate) loadFunc {
 }
 
 func (r *Runtime) loadIndirect(indirect compiler.Indirect) loadFunc {
-	return r.loadIndirectWithOffset(indirect, 0)
+	return r.loadIndirectWithOffset(indirect.Ptr, 0)
 }
 
 func (r *Runtime) loadOffset(offset compiler.Offset) loadFunc {
@@ -211,9 +216,9 @@ func (r *Runtime) loadOffset(offset compiler.Offset) loadFunc {
 	})
 }
 
-func (r *Runtime) loadIndirectWithOffset(indirect compiler.Indirect, offset Size) loadFunc {
+func (r *Runtime) loadIndirectWithOffset(indirect *compiler.Operand, offset Size) loadFunc {
 	return loadFunc(func() (any, error) {
-		base, err := r.load(indirect.Ptr)()
+		base, err := r.load(indirect)()
 		if err != nil {
 			return nil, err
 		}
@@ -347,7 +352,7 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 				}
 			}
 		case compiler.Call:
-			funcType, err := r.loadIndirectWithOffset(code.Func.Value.(compiler.Indirect), 0)()
+			funcType, err := r.loadIndirectWithOffset(code.Func, 0)()
 			if err != nil {
 				return fmt.Errorf("could not resolve function addr")
 			}
@@ -355,8 +360,8 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 			r.setSP(r.sp().Offset(code.Args))
 
 			switch funcType.(Int) {
-			case 0:
-				externName, err := r.loadIndirectWithOffset(code.Func.Value.(compiler.Indirect), 3)()
+			case RuntimeFuncTypeExtern:
+				externName, err := r.loadIndirectWithOffset(code.Func, 3)()
 				if err != nil {
 					return fmt.Errorf("could not resolve extern function name")
 				}
@@ -385,8 +390,8 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 				}
 
 				continue
-			case 1:
-				faddr, err := r.loadIndirectWithOffset(code.Func.Value.(compiler.Indirect), 3)()
+			case RuntimeFuncTypeFunc:
+				faddr, err := r.loadIndirectWithOffset(code.Func, 3)()
 				if err != nil {
 					return fmt.Errorf("could not resolve function addr")
 				}

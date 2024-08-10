@@ -30,11 +30,27 @@ type xenonContext struct {
 	PageSize     int
 	NumCodePages int
 	Code         map[PageAddr]string
+	VarInitFunc  int
+	InitFunc     int
 	MainFunc     int
 
 	ExternFuncs  []ExternFuncEntry
 	NumMemPages  int
 	NumRegisters int
+	MaxLoadDepth int
+}
+
+func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Function, error) {
+	pkg, ok := prog.Package(pkgName)
+	if !ok {
+		return nil, fmt.Errorf("failed to get package %q", pkgName)
+	}
+	f, ok := pkg.Function(funcName)
+	if !ok {
+		return nil, fmt.Errorf("failed to get function %q from package %q", funcName, pkgName)
+	}
+
+	return f, nil
 }
 
 func EmitXenonCode(w io.Writer, prog *compiler.Program) error {
@@ -43,17 +59,27 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program) error {
 	xeCtx.NumCodePages = (len(prog.Bytecode()) + xeCtx.PageSize) / xeCtx.PageSize
 	xeCtx.NumMemPages = 10
 	xeCtx.NumRegisters = 16
+	xeCtx.MaxLoadDepth = 3
 
-	pkg, ok := prog.Package("main")
-	if !ok {
-		return fmt.Errorf("failed to get entry point")
-	}
-	f, ok := pkg.Function("main")
-	if !ok {
-		return fmt.Errorf("failed to get entry point")
+	var err error
+	varinitFunc, err := getFunc(prog, "main", "varinit")
+	if err != nil {
+		return err
 	}
 
-	xeCtx.MainFunc = int(f.Addr())
+	xeCtx.VarInitFunc = int(varinitFunc.Addr())
+
+	initFunc, err := getFunc(prog, "main", "init")
+	if err != nil {
+		return err
+	}
+	xeCtx.InitFunc = int(initFunc.Addr())
+
+	mainFunc, err := getFunc(prog, "main", "main")
+	if err != nil {
+		return err
+	}
+	xeCtx.MainFunc = int(mainFunc.Addr())
 	xeCtx.Code = make(map[PageAddr]string)
 
 	log.Printf("Program BC:%d PageSize:%d", len(prog.Bytecode()), xeCtx.PageSize)
@@ -98,6 +124,12 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program) error {
 				ret = append(ret, i)
 			}
 			return ret
+		},
+		"add": func(a, b int) int {
+			return a + b
+		},
+		"sub": func(a, b int) int {
+			return a - b
 		},
 	}
 

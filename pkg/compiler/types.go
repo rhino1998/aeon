@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-
-	"golang.org/x/exp/maps"
 )
 
 var UnknownType = unknownType{}
@@ -175,16 +173,20 @@ func IsTypeResolvable(s *SymbolScope, typ Type) bool {
 			}
 		}
 
-		if typ.Return != nil {
-			if !IsTypeResolvable(s, typ.Return) {
-				return false
-			}
+		if !IsTypeResolvable(s, typ.Return) {
+			return false
 		}
 
 		return true
 	case *InterfaceType:
 		for _, method := range typ.Methods() {
-			if !IsTypeResolvable(s, method) {
+			for _, param := range method.Parameters {
+				if !IsTypeResolvable(s, param) {
+					return false
+				}
+			}
+
+			if !IsTypeResolvable(s, method.Return) {
 				return false
 			}
 		}
@@ -329,6 +331,20 @@ type MethodSetEntry struct {
 	Return     Type
 }
 
+func (e MethodSetEntry) String() string {
+	params := make([]string, 0, len(e.Parameters))
+	for _, param := range e.Parameters {
+		params = append(params, param.String())
+	}
+
+	var retStr string
+	if e.Return != VoidType {
+		retStr = e.Return.String()
+	}
+
+	return fmt.Sprintf("%s(%s) %s", e.Name, strings.Join(params, ", "), retStr)
+}
+
 func (e MethodSetEntry) Equal(o MethodSetEntry) bool {
 	if e.Name != o.Name {
 		return false
@@ -384,6 +400,7 @@ func (m MethodSet) Subset(o MethodSet) bool {
 type DerivedType struct {
 	name       string
 	methods    MethodSet
+	ptrMethods MethodSet
 	underlying Type
 }
 
@@ -406,15 +423,18 @@ func (t *DerivedType) Size() Size {
 }
 
 func (t *DerivedType) Methods(ptr bool) MethodSet {
-	m := make(MethodSet)
-	for k, v := range t.methods {
-		if v.Receiver.Kind() == KindPointer && !ptr {
-			continue
-		}
+	ret := make([]MethodSetEntry, 0, len(t.methods)+len(t.ptrMethods))
+	ret = append(ret, t.methods...)
 
-		m[k] = v
+	if ptr {
+		ret = append(ret, t.ptrMethods...)
 	}
-	return m
+
+	slices.SortStableFunc(ret, func(a, b MethodSetEntry) int {
+		return cmp.Compare(a.Name, b.Name)
+	})
+
+	return t.methods
 }
 
 type PointerType struct {
@@ -569,12 +589,10 @@ type InterfaceType struct {
 
 func (t *InterfaceType) String() string {
 	methods := t.Methods()
-	names := maps.Keys(methods)
-	slices.Sort(names)
 
 	var parts []string
-	for _, name := range names {
-		parts = append(parts, fmt.Sprintf("%s %s", name, methods[name]))
+	for _, entry := range methods {
+		parts = append(parts, entry.String())
 	}
 
 	return fmt.Sprintf("interface{%s}", strings.Join(parts, "; "))

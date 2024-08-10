@@ -25,6 +25,9 @@ func main() {
   // test comment
 
 	print(y.0)
+
+  return
+
 	f(&y.0)
 	print(y.0)
 

@@ -19,7 +19,7 @@ const Registers = 16
 
 var externs = xenon.RuntimeExternFuncs{
 	"print": {
-		Args: 1,
+		ArgSize: 1,
 		Func: func(args []any) any {
 			fmt.Println(string(args[0].(xenon.String)))
 			return nil

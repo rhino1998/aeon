@@ -771,7 +771,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			bc.Add(Call{
 				Args: offset,
-				Func: callLoc.Operand,
+				Func: callLoc.Operand.AddressOf(),
 			})
 
 			if retVar.Type.Size() > 0 {
