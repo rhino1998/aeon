@@ -309,7 +309,7 @@ type Expr interface {
 	WrapError(err error) error
 }
 
-type NumberLiteral struct {
+type FloatLiteral struct {
 	baseExpr
 
 	Value float64
@@ -317,8 +317,12 @@ type NumberLiteral struct {
 	Position
 }
 
-func (l NumberLiteral) IsInteger() bool {
-	return float64(int64(l.Value)) == float64(l.Value)
+type IntLiteral struct {
+	baseExpr
+
+	Value int64
+
+	Position
 }
 
 type StringLiteral struct {
@@ -329,7 +333,7 @@ type StringLiteral struct {
 	Position
 }
 
-type BooleanLiteral struct {
+type BoolLiteral struct {
 	baseExpr
 
 	Value bool
@@ -399,3 +403,13 @@ type ParenthesizedExpr struct {
 
 	Position
 }
+
+type Directive struct {
+	Name        Identifier
+	Args        []any
+	Declaration Declaration
+
+	Position
+}
+
+func (d Directive) declaration() {}

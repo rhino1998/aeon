@@ -762,6 +762,7 @@ func (c *Compiler) checkInterfaceTypeCoercion(expr Expression, bound Type) (err 
 	ifaceType, ok := BaseType(bound).(*InterfaceType)
 	if !ok {
 		errs.Add(expr.WrapError(fmt.Errorf("cannot resolve interface %v", bound)))
+		return errs
 	}
 
 	if !ifaceType.ImplementedBy(expr.Type()) {

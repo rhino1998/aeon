@@ -37,10 +37,6 @@ func IsAssignableTo(v, to Type) bool {
 	}
 
 	if v.Kind() == to.Kind() {
-		if _, ok := v.(TypeKind); ok {
-			return true
-		}
-
 		if _, ok := to.(TypeKind); ok {
 			return true
 		}

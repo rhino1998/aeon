@@ -64,12 +64,34 @@ func (p *Program) GlobalSize() int {
 	return 20
 }
 
+// TODO: topological sort by import
+func (p *Program) InitFunctions() []*Function {
+	var ret []*Function
+	for _, pkg := range p.Packages() {
+		ret = append(ret, pkg.InitFunctions()...)
+	}
+
+	return ret
+}
+
+// TODO: topological sort by import
+func (p *Program) UpdateFunctions() []*Function {
+	var ret []*Function
+	for _, pkg := range p.Packages() {
+		ret = append(ret, pkg.UpdateFunctions()...)
+	}
+
+	return ret
+}
+
 type Package struct {
 	name  string
 	prog  *Program
 	scope *SymbolScope
 
-	varinit *Function
+	varinit     *Function
+	initFuncs   []*Function
+	updateFuncs []*Function
 
 	addr     Addr
 	bytecode BytecodeSnippet
@@ -131,4 +153,16 @@ func (p *Package) Globals() []*Variable {
 
 func (p *Package) Constants() []*Constant {
 	return p.scope.Constants()
+}
+
+func (p *Package) Imports() *Package {
+	return nil
+}
+
+func (p *Package) InitFunctions() []*Function {
+	return p.initFuncs
+}
+
+func (p *Package) UpdateFunctions() []*Function {
+	return p.updateFuncs
 }

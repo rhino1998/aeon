@@ -308,6 +308,8 @@ init
 	@aeon_code_init()
 	@aeon_mem_init()
 	@aeon_run({{.VarInitFunc}})
-	@aeon_run({{.InitFunc}})
-	@aeon_run({{.MainFunc}})
+{{range $addr := .InitFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}
 	print("hello")
+
+tick
+{{range $addr := .UpdateFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}

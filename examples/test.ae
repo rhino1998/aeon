@@ -16,6 +16,7 @@ var x = "hello"
 
 var y (string,int)
 
+#init
 func init() {
   print(x)
   x = "there"
@@ -25,29 +26,6 @@ func init() {
 
 func main() {
   // test comment
-
-	print3("a", "b", "c")
-
-  return
-
-	f(&y.0)
-	print(y.0)
-
-	z := &y
-	z.0 = ("hello")
-
-	print(y.0)
-
-  y.0 = z.0 + "there"
-
-	h := &z
-
-  var x any = 5
-
-	(**h).0 = "hello2"
-
-	print(y.0)
-
 
   return
 }

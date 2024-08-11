@@ -31,8 +31,8 @@ type xenonContext struct {
 	NumCodePages int
 	Code         map[PageAddr]string
 	VarInitFunc  int
-	InitFunc     int
-	MainFunc     int
+	InitFuncs    []int
+	UpdateFuncs  []int
 
 	ExternFuncs  []ExternFuncEntry
 	NumMemPages  int
@@ -69,18 +69,14 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program) error {
 	}
 
 	xeCtx.VarInitFunc = int(varinitFunc.Addr())
-
-	initFunc, err := getFunc(prog, "main", "init")
-	if err != nil {
-		return err
+	for _, f := range prog.InitFunctions() {
+		xeCtx.InitFuncs = append(xeCtx.InitFuncs, int(f.Addr()))
 	}
-	xeCtx.InitFunc = int(initFunc.Addr())
 
-	mainFunc, err := getFunc(prog, "main", "main")
-	if err != nil {
-		return err
+	for _, f := range prog.UpdateFunctions() {
+		xeCtx.UpdateFuncs = append(xeCtx.UpdateFuncs, int(f.Addr()))
 	}
-	xeCtx.MainFunc = int(mainFunc.Addr())
+
 	xeCtx.Code = make(map[PageAddr]string)
 
 	log.Printf("Program BC:%d PageSize:%d", len(prog.Bytecode()), xeCtx.PageSize)

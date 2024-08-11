@@ -61,9 +61,29 @@ Package <- "package" _ name:Identifier {
   }, nil
 }
 
-Declaration <- _ decl:(FunctionDeclaration / ExternFuncDeclaration / TypeDeclaration / VarDeclaration / ConstDeclaration) __ {
+Declaration <- _ decl:(Directive / FunctionDeclaration / ExternFuncDeclaration / TypeDeclaration / VarDeclaration / ConstDeclaration) __ {
   return decl, nil
 }
+
+Directive <- '#' name:Identifier _ args:DirectiveArguments? __ decl:Declaration {
+	return Directive{
+		Name: name.(Identifier),
+		Args: maybeSlice[any](args),
+		Declaration: decl.(Declaration),
+
+    Position: pos(c),
+	}, nil
+}
+
+DirectiveArguments <- arg:DirectiveArgument rest:DirectiveArgumentsRest? {
+	return append(append([]any{}, arg), maybeSlice[any](rest)...), nil
+}
+
+DirectiveArgumentsRest <- _ args:DirectiveArguments {
+	return args, nil
+}
+
+DirectiveArgument <- Identifier / StringLiteral / FloatLiteral / IntLiteral / BoolLiteral
 
 TypeDeclaration <- "type" _ name:Identifier _ typ:Type {
   return TypeDeclaration{
@@ -327,13 +347,26 @@ ParenthesizedExpr <- '(' _ expr:Expr _ ')' {
   }, nil
 }
 
-NumberLiteral <- '-' ? ( [0-9]+ / [0-9]+.[0-9]+) {
+IntLiteral <- '-' ? ( [0-9]+ / ("0x" [0-9a-f]+) / ("0o" [0-7]) / ("0b" [0-1])) {
+  i, err := strconv.ParseInt(string(c.text), 0, 64)
+  if err != nil {
+    return 0, err
+  }
+
+  return IntLiteral{
+    Value: i,
+
+    Position: pos(c),
+  }, nil
+}
+
+FloatLiteral <- '-' ? ( [0-9]+.[0-9]+) {
   f, err := strconv.ParseFloat(string(c.text), 64)
   if err != nil {
     return 0, err
   }
 
-  return NumberLiteral{
+  return FloatLiteral{
     Value: f,
 
     Position: pos(c),
@@ -355,8 +388,8 @@ StringLiteral <- '"' ( !EscapedChar . / '\\' EscapeSequence )* '"' {
     }, nil
 }
 
-BooleanLiteral <- ("true" / "false") {
-  return BooleanLiteral{
+BoolLiteral <- ("true" / "false") {
+  return BoolLiteral{
     Value: string(c.text)=="true",
 
     Position: pos(c),
@@ -405,7 +438,7 @@ DotExpr <- exp:Expr '.' ident:(Identifier / TupleKey) {
 
 Expr <- MaybeOrExpr
 
-TermExpr <- UnaryExpr / DotExpr / ParenthesizedExpr / NumberLiteral / StringLiteral / BooleanLiteral / MaybeCallExpr
+TermExpr <- UnaryExpr / DotExpr / ParenthesizedExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / MaybeCallExpr
 
 MaybeExpExpr <- ExpExpr / TermExpr
 

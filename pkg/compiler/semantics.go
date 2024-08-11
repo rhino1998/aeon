@@ -26,66 +26,79 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 	}
 
 	for _, decl := range entry.Declarations {
-		switch decl := decl.(type) {
-		case parser.FunctionDeclaration:
-			err := c.compileFunction(pkg, pkg.scope, decl)
-			if err != nil {
-				var posError *parser.PositionError
-				if !errors.As(err, &posError) {
-					return FileError{File: filename, Err: err}
-				}
-
-				return err
+		_, err := c.compileDeclaration(pkg, pkg.scope, decl)
+		if err != nil {
+			var posError parser.PositionError
+			if !errors.As(err, &posError) {
+				return FileError{File: filename, Err: err}
 			}
-		case parser.TypeDeclaration:
-			err := c.compileTypeDeclaration(pkg.scope, decl)
-			if err != nil {
-				var posError *parser.PositionError
-				if !errors.As(err, &posError) {
-					return FileError{File: filename, Err: err}
-				}
 
-				return err
-			}
-		case parser.ExternFunctionDeclaration:
-			err := c.compileExternFunctionDeclaration(pkg, pkg.scope, decl)
-			if err != nil {
-				var posError *parser.PositionError
-				if !errors.As(err, &posError) {
-					return FileError{File: filename, Err: err}
-				}
-
-				return err
-			}
-		case parser.VarDeclaration:
-			err := c.compileVarDeclaration(pkg.scope, decl)
-			if err != nil {
-				var posError *parser.PositionError
-				if !errors.As(err, &posError) {
-					return FileError{File: filename, Err: err}
-				}
-
-				return err
-			}
-		case parser.ConstDeclaration:
-			err := c.compileConstDeclaration(pkg.scope, decl)
-			if err != nil {
-				var posError *parser.PositionError
-				if !errors.As(err, &posError) {
-					return FileError{File: filename, Err: err}
-				}
-
-				return err
-			}
-		default:
-			return decl.WrapError(fmt.Errorf("unrecognized declaration type: %T", decl))
+			return err
 		}
 	}
 
 	return nil
 }
 
-func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolScope, decl parser.ExternFunctionDeclaration) error {
+func (c *Compiler) compileDeclaration(p *Package, scope *SymbolScope, decl parser.Declaration) (Symbol, error) {
+	switch decl := decl.(type) {
+	case parser.FunctionDeclaration:
+		return c.compileFunction(p, scope, decl)
+	case parser.TypeDeclaration:
+		return c.compileTypeDeclaration(p, scope, decl)
+	case parser.ExternFunctionDeclaration:
+		return c.compileExternFunctionDeclaration(p, scope, decl)
+	case parser.VarDeclaration:
+		return c.compileVarDeclaration(p, scope, decl)
+	case parser.ConstDeclaration:
+		return c.compileConstDeclaration(p, scope, decl)
+	case parser.Directive:
+		return c.compileDirective(p, scope, decl)
+	default:
+		return nil, decl.WrapError(fmt.Errorf("unrecognized declaration type: %T", decl))
+	}
+}
+
+func (c *Compiler) compileDirective(p *Package, scope *SymbolScope, dir parser.Directive) (Symbol, error) {
+	sym, err := c.compileDeclaration(p, scope, dir.Declaration)
+	if err != nil {
+		return nil, err
+	}
+
+	switch sym := sym.(type) {
+	case *Function:
+		switch dir.Name {
+		case "init":
+			if len(dir.Args) != 0 {
+				return nil, dir.WrapError(fmt.Errorf("expected 0 arguments for directive %q", dir.Name))
+			}
+
+			p.initFuncs = append(p.initFuncs, sym)
+		case "update":
+			if len(dir.Args) != 0 {
+				return nil, dir.WrapError(fmt.Errorf("expected 0 arguments for directive %q", dir.Name))
+			}
+
+			p.updateFuncs = append(p.updateFuncs, sym)
+		default:
+			return nil, dir.WrapError(fmt.Errorf("unknown directive %q", dir.Name))
+		}
+	case *ExternFunction:
+		return nil, dir.WrapError(fmt.Errorf("directive %q is not supported for extern declarations", dir.Name))
+	case *DerivedType:
+		return nil, dir.WrapError(fmt.Errorf("directive %q is not supported for type declarations", dir.Name))
+	case *Constant:
+		return nil, dir.WrapError(fmt.Errorf("directive %q is not supported for constant declarations", dir.Name))
+	case *Variable:
+		return nil, dir.WrapError(fmt.Errorf("directive %q is not supported for variable declarations", dir.Name))
+	default:
+		return nil, fmt.Errorf("compiler error: unhandled symbol type %T", sym)
+	}
+
+	return sym, nil
+}
+
+func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolScope, decl parser.ExternFunctionDeclaration) (*ExternFunction, error) {
 	f := &ExternFunction{
 		name: string(decl.Name),
 	}
@@ -98,7 +111,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 
 		typ, err := c.compileTypeReference(scope, param.Type)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		variable := &Variable{
@@ -112,7 +125,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 	if decl.Return != nil {
 		typ, err := c.compileTypeReference(scope, decl.Return)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		f.ret = typ
@@ -122,13 +135,18 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 
 	p.prog.externFuncs[f.Name()] = f
 
-	return scope.put(f)
+	err := scope.put(f)
+	if err != nil {
+		return nil, decl.WrapError(err)
+	}
+
+	return f, nil
 }
 
-func (c *Compiler) compileTypeDeclaration(scope *SymbolScope, decl parser.TypeDeclaration) error {
+func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl parser.TypeDeclaration) (*DerivedType, error) {
 	underlying, err := c.compileTypeReference(scope, decl.Type)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	t := &DerivedType{
@@ -136,10 +154,15 @@ func (c *Compiler) compileTypeDeclaration(scope *SymbolScope, decl parser.TypeDe
 		underlying: underlying,
 	}
 
-	return scope.put(t)
+	err = scope.put(t)
+	if err != nil {
+		return nil, decl.WrapError(err)
+	}
+
+	return t, nil
 }
 
-func (c *Compiler) compileVarDeclaration(scope *SymbolScope, decl parser.VarDeclaration) error {
+func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl parser.VarDeclaration) (*Variable, error) {
 	v := &Variable{
 		name:   string(decl.Name),
 		global: true,
@@ -147,7 +170,7 @@ func (c *Compiler) compileVarDeclaration(scope *SymbolScope, decl parser.VarDecl
 	if decl.Type != nil {
 		typ, err := c.compileTypeReference(scope, *decl.Type)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		v.typ = typ
@@ -156,7 +179,7 @@ func (c *Compiler) compileVarDeclaration(scope *SymbolScope, decl parser.VarDecl
 	if decl.Expr != nil {
 		expr, err := c.compileExpression(scope, *decl.Expr)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		v.expr = expr
@@ -167,20 +190,25 @@ func (c *Compiler) compileVarDeclaration(scope *SymbolScope, decl parser.VarDecl
 	}
 
 	if v.typ == nil {
-		return decl.WrapError(fmt.Errorf("variable declaration must have a type or an expression"))
+		return nil, decl.WrapError(fmt.Errorf("variable declaration must have a type or an expression"))
 	}
 
-	return scope.put(v)
+	err := scope.put(v)
+	if err != nil {
+		return nil, decl.WrapError(err)
+	}
+
+	return v, nil
 }
 
-func (c *Compiler) compileConstDeclaration(scope *SymbolScope, decl parser.ConstDeclaration) error {
+func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl parser.ConstDeclaration) (*Constant, error) {
 	v := &Constant{
 		name: string(decl.Name),
 	}
 	if decl.Type != nil {
 		typ, err := c.compileTypeReference(scope, *decl.Type)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		v.typ = typ
@@ -189,7 +217,7 @@ func (c *Compiler) compileConstDeclaration(scope *SymbolScope, decl parser.Const
 	if decl.Expr != nil {
 		expr, err := c.compileExpression(scope, *decl.Expr)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		v.expr = expr
@@ -200,10 +228,15 @@ func (c *Compiler) compileConstDeclaration(scope *SymbolScope, decl parser.Const
 	}
 
 	if v.typ == nil {
-		return decl.WrapError(fmt.Errorf("const declaration must have a type or an expression"))
+		return nil, decl.WrapError(fmt.Errorf("const declaration must have a type or an expression"))
 	}
 
-	return scope.put(v)
+	err := scope.put(v)
+	if err != nil {
+		return nil, decl.WrapError(err)
+	}
+
+	return v, nil
 }
 
 func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Type, error) {
@@ -262,7 +295,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 	}
 }
 
-func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.FunctionDeclaration) error {
+func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.FunctionDeclaration) (*Function, error) {
 	f := newFunction(string(decl.Name), p)
 
 	for _, param := range decl.Parameters {
@@ -273,7 +306,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 
 		typ, err := c.compileTypeReference(scope, param.Type)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		variable := &Variable{
@@ -291,7 +324,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 	if decl.Return != nil {
 		typ, err := c.compileTypeReference(scope, decl.Return)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		f.ret = typ
@@ -304,13 +337,18 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 	for _, stmt := range decl.Body {
 		compiledStmt, err := c.compileStatement(f.symbols, stmt)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		f.body = append(f.body, compiledStmt)
 	}
 
-	return scope.put(f)
+	err := scope.put(f)
+	if err != nil {
+		return nil, err
+	}
+
+	return f, nil
 }
 
 func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (Statement, error) {
@@ -582,23 +620,22 @@ func (c *Compiler) compileStatements(scope *SymbolScope, stmts []parser.Statemen
 
 func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expression, error) {
 	switch expr := expr.(type) {
-	case parser.NumberLiteral:
-		if expr.IsInteger() {
-			return &Literal[Int]{
-				value: Int(expr.Value),
-				typ:   TypeKind(KindInt),
+	case parser.FloatLiteral:
+		return &Literal[Float]{
+			value: Float(expr.Value),
 
-				Position: expr.Position,
-			}, nil
-		} else {
-			return &Literal[Float]{
-				value: Float(expr.Value),
+			typ: TypeKind(KindFloat),
 
-				typ: TypeKind(KindFloat),
+			Position: expr.Position,
+		}, nil
+	case parser.IntLiteral:
+		return &Literal[Int]{
+			value: Int(expr.Value),
 
-				Position: expr.Position,
-			}, nil
-		}
+			typ: TypeKind(KindInt),
+
+			Position: expr.Position,
+		}, nil
 	case parser.StringLiteral:
 		return &Literal[String]{
 			value: String(expr.Value),
@@ -607,7 +644,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 
 			Position: expr.Position,
 		}, nil
-	case parser.BooleanLiteral:
+	case parser.BoolLiteral:
 		return &Literal[Bool]{
 			value: Bool(expr.Value),
 
