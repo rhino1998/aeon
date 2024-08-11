@@ -57,7 +57,7 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 	}()
 
 	for _, stmt := range f.Body() {
-		err := c.resolveStatementTypes(f.symbols, stmt)
+		err := c.resolveStatementTypes(stmt)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -88,7 +88,7 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 			}
 		}
 
-		if !IsTypeResolvable(pkg.scope, typ) {
+		if !IsTypeResolvable(typ) {
 			errs.Add(g.WrapError(fmt.Errorf("type %s is unknown", typ)))
 		}
 
@@ -96,7 +96,7 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 	}
 
 	if g.expr != nil {
-		expr, err := c.resolveExpressionTypes(pkg.scope, g.expr, g.Type())
+		expr, err := c.resolveExpressionTypes(g.expr, g.Type())
 		if err != nil {
 			errs.Add(err)
 		}
@@ -107,7 +107,7 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 	return nil
 }
 
-func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (err error) {
+func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -131,7 +131,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 				}
 			}
 
-			if !IsTypeResolvable(scope, typ) {
+			if !IsTypeResolvable(typ) {
 				errs.Add(stmt.WrapError(fmt.Errorf("type %s is unknown", typ)))
 			}
 
@@ -139,7 +139,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		}
 
 		if stmt.Expression != nil {
-			expr, err := c.resolveExpressionTypes(scope, stmt.Expression, stmt.Type)
+			expr, err := c.resolveExpressionTypes(stmt.Expression, stmt.Type)
 			if err != nil {
 				errs.Add(err)
 			}
@@ -158,7 +158,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 
 		return nil
 	case *DeclarationStatement:
-		expr, err := c.resolveExpressionTypes(scope, stmt.Expression, nil)
+		expr, err := c.resolveExpressionTypes(stmt.Expression, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -176,14 +176,14 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 
 		return nil
 	case *AssignmentOperatorStatement:
-		left, err := c.resolveLHSTypes(scope, stmt.Left)
+		left, err := c.resolveLHSTypes(stmt.Left)
 		if err != nil {
 			errs.Add(err)
 		}
 
 		stmt.Left = left
 
-		right, err := c.resolveExpressionTypes(scope, stmt.Right, left.Type())
+		right, err := c.resolveExpressionTypes(stmt.Right, left.Type())
 		if err != nil {
 			errs.Add(err)
 		}
@@ -197,14 +197,14 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 
 		return nil
 	case *AssignmentStatement:
-		left, err := c.resolveLHSTypes(scope, stmt.Left)
+		left, err := c.resolveLHSTypes(stmt.Left)
 		if err != nil {
 			errs.Add(err)
 		}
 
 		stmt.Left = left
 
-		right, err := c.resolveExpressionTypes(scope, stmt.Right, left.Type())
+		right, err := c.resolveExpressionTypes(stmt.Right, left.Type())
 		if err != nil {
 			errs.Add(err)
 		}
@@ -217,7 +217,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 
 		return nil
 	case *PostfixStatement:
-		expr, err := c.resolveExpressionTypes(scope, stmt.Expression, nil)
+		expr, err := c.resolveExpressionTypes(stmt.Expression, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -228,7 +228,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		return nil
 	case *IfStatement:
 		if stmt.Condition != nil {
-			cond, err := c.resolveExpressionTypes(scope, stmt.Condition, TypeKind(KindBool))
+			cond, err := c.resolveExpressionTypes(stmt.Condition, TypeKind(KindBool))
 			if err != nil {
 				errs.Add(err)
 			}
@@ -241,14 +241,14 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		}
 
 		for _, subStmt := range stmt.Body {
-			err := c.resolveStatementTypes(stmt.Scope, subStmt)
+			err := c.resolveStatementTypes(subStmt)
 			if err != nil {
 				errs.Add(err)
 			}
 		}
 
 		if stmt.Else != nil {
-			err := c.resolveStatementTypes(scope, stmt.Else)
+			err := c.resolveStatementTypes(stmt.Else)
 			if err != nil {
 				errs.Add(err)
 			}
@@ -257,14 +257,14 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		return nil
 	case *ForStatement:
 		if stmt.Init != nil {
-			err := c.resolveStatementTypes(stmt.Scope, stmt.Init)
+			err := c.resolveStatementTypes(stmt.Init)
 			if err != nil {
 				errs.Add(err)
 			}
 		}
 
 		if stmt.Condition != nil {
-			cond, err := c.resolveExpressionTypes(stmt.Scope, stmt.Condition, TypeKind(KindBool))
+			cond, err := c.resolveExpressionTypes(stmt.Condition, TypeKind(KindBool))
 			if err != nil {
 				errs.Add(err)
 			}
@@ -277,14 +277,14 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 		}
 
 		if stmt.Step != nil {
-			err := c.resolveStatementTypes(stmt.Scope, stmt.Step)
+			err := c.resolveStatementTypes(stmt.Step)
 			if err != nil {
 				errs.Add(err)
 			}
 		}
 
 		for _, subStmt := range stmt.Body {
-			err := c.resolveStatementTypes(stmt.Scope, subStmt)
+			err := c.resolveStatementTypes(subStmt)
 			if err != nil {
 				errs.Add(err)
 			}
@@ -292,20 +292,16 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 
 		return nil
 	case *ReturnStatement:
-		if scope.Function() == nil {
-			errs.Add(stmt.WrapError(fmt.Errorf("return statement outside of function")))
-		}
-
-		if stmt.Expression != nil && scope.Function().Return() == VoidType {
+		if stmt.Expression != nil && stmt.Function.Return() == VoidType {
 			errs.Add(stmt.WrapError(fmt.Errorf("unexpected return value on void function")))
 		}
 
-		if stmt.Expression == nil && scope.Function().Return() != VoidType {
-			errs.Add(stmt.WrapError(fmt.Errorf("expected return value of type %s", scope.Function().Return())))
+		if stmt.Expression == nil && stmt.Function.Return() != VoidType {
+			errs.Add(stmt.WrapError(fmt.Errorf("expected return value of type %s", stmt.Function.Return())))
 		}
 
 		if stmt.Expression != nil {
-			expr, err := c.resolveExpressionTypes(scope, stmt.Expression, scope.Function().Return())
+			expr, err := c.resolveExpressionTypes(stmt.Expression, stmt.Function.Return())
 			if err != nil {
 				errs.Add(err)
 			}
@@ -315,7 +311,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 
 		return nil
 	case *ExpressionStatement:
-		expr, err := c.resolveExpressionTypes(scope, stmt.Expression, nil)
+		expr, err := c.resolveExpressionTypes(stmt.Expression, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -328,7 +324,7 @@ func (c *Compiler) resolveStatementTypes(scope *SymbolScope, stmt Statement) (er
 	}
 }
 
-func (c *Compiler) resolveLHSTypes(scope *SymbolScope, expr Expression) (_ Expression, err error) {
+func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -362,13 +358,14 @@ func (c *Compiler) resolveLHSTypes(scope *SymbolScope, expr Expression) (_ Expre
 			return expr, expr.WrapError(fmt.Errorf("cannot assign to expression type: %T", expr))
 		}
 	case *ParenthesizedExpression:
-		return c.resolveLHSTypes(scope, expr.Expression)
+		expr.Expression, err = c.resolveLHSTypes(expr.Expression)
+		return expr, err
 	case *BinaryExpression:
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to binary expression"))
 	case *UnaryExpression:
 		switch expr.Operator {
 		case OperatorDereference:
-			subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, nil)
+			subExpr, err := c.resolveExpressionTypes(expr.Expression, nil)
 			if err != nil {
 				errs.Add(err)
 			}
@@ -379,7 +376,7 @@ func (c *Compiler) resolveLHSTypes(scope *SymbolScope, expr Expression) (_ Expre
 			return expr, expr.WrapError(fmt.Errorf("cannot assign to unary expression"))
 		}
 	case *DotExpression:
-		receiver, err := c.resolveExpressionTypes(scope, expr.Receiver, nil)
+		receiver, err := c.resolveExpressionTypes(expr.Receiver, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -388,14 +385,14 @@ func (c *Compiler) resolveLHSTypes(scope *SymbolScope, expr Expression) (_ Expre
 
 		return c.resolveLHSDotExpressionReceiverTypes(expr, expr.Receiver.Type())
 	case *IndexExpression:
-		receiver, err := c.resolveExpressionTypes(scope, expr.Receiver, nil)
+		receiver, err := c.resolveExpressionTypes(expr.Receiver, nil)
 		if err != nil {
 			errs.Add(err)
 		}
 
 		expr.Receiver = receiver
 
-		return c.resolveLHSIndexExpressionReceiverTypes(scope, expr, expr.Receiver.Type())
+		return c.resolveLHSIndexExpressionReceiverTypes(expr, expr.Receiver.Type())
 	default:
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to expression type: %T", expr))
 	}
@@ -407,7 +404,7 @@ func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ
 		err = errs.Defer(err)
 	}()
 
-	switch typ := typ.(type) {
+	switch typ := BaseType(typ).(type) {
 	case *TupleType:
 		index, err := strconv.Atoi(expr.Key)
 		if err != nil {
@@ -420,16 +417,19 @@ func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ
 
 		return expr, nil
 	case *StructType:
-		// TODO:
-		return nil, expr.WrapError(fmt.Errorf("struct type not yet implemented"))
+		if !typ.HasField(expr.Key) {
+			errs.Add(expr.WrapError(fmt.Errorf("struct does not have field %q", expr.Key)))
+		}
+
+		return expr, nil
 	case *PointerType:
 		return c.resolveLHSDotExpressionReceiverTypes(expr, typ.Pointee())
 	default:
-		return expr, expr.WrapError(fmt.Errorf("cannot dot index assign receiver type: %T", expr.Receiver))
+		return expr, expr.WrapError(fmt.Errorf("cannot dot index assign receiver type: %T", expr.Receiver.Type()))
 	}
 }
 
-func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(scope *SymbolScope, expr *IndexExpression, typ Type) (_ Expression, err error) {
+func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(expr *IndexExpression, typ Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -437,7 +437,7 @@ func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(scope *SymbolScope, ex
 
 	switch typ := typ.(type) {
 	case *ArrayType:
-		index, err := c.resolveExpressionTypes(scope, expr.Index, nil)
+		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -450,7 +450,7 @@ func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(scope *SymbolScope, ex
 
 		return expr, nil
 	case *SliceType:
-		index, err := c.resolveExpressionTypes(scope, expr.Index, nil)
+		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -463,7 +463,7 @@ func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(scope *SymbolScope, ex
 
 		return expr, nil
 	case *MapType:
-		index, err := c.resolveExpressionTypes(scope, expr.Index, typ.Key())
+		index, err := c.resolveExpressionTypes(expr.Index, typ.Key())
 		if err != nil {
 			errs.Add(err)
 		}
@@ -476,7 +476,7 @@ func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(scope *SymbolScope, ex
 	}
 }
 
-func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, bound Type) (_ Expression, err error) {
+func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -675,7 +675,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 			return expr, expr.WrapError(fmt.Errorf("unhandled symbol type %T", sym))
 		}
 	case *ParenthesizedExpression:
-		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, bound)
+		subExpr, err := c.resolveExpressionTypes(expr.Expression, bound)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -684,14 +684,14 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 		return expr, nil
 	case *BinaryExpression:
-		left, err := c.resolveExpressionTypes(scope, expr.Left, expr.Right.Type())
+		left, err := c.resolveExpressionTypes(expr.Left, expr.Right.Type())
 		if err != nil {
 			errs.Add(err)
 		}
 
 		expr.Left = left
 
-		right, err := c.resolveExpressionTypes(scope, expr.Right, expr.Left.Type())
+		right, err := c.resolveExpressionTypes(expr.Right, expr.Left.Type())
 		if err != nil {
 			errs.Add(err)
 		}
@@ -714,7 +714,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 			}
 		}
 
-		subExpr, err := c.resolveExpressionTypes(scope, expr.Expression, bound)
+		subExpr, err := c.resolveExpressionTypes(expr.Expression, bound)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -728,7 +728,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 		return expr, nil
 	case *CallExpression:
-		fExpr, err := c.resolveExpressionTypes(scope, expr.Function, nil)
+		fExpr, err := c.resolveCallExpressionReceiverTypes(expr.Function, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -742,7 +742,7 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 			}
 
 			for i := range min(len(expr.Args), len(ftype.Parameters)) {
-				arg, err := c.resolveExpressionTypes(scope, expr.Args[i], ftype.Parameters[i])
+				arg, err := c.resolveExpressionTypes(expr.Args[i], ftype.Parameters[i])
 				if err != nil {
 					errs.Add(err)
 				}
@@ -765,67 +765,189 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 
 		return expr, nil
 	case *DotExpression:
-		receiver, err := c.resolveExpressionTypes(scope, expr.Receiver, nil)
+		receiver, err := c.resolveExpressionTypes(expr.Receiver, nil)
 		if err != nil {
 			errs.Add(err)
 		}
 		expr.Receiver = receiver
 
-		return c.resolveDotExpressionReceiverTypes(expr, expr.Receiver.Type(), bound)
+		return c.resolveDotExpressionReceiverTypes(expr, expr.Receiver.Type(), false, bound)
 	case *IndexExpression:
-		receiver, err := c.resolveExpressionTypes(scope, expr.Receiver, nil)
+		receiver, err := c.resolveExpressionTypes(expr.Receiver, nil)
 		if err != nil {
 			errs.Add(err)
 		}
 		expr.Receiver = receiver
 
-		return c.resolveIndexExpressionReceiverTypes(scope, expr, expr.Receiver.Type(), bound)
+		return c.resolveIndexExpressionReceiverTypes(expr, expr.Receiver.Type(), bound)
+	case *TupleExpression:
+		tupleBound, _ := BaseType(bound).(*TupleType)
+		for i, elem := range expr.Elems {
+			var elemBound Type
+			if tupleBound != nil {
+				elemBound = tupleBound.Elems()[i]
+			}
+
+			elem, err := c.resolveExpressionTypes(elem, elemBound)
+			if err != nil {
+				errs.Add(err)
+			}
+
+			expr.Elems[i] = elem
+		}
+
+		return expr, nil
+	case *ArrayExpression:
+		arrayBound, ok := BaseType(bound).(*ArrayType)
+		var elemBound Type
+		if ok {
+			elemBound = arrayBound.Elem()
+		}
+
+		for i, elem := range expr.Elems {
+			elem, err := c.resolveExpressionTypes(elem, elemBound)
+			if err != nil {
+				errs.Add(err)
+			}
+
+			if !TypesEqual(elem.Type(), expr.ElemType) {
+				errs.Add(elem.WrapError(fmt.Errorf("cannot use element of type %s at index %d in array literal as %s", elem.Type(), i, elemBound)))
+			}
+
+			expr.Elems[i] = elem
+		}
+
+		return expr, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %T", expr))
 	}
 }
 
-func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Type, bound Type) (_ Expression, err error) {
+func (c *Compiler) resolveCallExpressionReceiverTypes(expr Expression, bound Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
 	}()
 
-	switch typ := typ.(type) {
-	case *TupleType:
-		index, err := strconv.Atoi(expr.Key)
+	switch expr := expr.(type) {
+	case *DotExpression:
+		dotExpr, err := c.resolveDotExpressionReceiverTypes(expr, expr.Receiver.Type(), false, bound)
 		if err != nil {
-			errs.Add(expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key)))
-		} else {
-			if !IsAssignableTo(typ.Elems()[index], bound) {
-				errs.Add(expr.WrapError(fmt.Errorf("cannot use tuple element at index %d of type %v as type %v", index, typ.Elems()[index], bound)))
+			errs.Add(err)
+		}
+
+		// optimization to not allocate a closure for most method calls
+		if boundMethod, ok := dotExpr.(*BoundMethodExpression); ok {
+			return &MethodExpression{
+				Function: boundMethod.Function,
+				Receiver: boundMethod.Receiver,
+
+				Position: expr.Position,
+			}, nil
+		}
+
+		return dotExpr, nil
+	case *ParenthesizedExpression:
+		expr.Expression, err = c.resolveCallExpressionReceiverTypes(expr.Expression, bound)
+		return expr, err
+	default:
+		return c.resolveExpressionTypes(expr, bound)
+	}
+}
+
+func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Type, ptr bool, bound Type) (_ Expression, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	var isNumeric bool
+	numericKey, err := strconv.Atoi(expr.Key)
+	if err == nil {
+		isNumeric = true
+	}
+
+	var hasMethods bool
+	if typ, ok := resolveType(typ).(*DerivedType); ok && !isNumeric {
+		hasMethods = true
+
+		methods := typ.Methods(ptr)
+		// TODO: auto address of
+		if methods.Has(expr.Key) {
+			methodFunc := typ.Method(expr.Key)
+			targetReceiverType := methodFunc.Receiver().Type()
+			receiver := expr.Receiver
+
+			for {
+				_, ok := receiver.Type().(*PointerType)
+				if !ok || TypesEqual(receiver.Type(), targetReceiverType) {
+					break
+				}
+
+				receiver = &UnaryExpression{
+					Expression: receiver,
+					Operator:   OperatorDereference,
+				}
 			}
 
-			if index >= len(typ.Elems()) {
-				errs.Add(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", index, len(typ.Elems())))
+			if !TypesEqual(receiver.Type(), targetReceiverType) {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot call method %q on type %s", expr.Key, typ)))
+			}
+
+			return &BoundMethodExpression{
+				Receiver: receiver,
+				Function: methodFunc,
+
+				Position: expr.Position,
+			}, nil
+		}
+	}
+
+	switch typ := BaseType(typ).(type) {
+	case *TupleType:
+		if isNumeric {
+			if !IsAssignableTo(typ.Elems()[numericKey], bound) {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot use tuple element of type %v at index %d as type %v", typ.Elems()[numericKey], numericKey, bound)))
+			}
+
+			if numericKey >= len(typ.Elems()) {
+				errs.Add(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", numericKey, len(typ.Elems())))
+			}
+		} else {
+			if hasMethods {
+				errs.Add(expr.WrapError(fmt.Errorf("type %s has no such method %s", expr.Type(), expr.Key)))
+			} else {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot index tuple type %s with %q", expr.Type(), expr.Key)))
 			}
 		}
 
 		return expr, nil
 	case *StructType:
-		// TODO:
-		return nil, expr.WrapError(fmt.Errorf("struct type not yet implemented"))
+		if !typ.HasField(expr.Key) {
+			if hasMethods {
+				errs.Add(expr.WrapError(fmt.Errorf("type %s no such field or method %q", expr.Type(), expr.Key)))
+			} else {
+				errs.Add(expr.WrapError(fmt.Errorf("type %s has no such field %q", expr.Type(), expr.Key)))
+			}
+		}
+
+		return expr, nil
 	case *PointerType:
-		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), bound)
+		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), true, bound)
 	default:
-		return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", typ))
+		return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ, expr.Key))
 	}
 }
 
-func (c *Compiler) resolveIndexExpressionReceiverTypes(scope *SymbolScope, expr *IndexExpression, typ Type, bound Type) (_ Expression, err error) {
+func (c *Compiler) resolveIndexExpressionReceiverTypes(expr *IndexExpression, typ Type, bound Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
 	}()
 
-	switch typ := typ.(type) {
+	switch typ := BaseType(typ).(type) {
 	case *ArrayType:
-		index, err := c.resolveExpressionTypes(scope, expr.Index, nil)
+		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -838,7 +960,7 @@ func (c *Compiler) resolveIndexExpressionReceiverTypes(scope *SymbolScope, expr 
 
 		return expr, nil
 	case *SliceType:
-		index, err := c.resolveExpressionTypes(scope, expr.Index, nil)
+		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -851,7 +973,7 @@ func (c *Compiler) resolveIndexExpressionReceiverTypes(scope *SymbolScope, expr 
 
 		return expr, nil
 	case *MapType:
-		index, err := c.resolveExpressionTypes(scope, expr.Index, typ.Key())
+		index, err := c.resolveExpressionTypes(expr.Index, typ.Key())
 		if err != nil {
 			errs.Add(err)
 		}
@@ -860,7 +982,7 @@ func (c *Compiler) resolveIndexExpressionReceiverTypes(scope *SymbolScope, expr 
 
 		return expr, nil
 	default:
-		return expr, expr.WrapError(fmt.Errorf("cannot index receiver type %T", typ))
+		return expr, expr.WrapError(fmt.Errorf("cannot index receiver type %s", typ))
 	}
 }
 

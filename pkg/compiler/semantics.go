@@ -3,6 +3,7 @@ package compiler
 import (
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/rhino1998/aeon/pkg/parser"
 )
@@ -26,6 +27,26 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 	}
 
 	for _, decl := range entry.Declarations {
+		if _, ok := decl.(parser.TypeDeclaration); !ok {
+			continue
+		}
+		_, err := c.compileDeclaration(pkg, pkg.scope, decl)
+		if err != nil {
+			var posError parser.PositionError
+			if !errors.As(err, &posError) {
+				return FileError{File: filename, Err: err}
+			}
+
+			return err
+		}
+	}
+
+	// TODO: sort topologically
+	for _, decl := range entry.Declarations {
+		if _, ok := decl.(parser.TypeDeclaration); ok {
+			continue
+		}
+
 		_, err := c.compileDeclaration(pkg, pkg.scope, decl)
 		if err != nil {
 			var posError parser.PositionError
@@ -44,6 +65,8 @@ func (c *Compiler) compileDeclaration(p *Package, scope *SymbolScope, decl parse
 	switch decl := decl.(type) {
 	case parser.FunctionDeclaration:
 		return c.compileFunction(p, scope, decl)
+	case parser.MethodDeclaration:
+		return c.compileMethod(p, scope, decl)
 	case parser.TypeDeclaration:
 		return c.compileTypeDeclaration(p, scope, decl)
 	case parser.ExternFunctionDeclaration:
@@ -152,6 +175,8 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 	t := &DerivedType{
 		name:       string(decl.Name),
 		underlying: underlying,
+
+		methodFuncs: make(map[string]*Function),
 	}
 
 	err = scope.put(t)
@@ -255,6 +280,8 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 
 		return &PointerType{
 			pointee: pointee,
+
+			Position: typ.Position,
 		}, nil
 	case parser.SliceType:
 		elem, err := c.compileTypeReference(scope, typ.Element)
@@ -264,6 +291,8 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 
 		return &SliceType{
 			elem: elem,
+
+			Position: typ.Position,
 		}, nil
 	case parser.MapType:
 		key, err := c.compileTypeReference(scope, typ.Key)
@@ -279,6 +308,8 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 		return &MapType{
 			key:   key,
 			value: val,
+
+			Position: typ.Position,
 		}, nil
 	case parser.TupleType:
 		var elems []Type
@@ -293,6 +324,8 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 
 		return &TupleType{
 			elems: elems,
+
+			Position: typ.Position,
 		}, nil
 	case parser.ArrayType:
 		elem, err := c.compileTypeReference(scope, typ.Element)
@@ -303,6 +336,27 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 		return &ArrayType{
 			length: int(typ.Length.Value),
 			elem:   elem,
+
+			Position: typ.Position,
+		}, nil
+	case parser.StructType:
+		var fields []StructField
+		for _, field := range typ.Fields {
+			fieldType, err := c.compileTypeReference(scope, field.Type)
+			if err != nil {
+				return nil, err
+			}
+
+			fields = append(fields, StructField{
+				Name: string(field.Name),
+				Type: fieldType,
+			})
+		}
+
+		return &StructType{
+			fields: fields,
+
+			Position: typ.Position,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unhandled type reference %q", typ)
@@ -311,6 +365,10 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 
 func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.FunctionDeclaration) (*Function, error) {
 	f := newFunction(string(decl.Name), p)
+
+	f.receiver = &Variable{
+		typ: VoidType,
+	}
 
 	for _, param := range decl.Parameters {
 		var paramName string
@@ -348,16 +406,13 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 
 	f.symbols.put(f)
 
-	for _, stmt := range decl.Body {
-		compiledStmt, err := c.compileStatement(f.symbols, stmt)
-		if err != nil {
-			return nil, err
-		}
-
-		f.body = append(f.body, compiledStmt)
+	var err error
+	f.body, err = c.compileStatements(f.symbols, decl.Body)
+	if err != nil {
+		return nil, err
 	}
 
-	err := scope.put(f)
+	err = scope.put(f)
 	if err != nil {
 		return nil, err
 	}
@@ -365,7 +420,92 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 	return f, nil
 }
 
-func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (Statement, error) {
+func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.MethodDeclaration) (*Function, error) {
+	f := newFunction(string(decl.Name), p)
+
+	var recvName string
+	if decl.Receiver.Name != nil {
+		recvName = string(*decl.Receiver.Name)
+	}
+
+	recvTyp, err := c.compileTypeReference(scope, decl.Receiver.Type)
+	if err != nil {
+		return nil, err
+	}
+
+	if !IsValidMethodReceiverType(recvTyp) {
+		return nil, decl.WrapError(fmt.Errorf("cannot use %s as a method receiver", recvTyp))
+	}
+
+	var recvDerivedType *DerivedType
+	switch recvTyp := resolveType(recvTyp).(type) {
+	case *DerivedType:
+		recvDerivedType = recvTyp
+	case *PointerType:
+		switch recvTyp := resolveType(recvTyp.Pointee()).(type) {
+		case *DerivedType:
+			recvDerivedType = recvTyp
+		}
+	}
+
+	recvVar := &Variable{
+		name: recvName,
+		typ:  recvTyp,
+	}
+
+	f.receiver = recvVar
+
+	if decl.Receiver.Name != nil {
+		f.symbols.put(recvVar)
+	}
+
+	for _, param := range decl.Parameters {
+		var paramName string
+		if param.Name != nil {
+			paramName = string(*param.Name)
+		}
+
+		typ, err := c.compileTypeReference(scope, param.Type)
+		if err != nil {
+			return nil, err
+		}
+
+		variable := &Variable{
+			name: paramName,
+			typ:  typ,
+		}
+
+		if param.Name != nil {
+			f.symbols.put(variable)
+		}
+
+		f.parameters = append(f.parameters, variable)
+	}
+
+	if decl.Return != nil {
+		typ, err := c.compileTypeReference(scope, decl.Return)
+		if err != nil {
+			return nil, err
+		}
+
+		f.ret = typ
+	} else {
+		f.ret = VoidType
+	}
+
+	f.symbols.put(f)
+
+	f.body, err = c.compileStatements(f.symbols, decl.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	recvDerivedType.AddMethod(string(decl.Name), f)
+
+	return f, nil
+}
+
+func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (Statement, *SymbolScope, error) {
 	var err error
 
 	switch stmt := stmt.(type) {
@@ -374,7 +514,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Expr != nil {
 			expr, err = c.compileExpression(scope, *stmt.Expr)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 
 			}
 		}
@@ -383,18 +523,20 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Type != nil {
 			typ, err = c.compileTypeReference(scope, *stmt.Type)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		} else if stmt.Expr != nil {
 			typ = expr.Type()
 		} else {
-			return nil, fmt.Errorf("invalid variable declaration")
+			return nil, nil, fmt.Errorf("invalid variable declaration")
 		}
 
 		v := &Variable{
 			name: string(stmt.Name),
 			typ:  typ,
 		}
+
+		scope := scope.next()
 
 		scope.put(v)
 
@@ -404,17 +546,19 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Type:       typ,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.DeclarationStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		v := &Variable{
 			name: string(stmt.Name),
 			typ:  expr.Type(),
 		}
+
+		scope := scope.next()
 
 		scope.put(v)
 
@@ -423,16 +567,16 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Expression: expr,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.AssignmentOperatorStatement:
 		left, err := c.compileExpression(scope, stmt.Left)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		right, err := c.compileExpression(scope, stmt.Right)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		return &AssignmentOperatorStatement{
@@ -441,16 +585,16 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Right:    right,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.AssignmentStatement:
 		left, err := c.compileExpression(scope, stmt.Left)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		right, err := c.compileExpression(scope, stmt.Right)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		return &AssignmentStatement{
@@ -458,41 +602,43 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Right: right,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.ExprStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		return &ExpressionStatement{
 			Expression: expr,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.ReturnStatement:
 		var expr Expression
 		if stmt.Expr != nil {
 			expr, err = c.compileExpression(scope, stmt.Expr)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
 		function := scope.Function()
 		if function == nil {
-			return nil, stmt.WrapError(fmt.Errorf("return statement outside function"))
+			return nil, nil, stmt.WrapError(fmt.Errorf("return statement outside function"))
 		}
 
 		return &ReturnStatement{
 			Expression: expr,
 
+			Function: function,
+
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.PostfixStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		return &PostfixStatement{
@@ -500,24 +646,24 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Operator:   Operator(stmt.Operator),
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.IfStatement:
 		condition, err := c.compileExpression(scope, stmt.Condition)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		bodyScope := newScope(scope, "if")
 		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		var rest Statement
 		if stmt.Else != nil {
-			rest, err = c.compileStatement(scope, stmt.Else)
+			rest, _, err = c.compileStatement(scope, stmt.Else)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -528,24 +674,24 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Else:      rest,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.ElseIfStatement:
 		condition, err := c.compileExpression(scope, stmt.Condition)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		bodyScope := newScope(scope, "elseif")
 		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		var rest Statement
 		if stmt.Else != nil {
-			rest, err = c.compileStatement(scope, stmt.Else)
+			rest, _, err = c.compileStatement(scope, stmt.Else)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -556,12 +702,12 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Else:      rest,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.ElseStatement:
 		bodyScope := newScope(scope, "else")
 		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		return &IfStatement{
@@ -569,16 +715,16 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Body:  body,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	case parser.ForStatement:
 		var err error
 		bodyScope := newScope(scope, "for")
 
 		var init Statement
 		if stmt.Init != nil {
-			init, err = c.compileStatement(bodyScope, stmt.Init)
+			init, bodyScope, err = c.compileStatement(bodyScope, stmt.Init)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
@@ -586,21 +732,21 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Condition != nil {
 			cond, err = c.compileExpression(bodyScope, stmt.Condition)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
 		var step Statement
 		if stmt.Step != nil {
-			step, err = c.compileStatement(bodyScope, stmt.Step)
+			step, _, err = c.compileStatement(bodyScope, stmt.Step)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
 
 		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		return &ForStatement{
@@ -612,21 +758,24 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			Body:  body,
 
 			Position: stmt.Position,
-		}, nil
+		}, scope, nil
 	default:
-		return nil, stmt.WrapError(fmt.Errorf("unhandled statement %T", stmt))
+		return nil, nil, stmt.WrapError(fmt.Errorf("unhandled statement %T", stmt))
 	}
 }
 
 func (c *Compiler) compileStatements(scope *SymbolScope, stmts []parser.Statement) ([]Statement, error) {
 	var ret []Statement
 	for _, stmt := range stmts {
-		retStmt, err := c.compileStatement(scope, stmt)
+		retStmt, nextScope, err := c.compileStatement(scope, stmt)
 		if err != nil {
 			return nil, err
 		}
 
 		ret = append(ret, retStmt)
+
+		log.Printf("%p %T", scope, stmt)
+		scope = nextScope
 	}
 
 	return ret, nil
@@ -764,6 +913,55 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 
 		return &ParenthesizedExpression{
 			Expression: exp,
+
+			Position: expr.Position,
+		}, nil
+	case parser.TupleExpr:
+		var elems []Expression
+		for _, elem := range expr.Elems {
+			elemExpr, err := c.compileExpression(scope, elem)
+			if err != nil {
+				return nil, err
+			}
+
+			elems = append(elems, elemExpr)
+		}
+
+		return &TupleExpression{
+			Elems: elems,
+
+			Position: expr.Position,
+		}, nil
+	case parser.ArrayExpr:
+		lengthExpr, err := c.compileExpression(scope, expr.Length)
+		if err != nil {
+			return nil, err
+		}
+
+		lengthLiteral, ok := lengthExpr.(*Literal[Int])
+		if !ok {
+			return nil, expr.WrapError(fmt.Errorf("array size must be an integer literal"))
+		}
+
+		typeRef, err := c.compileTypeReference(scope, expr.Type)
+		if err != nil {
+			return nil, err
+		}
+
+		var elems []Expression
+		for _, elem := range expr.Elems {
+			elemExpr, err := c.compileExpression(scope, elem)
+			if err != nil {
+				return nil, err
+			}
+
+			elems = append(elems, elemExpr)
+		}
+
+		return &ArrayExpression{
+			Length:   lengthLiteral,
+			ElemType: typeRef,
+			Elems:    elems,
 
 			Position: expr.Position,
 		}, nil

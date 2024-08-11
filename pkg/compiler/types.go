@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
+
+	"github.com/rhino1998/aeon/pkg/parser"
 )
 
 var UnknownType = unknownType{}
@@ -22,6 +25,20 @@ type voidType struct{}
 func (voidType) String() string { return "<void>" }
 func (voidType) Kind() Kind     { return KindVoid }
 func (voidType) Size() Size     { return 0 }
+
+func IsValidMethodReceiverType(t Type) bool {
+	switch t := resolveType(t).(type) {
+	case *DerivedType:
+		return true
+	case *PointerType:
+		switch resolveType(t.Pointee()).(type) {
+		case *DerivedType:
+			return true
+		}
+	}
+
+	return false
+}
 
 func IsAssignableTo(v, to Type) bool {
 	if v.Kind() == KindTypeConversion {
@@ -66,11 +83,11 @@ func IsConvertibleTo(v, to Type) bool {
 }
 
 func BaseType(typ Type) Type {
-	switch typ := typ.(type) {
+	switch typ := resolveType(typ).(type) {
 	case *ReferencedType:
-		return resolveType(typ.Dereference())
+		return BaseType(typ.Dereference())
 	case *DerivedType:
-		return resolveType(typ.Underlying())
+		return BaseType(typ.Underlying())
 	default:
 		return typ
 	}
@@ -121,6 +138,20 @@ func typesEqual(t1, t2 Type) bool {
 		default:
 			return false
 		}
+	case *ArrayType:
+		switch t2 := t2.(type) {
+		case *ArrayType:
+			return t1.Length() == t2.Length() && TypesEqual(t1.Elem(), t2.Elem())
+		default:
+			return false
+		}
+	case *TupleType:
+		switch t2 := t2.(type) {
+		case *TupleType:
+			return slices.EqualFunc(t1.Elems(), t2.Elems(), TypesEqual)
+		default:
+			return false
+		}
 	default:
 		return false
 	}
@@ -139,26 +170,25 @@ func IsUnspecified(typ Type) bool {
 	return ok
 }
 
-func IsTypeResolvable(s *SymbolScope, typ Type) bool {
+func IsTypeResolvable(typ Type) bool {
 	switch typ := resolveType(typ).(type) {
 	case TypeKind:
 		return false
 	case *BasicType:
-		_, ok := s.getType(typ.String())
-		return ok
+		return true
 	case *PointerType:
-		return IsTypeResolvable(s, typ.Pointee())
+		return IsTypeResolvable(typ.Pointee())
 	case *DerivedType:
-		return IsTypeResolvable(s, typ.Underlying())
+		return IsTypeResolvable(typ.Underlying())
 	case *SliceType:
-		return IsTypeResolvable(s, typ.Elem())
+		return IsTypeResolvable(typ.Elem())
 	case *ArrayType:
-		return IsTypeResolvable(s, typ.Elem())
+		return IsTypeResolvable(typ.Elem())
 	case *MapType:
-		return IsTypeResolvable(s, typ.Key()) && IsTypeResolvable(s, typ.Value())
+		return IsTypeResolvable(typ.Key()) && IsTypeResolvable(typ.Value())
 	case *TupleType:
 		for _, subType := range typ.Elems() {
-			if !IsTypeResolvable(s, subType) {
+			if !IsTypeResolvable(subType) {
 				return false
 			}
 		}
@@ -166,12 +196,12 @@ func IsTypeResolvable(s *SymbolScope, typ Type) bool {
 		return true
 	case *FunctionType:
 		for _, param := range typ.Parameters {
-			if !IsTypeResolvable(s, param) {
+			if !IsTypeResolvable(param) {
 				return false
 			}
 		}
 
-		if !IsTypeResolvable(s, typ.Return) {
+		if !IsTypeResolvable(typ.Return) {
 			return false
 		}
 
@@ -179,12 +209,20 @@ func IsTypeResolvable(s *SymbolScope, typ Type) bool {
 	case *InterfaceType:
 		for _, method := range typ.Methods() {
 			for _, param := range method.Parameters {
-				if !IsTypeResolvable(s, param) {
+				if !IsTypeResolvable(param) {
 					return false
 				}
 			}
 
-			if !IsTypeResolvable(s, method.Return) {
+			if !IsTypeResolvable(method.Return) {
+				return false
+			}
+		}
+
+		return true
+	case *StructType:
+		for _, field := range typ.Fields() {
+			if !IsTypeResolvable(field.Type) {
 				return false
 			}
 		}
@@ -328,13 +366,14 @@ func (t ReferencedType) Size() Size {
 	return t.Dereference().Size()
 }
 
-type MethodSetEntry struct {
+type Method struct {
 	Name       string
+	Receiver   Type
 	Parameters []Type
 	Return     Type
 }
 
-func (e MethodSetEntry) String() string {
+func (e Method) String() string {
 	params := make([]string, 0, len(e.Parameters))
 	for _, param := range e.Parameters {
 		params = append(params, param.String())
@@ -348,7 +387,7 @@ func (e MethodSetEntry) String() string {
 	return fmt.Sprintf("%s(%s) %s", e.Name, strings.Join(params, ", "), retStr)
 }
 
-func (e MethodSetEntry) Equal(o MethodSetEntry) bool {
+func (e Method) Equal(o Method) bool {
 	if e.Name != o.Name {
 		return false
 	}
@@ -364,10 +403,26 @@ func (e MethodSetEntry) Equal(o MethodSetEntry) bool {
 	return true
 }
 
-type MethodSet []MethodSetEntry
+func (e Method) BoundFunction() *FunctionType {
+	return &FunctionType{
+		Receiver:   e.Receiver,
+		Parameters: e.Parameters,
+		Return:     e.Return,
+	}
+}
+
+func (e Method) UnboundFunction() *FunctionType {
+	return &FunctionType{
+		Receiver:   VoidType,
+		Parameters: append([]Type{e.Receiver}, e.Parameters...),
+		Return:     e.Return,
+	}
+}
+
+type MethodSet []Method
 
 func (m *MethodSet) Add(name string, params []Type, ret Type) error {
-	entry := MethodSetEntry{
+	entry := Method{
 		Name:       name,
 		Parameters: params,
 		Return:     ret,
@@ -379,15 +434,21 @@ func (m *MethodSet) Add(name string, params []Type, ret Type) error {
 
 	*m = append(*m, entry)
 
-	slices.SortStableFunc(*m, func(a, b MethodSetEntry) int {
+	slices.SortStableFunc(*m, func(a, b Method) int {
 		return cmp.Compare(a.Name, b.Name)
 	})
 
 	return nil
 }
 
+func (m MethodSet) Has(name string) bool {
+	return slices.ContainsFunc(m, func(method Method) bool {
+		return method.Name == name
+	})
+}
+
 func (m MethodSet) Equal(o MethodSet) bool {
-	return slices.EqualFunc(m, o, MethodSetEntry.Equal)
+	return slices.EqualFunc(m, o, Method.Equal)
 }
 
 func (m MethodSet) Subset(o MethodSet) bool {
@@ -405,6 +466,8 @@ type DerivedType struct {
 	methods    MethodSet
 	ptrMethods MethodSet
 	underlying Type
+
+	methodFuncs map[string]*Function
 }
 
 func (t *DerivedType) Name() string {
@@ -425,23 +488,77 @@ func (t *DerivedType) Size() Size {
 	return t.underlying.Size()
 }
 
+func (t *DerivedType) AddMethod(name string, f *Function) error {
+	if t.Method(name) != nil {
+		return fmt.Errorf("type %s already has a method %q", t, name)
+	}
+
+	t.methodFuncs[name] = f
+
+	params := f.Parameters()
+
+	paramTypes := make([]Type, 0, len(params))
+	for _, param := range params {
+		paramTypes = append(paramTypes, param.Type())
+	}
+
+	if _, ok := f.receiver.Type().(*PointerType); ok {
+		t.ptrMethods.Add(name, paramTypes, f.Return())
+	} else {
+		t.methods.Add(name, paramTypes, f.Return())
+	}
+
+	return nil
+}
+
 func (t *DerivedType) Methods(ptr bool) MethodSet {
-	ret := make([]MethodSetEntry, 0, len(t.methods)+len(t.ptrMethods))
+	ret := make([]Method, 0, len(t.methods)+len(t.ptrMethods))
 	ret = append(ret, t.methods...)
 
 	if ptr {
 		ret = append(ret, t.ptrMethods...)
 	}
 
-	slices.SortStableFunc(ret, func(a, b MethodSetEntry) int {
+	slices.SortStableFunc(ret, func(a, b Method) int {
 		return cmp.Compare(a.Name, b.Name)
 	})
 
 	return t.methods
 }
 
+func (t *DerivedType) Method(name string) *Function {
+	return t.methodFuncs[name]
+}
+
+func (t *DerivedType) MethodFunctions() []*Function {
+	var funs []*Function
+	for _, fun := range t.methodFuncs {
+		funs = append(funs, fun)
+	}
+
+	slices.SortStableFunc(funs, func(a, b *Function) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return funs
+}
+
+func (t *DerivedType) BoundMethodType(name string) (*FunctionType, bool) {
+	f := t.methodFuncs[name]
+	if f == nil {
+		return nil, false
+	}
+
+	ftype := f.Type().(*FunctionType)
+
+	ftype.Parameters = ftype.Parameters[1:]
+	return ftype, true
+}
+
 type PointerType struct {
 	pointee Type
+
+	parser.Position
 }
 
 func NewPointerType(pointee Type) *PointerType {
@@ -461,6 +578,8 @@ func (t PointerType) Pointee() Type {
 
 type SliceType struct {
 	elem Type
+
+	parser.Position
 }
 
 func (t SliceType) Kind() Kind { return KindSlice }
@@ -479,6 +598,8 @@ var sliceHeader = NewTupleType(
 type ArrayType struct {
 	length int
 	elem   Type
+
+	parser.Position
 }
 
 func (t ArrayType) Kind() Kind { return KindArray }
@@ -491,6 +612,8 @@ func (t ArrayType) Size() Size  { return t.elem.Size() * Size(t.length) }
 
 type TupleType struct {
 	elems []Type
+
+	parser.Position
 }
 
 func NewTupleType(elems ...Type) *TupleType {
@@ -509,6 +632,7 @@ func (t TupleType) String() string {
 }
 
 func (t TupleType) Elems() []Type { return t.elems }
+
 func (t TupleType) ElemOffset(index int) Size {
 	var size Size
 	for _, typ := range t.elems[:index] {
@@ -524,6 +648,8 @@ func (t TupleType) Size() Size {
 type MapType struct {
 	key   Type
 	value Type
+
+	parser.Position
 }
 
 func (*MapType) Kind() Kind { return KindMap }
@@ -548,15 +674,66 @@ type StructType struct {
 	BasicType
 
 	fields []StructField
+
+	parser.Position
 }
 
-func (t StructType) Fields() []StructField {
+func (t *StructType) Fields() []StructField {
 	return t.fields
+}
+
+func (t *StructType) GetField(name string) (StructField, bool) {
+	index := slices.IndexFunc(t.fields, func(f StructField) bool {
+		return f.Name == name
+	})
+	if index == -1 {
+		return StructField{}, false
+	}
+
+	return t.fields[index], true
+}
+
+func (t *StructType) HasField(name string) bool {
+	return slices.ContainsFunc(t.fields, func(f StructField) bool {
+		return f.Name == name
+	})
+}
+
+func (t *StructType) FieldOffset(name string) (Size, error) {
+	index := slices.IndexFunc(t.fields, func(f StructField) bool {
+		return f.Name == name
+	})
+	if index == -1 {
+		return 0, fmt.Errorf("no such field %q", name)
+	}
+
+	var offset Size
+	for _, f := range t.fields[:index] {
+		offset += f.Type.Size()
+	}
+
+	return offset, nil
+}
+
+func (t *StructType) Size() Size {
+	var offset Size
+	for _, f := range t.fields {
+		offset += f.Type.Size()
+	}
+
+	return offset
 }
 
 type StructField struct {
 	Name string
 	Type Type
+
+	// TODO: maybe tags
+	Tag string
+}
+
+func (f StructField) IsExported() bool {
+	return unicode.IsUpper([]rune(f.Name)[0])
 }
 
 type FunctionType struct {

@@ -1,5 +1,7 @@
 package compiler
 
+import "log"
+
 type Program struct {
 	root *SymbolScope
 
@@ -24,10 +26,6 @@ func newProgram() *Program {
 
 func (p *Program) Bytecode() []Bytecode {
 	return p.bytecode
-}
-
-func (p *Program) Functions() []*Function {
-	return p.root.Functions()
 }
 
 func (p *Program) FrameSize() Size {
@@ -60,8 +58,33 @@ func (p *Program) ExternFuncs() []*ExternFunction {
 	return sortedMapByKey(p.externFuncs)
 }
 
-func (p *Program) GlobalSize() int {
-	return 20
+func (p *Program) GlobalSize() Size {
+	var size Size
+	for _, global := range p.Globals() {
+		size += global.Type().Size()
+	}
+
+	size += funcType.Size() * Size(len(p.Functions()))
+	size += externType.Size() * Size(len(p.ExternFuncs()))
+
+	for _, drv := range p.DerivedTypes() {
+		size += funcType.Size() * Size(len(drv.MethodFunctions()))
+	}
+
+	log.Println("f", len(p.Functions()))
+	log.Println("e", len(p.ExternFuncs()))
+
+	return size
+}
+
+// TODO: topological sort by import
+func (p *Program) Functions() []*Function {
+	var ret []*Function
+	for _, pkg := range p.Packages() {
+		ret = append(ret, pkg.Functions()...)
+	}
+
+	return ret
 }
 
 // TODO: topological sort by import
@@ -94,10 +117,30 @@ func (p *Program) UpdateFunctions() []*Function {
 	return ret
 }
 
+// TODO: topological sort by import
+func (p *Program) Globals() []*Variable {
+	var ret []*Variable
+	for _, pkg := range p.Packages() {
+		ret = append(ret, pkg.Globals()...)
+	}
+
+	return ret
+}
+
+func (p *Program) DerivedTypes() []*DerivedType {
+	var ret []*DerivedType
+	for _, pkg := range p.Packages() {
+		ret = append(ret, pkg.DerivedTypes()...)
+	}
+
+	return ret
+}
+
 type Package struct {
-	name  string
-	prog  *Program
-	scope *SymbolScope
+	name          string
+	qualifiedName string
+	prog          *Program
+	scope         *SymbolScope
 
 	varinit     *Function
 	initFuncs   []*Function
@@ -109,9 +152,10 @@ type Package struct {
 
 func NewPackage(prog *Program, name string) *Package {
 	pkg := &Package{
-		name:  name,
-		prog:  prog,
-		scope: newScope(prog.root, name),
+		name:          name,
+		qualifiedName: name, // TODO: compute by path/w/e
+		prog:          prog,
+		scope:         newScope(prog.root, name),
 	}
 	pkg.scope.pkg = pkg
 
@@ -120,6 +164,10 @@ func NewPackage(prog *Program, name string) *Package {
 
 func (p *Package) Name() string {
 	return p.name
+}
+
+func (p *Package) QualifiedName() string {
+	return p.qualifiedName
 }
 
 func (p *Package) Functions() []*Function {
@@ -159,6 +207,10 @@ func (p *Package) Globals() []*Variable {
 
 func (p *Package) Constants() []*Constant {
 	return p.scope.Constants()
+}
+
+func (p *Package) DerivedTypes() []*DerivedType {
+	return p.scope.DerivedTypes()
 }
 
 func (p *Package) Imports() *Package {

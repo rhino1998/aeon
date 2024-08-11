@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"fmt"
+
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
@@ -8,6 +10,7 @@ type Function struct {
 	name string
 	pkg  *Package
 
+	receiver   *Variable
 	parameters []*Variable
 	ret        Type
 	body       []Statement
@@ -41,7 +44,15 @@ func (f *Function) Package() *Package {
 }
 
 func (f *Function) Name() string {
-	return f.name
+	if f.receiver.Type() == VoidType {
+		return f.name
+	}
+
+	return fmt.Sprintf("%s.%s", f.receiver.Type(), f.name)
+}
+
+func (f *Function) QualifiedName() string {
+	return fmt.Sprintf("%s.%s", f.pkg.QualifiedName(), f.Name())
 }
 
 func (f *Function) Type() Type {
@@ -50,10 +61,20 @@ func (f *Function) Type() Type {
 		paramTypes = append(paramTypes, param.Type())
 	}
 
+	var receiverTyp Type = VoidType
+	if f.receiver != nil {
+		receiverTyp = f.receiver.Type()
+	}
+
 	return &FunctionType{
+		Receiver:   receiverTyp,
 		Parameters: paramTypes,
 		Return:     f.ret,
 	}
+}
+
+func (f *Function) Receiver() *Variable {
+	return f.receiver
 }
 
 func (f *Function) Parameters() []*Variable {
@@ -106,6 +127,8 @@ func (e *CallExpression) Type() Type {
 type ReturnStatement struct {
 	Expression Expression
 
+	Function *Function
+
 	parser.Position
 }
 
@@ -127,6 +150,7 @@ func (f *ExternFunction) Type() Type {
 	}
 
 	return &FunctionType{
+		Receiver:   VoidType,
 		Parameters: paramTypes,
 		Return:     f.ret,
 	}
@@ -161,4 +185,31 @@ func (*CompilerFunctionReferenceExpression) Type() Type {
 
 func (*CompilerFunctionReferenceExpression) WrapError(err error) error {
 	return err
+}
+
+type BoundMethodExpression struct {
+	Receiver Expression
+
+	Function *Function
+
+	parser.Position
+}
+
+func (e *BoundMethodExpression) Type() Type {
+	ftype := e.Function.Type().(*FunctionType)
+	ftype.Receiver = VoidType
+
+	return ftype
+}
+
+type MethodExpression struct {
+	Receiver Expression
+
+	Function *Function
+
+	parser.Position
+}
+
+func (e *MethodExpression) Type() Type {
+	return e.Function.Type().(*FunctionType)
 }

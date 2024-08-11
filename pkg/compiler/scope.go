@@ -163,6 +163,22 @@ func (s *SymbolScope) Constants() []*Constant {
 	return funcs
 }
 
+func (s *SymbolScope) DerivedTypes() []*DerivedType {
+	var funcs []*DerivedType
+	for _, val := range s.scope {
+		switch val := val.(type) {
+		case *DerivedType:
+			funcs = append(funcs, val)
+		}
+	}
+
+	slices.SortFunc(funcs, func(a, b *DerivedType) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return funcs
+}
+
 func (s *SymbolScope) get(name string) (Symbol, bool) {
 	if s == nil {
 		var v Symbol
@@ -188,6 +204,10 @@ func (s *SymbolScope) put(symbol Symbol) error {
 	s.scope[name] = symbol
 
 	return nil
+}
+
+func (s *SymbolScope) next() *SymbolScope {
+	return newScope(s, "")
 }
 
 func (s *SymbolScope) getType(name string) (Type, bool) {
@@ -256,6 +276,7 @@ const (
 	LocationKindArg
 	LocationKindParam
 	LocationKindHeap
+	LocationKindVTable
 )
 
 type Location struct {
@@ -342,6 +363,27 @@ func (l *Location) IndexSlice(index *Location) (*Location, error) {
 	}, nil
 }
 
+func (l *Location) IndexFieldConst(name string) (*Location, error) {
+	typ := BaseType(l.Type).(*StructType)
+
+	field, ok := typ.GetField(name)
+	if !ok {
+		return nil, fmt.Errorf("struct field %q does not exist", name)
+	}
+
+	offset, err := typ.FieldOffset(name)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Location{
+		Kind:    l.Kind,
+		Name:    fmt.Sprintf("%s.%s", l.Name, name),
+		Type:    field.Type,
+		Operand: l.Operand.AddressOf().ConstOffset(offset).Dereference(),
+	}, nil
+}
+
 type ValueScope struct {
 	parent *ValueScope
 
@@ -389,7 +431,7 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 func (vs *ValueScope) newFunctionRef(fun *Function) *Location {
 	return &Location{
 		Kind:    LocationKindConstant,
-		Name:    fun.Name(),
+		Name:    fun.QualifiedName(),
 		Type:    TypeKind(KindInt),
 		Operand: fun.AddrOp(),
 	}

@@ -26,7 +26,12 @@ func (e *DotExpression) Type() Type {
 func resolveDotExpressionType(e *DotExpression, typ Type) Type {
 	switch typ := typ.(type) {
 	case *StructType:
-		return UnknownType
+		field, ok := typ.GetField(e.Key)
+		if !ok {
+			return UnknownType
+		}
+
+		return field.Type
 	case *TupleType:
 		index, err := strconv.Atoi(e.Key)
 		if err != nil {
@@ -38,6 +43,13 @@ func resolveDotExpressionType(e *DotExpression, typ Type) Type {
 		}
 
 		return typ.Elems()[index]
+	case *DerivedType:
+		ftype, ok := typ.BoundMethodType(e.Key)
+		if !ok {
+			return resolveDotExpressionType(e, typ.Underlying())
+		}
+
+		return ftype
 	case *PointerType:
 		return resolveDotExpressionType(e, typ.Pointee())
 	default:
@@ -56,7 +68,7 @@ func (e *IndexExpression) Type() Type {
 	return resolveIndexExpressionType(e, BaseType(e.Receiver.Type()))
 }
 
-func resolveIndexExpressionType(e *IndexExpression, typ Type) Type {
+func resolveIndexExpressionType(_ *IndexExpression, typ Type) Type {
 	switch typ := typ.(type) {
 	case *MapType:
 		return typ.Value()
@@ -83,4 +95,36 @@ type ExpressionStatement struct {
 	Expression Expression
 
 	parser.Position
+}
+
+type TupleExpression struct {
+	Elems []Expression
+
+	parser.Position
+}
+
+func (e *TupleExpression) Type() Type {
+	elemTyps := make([]Type, 0, len(e.Elems))
+	for _, elem := range e.Elems {
+		elemTyps = append(elemTyps, elem.Type())
+	}
+
+	return &TupleType{
+		elems: elemTyps,
+	}
+}
+
+type ArrayExpression struct {
+	Length   *Literal[Int] // TODO: enforce known at compile time
+	ElemType Type
+	Elems    []Expression
+
+	parser.Position
+}
+
+func (e *ArrayExpression) Type() Type {
+	return &ArrayType{
+		length: int(e.Length.value),
+		elem:   e.ElemType,
+	}
 }

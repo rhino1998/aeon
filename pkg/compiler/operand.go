@@ -5,11 +5,13 @@ import "fmt"
 type OperandKind int
 
 const (
-	OperandKindImmediate OperandKind = 0
-	OperandKindRegister  OperandKind = 1
-	OperandKindIndirect  OperandKind = 2
-	OperandKindOffset    OperandKind = 3
-	OperandKindStride    OperandKind = 4
+	OperandKindUnknown OperandKind = iota
+	OperandKindImmediate
+	OperandKindRegister
+	OperandKindIndirect
+	OperandKindOffset
+	OperandKindStride
+	OperandKindVTableLookup
 )
 
 func (s OperandKind) MarshalXenon() ([]byte, error) {
@@ -24,9 +26,16 @@ func (s OperandKind) MarshalXenon() ([]byte, error) {
 		return []byte("+"), nil
 	case OperandKindStride:
 		return []byte("*"), nil
+	case OperandKindVTableLookup:
+		return []byte("V"), nil
 	default:
-		return nil, fmt.Errorf("invalid value source %x", s)
+		return nil, fmt.Errorf("invalid operand kind %x", s)
 	}
+}
+
+type VTableLookup struct {
+	Type   *Operand `xc:"t"`
+	Method *Operand `xc:"m"`
 }
 
 type Indirect struct {
@@ -58,6 +67,26 @@ func (o Stride) String() string {
 type Operand struct {
 	Kind  OperandKind `xc:"k"`
 	Value any         `xc:"v"`
+}
+
+func NewVTableLookup(typ, method *Operand) *Operand {
+	return &Operand{
+		Kind: OperandKindVTableLookup,
+		Value: VTableLookup{
+			Type:   typ,
+			Method: method,
+		},
+	}
+}
+
+func (o *Operand) VTableLookup(method *Operand) *Operand {
+	return &Operand{
+		Kind: OperandKindVTableLookup,
+		Value: VTableLookup{
+			Type:   o,
+			Method: method,
+		},
+	}
 }
 
 func (o *Operand) OffsetReference(offset Size) *Operand {

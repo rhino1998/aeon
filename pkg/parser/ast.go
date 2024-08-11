@@ -149,6 +149,19 @@ type FunctionDeclaration struct {
 	Position
 }
 
+type MethodDeclaration struct {
+	baseDeclaration
+
+	Receiver   Parameter
+	Name       Identifier
+	Parameters []Parameter
+	Return     Type
+
+	Body []Statement
+
+	Position
+}
+
 type ExternFunctionDeclaration struct {
 	baseDeclaration
 
@@ -423,6 +436,8 @@ type ParenthesizedExpr struct {
 }
 
 type Directive struct {
+	baseDeclaration
+
 	Name        Identifier
 	Args        []any
 	Declaration Declaration
@@ -430,4 +445,33 @@ type Directive struct {
 	Position
 }
 
-func (d Directive) declaration() {}
+type TupleExpr struct {
+	baseExpr
+
+	Elems []Expr
+
+	Position
+}
+
+type ArrayExpr struct {
+	baseExpr
+
+	Length IntLiteral
+	Type   Type
+	Elems  []Expr
+
+	Position
+}
+
+type StructType struct {
+	baseType
+
+	Fields []StructField
+
+	Position
+}
+
+type StructField struct {
+	Name Identifier
+	Type Type
+}

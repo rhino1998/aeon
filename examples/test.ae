@@ -4,7 +4,7 @@ type intIntMap map[int]int
 
 type A *B
 
-type B int
+type B [3]int
 
 extern func print(string)
 
@@ -12,20 +12,21 @@ extern func print3(a string, b string, c string)
 
 extern func add(a int, b int) int
 
-var x = "hello"
+type C struct {
+	A string
+	B int
+}
 
-var y (string,int)
-
-var z [3]string
+func (c C) C() string {
+	c.B = "9"
+	return c.B
+}
 
 #init
 func whatever() {
-	z[0] = "hello"
-  print(
-		z[0],
-	)
-
-	y.1 = 5 +
-	3
+	var g C
+	print(g.A)
+	print(g.C())
+	print(g.A)
   return
 }

@@ -53,7 +53,7 @@ File <- pkg:Package __ decls:(Declaration)* EOF {
   }, nil
 }
 
-Keyword <- "map" / "func" / "if" / "else" / "for" / "package" / "var" / "extern" / "const"
+Keyword <- "map" / "func" / "if" / "else" / "for" / "package" / "var" / "extern" / "const" / "struct"
 
 Package <- "package" _ name:Identifier {
   return Package{
@@ -61,7 +61,7 @@ Package <- "package" _ name:Identifier {
   }, nil
 }
 
-Declaration <- _ decl:(Directive / FunctionDeclaration / ExternFuncDeclaration / TypeDeclaration / VarDeclaration / ConstDeclaration) __ {
+Declaration <- _ decl:(Directive / MethodDeclaration / FunctionDeclaration / ExternFuncDeclaration / TypeDeclaration / VarDeclaration / ConstDeclaration) __ {
   return decl, nil
 }
 
@@ -106,7 +106,7 @@ ConstDeclaration <- "const" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr
   }, nil
 }
 
-Type <- Identifier / PointerType / MapType / ArrayType / SliceType / TupleType
+Type <- Identifier / PointerType / MapType / ArrayType / SliceType / TupleType / StructType
 
 PointerType <- '*' pointee:Type {
   return PointerType{
@@ -148,6 +148,30 @@ TupleTypeList <- _ elem:Type _ rest:TupleTypeListComma? {
 TupleTypeListComma <- ',' rest:TupleTypeList {
   return rest, nil
 }
+
+StructType <- "struct" _ '{' elems:StructFieldList? __ '}' {
+	return StructType{
+		Fields: maybeSlice[StructField](elems),
+
+		Position: pos(c),
+	}, nil
+}
+
+StructField <- name:Identifier _ typ:Type {
+	return StructField{
+		Name: name.(Identifier),
+		Type: typ.(Type),
+	}, nil
+}
+
+StructFieldList <- __ field:StructField _ rest:StructFieldListComma? {
+	return append([]StructField{field.(StructField)}, maybeSlice[StructField](rest)...), nil
+}
+
+StructFieldListComma <- nl rest:StructFieldList {
+	return rest, nil
+}
+
 
 TupleKey <- [0-9]+ {
   return Identifier(c.text), nil
@@ -320,6 +344,20 @@ FunctionDeclaration <- "func" _ name:Identifier '(' params:ParameterList? ')' _ 
     Parameters: maybeSlice[Parameter](params),
     Return: maybe[Type](ret),
     Body: maybeSlice[Statement](body),
+
+    Position: pos(c),
+  }, nil
+}
+
+MethodDeclaration <- "func" _ '(' _ receiver:Parameter _ ')' _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:StatementList? '}' {
+  return MethodDeclaration{
+    Name: name.(Identifier),
+		Receiver: receiver.(Parameter),
+    Parameters: maybeSlice[Parameter](params),
+    Return: maybe[Type](ret),
+    Body: maybeSlice[Statement](body),
+
+    Position: pos(c),
   }, nil
 }
 
@@ -368,7 +406,7 @@ ParenthesizedExpr <- '(' _ expr:Expr _ ')' {
   }, nil
 }
 
-IntLiteral <- '-' ? ( [0-9]+ / ("0x" [0-9a-f]+) / ("0o" [0-7]) / ("0b" [0-1])) {
+IntLiteral <- '-'? ( [0-9]+ / ("0x" [0-9a-f]+) / ("0o" [0-7]) / ("0b" [0-1])) {
   i, err := strconv.ParseInt(string(c.text), 0, 64)
   if err != nil {
     return 0, err
@@ -381,7 +419,7 @@ IntLiteral <- '-' ? ( [0-9]+ / ("0x" [0-9a-f]+) / ("0o" [0-7]) / ("0b" [0-1])) {
   }, nil
 }
 
-FloatLiteral <- '-' ? ( [0-9]+.[0-9]+) {
+FloatLiteral <- '-' ? ( [0-9]+'.'[0-9]+) {
   f, err := strconv.ParseFloat(string(c.text), 64)
   if err != nil {
     return 0, err
@@ -426,7 +464,7 @@ IdentifierExpr <- ident:Identifier {
 
 MaybeCallExpr <- CallExpr / IdentifierExpr
 
-CallExpr <- exp:MaybeCallExpr '(' __ args:CallArgumentList? __ ','? __ ')' {
+CallExpr <- exp:TermExpr '(' __ args:CallArgumentList? __ ','? __ ')' {
   call := CallExpr{
     Expr: exp.(Expr),
 
@@ -468,7 +506,7 @@ IndexExpr <- expr:Expr _ '[' _ index:Expr _ ']' {
 
 Expr <- MaybeOrExpr
 
-TermExpr <- UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / MaybeCallExpr
+TermExpr <- UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / MaybeCallExpr / TupleExpr / ArrayExpr
 
 MaybeExpExpr <- ExpExpr / TermExpr
 
@@ -549,6 +587,52 @@ UnaryExpr <- op:("-" / "+" / "!" / "^" / "*" / "&") exp:Expr {
 
     Position: pos(c),
   }, nil
+}
+
+TupleExpr <- '(' __ args:TupleArgumentList? __ ','? __ ')' {
+  tuple := TupleExpr{
+		Elems: maybeSlice[Expr](args),
+
+    Position: pos(c),
+  }
+
+  return tuple, nil
+}
+
+TupleArgumentList <- _ exp:Expr _ rest:TupleArgumentListComma? {
+  return append([]Expr{exp.(Expr)}, maybeSlice[Expr](rest)...), nil
+}
+
+TupleArgumentListComma <- ',' __ rest:TupleArgumentList {
+  return rest, nil
+}
+
+ArrayExpr <- '[' __ length:(IntLiteral / "...") __ ']' typ:Type '{' __ args:ArrayArgumentList? __ ','? __ '}' {
+	argsSlice := maybeSlice[Expr](args)
+
+	lengthLiteral, ok := length.(IntLiteral)
+	if !ok {
+		lengthLiteral = IntLiteral{
+			Value: int64(len(argsSlice)),
+		}
+	}
+  arr := ArrayExpr{
+		Length: lengthLiteral,
+		Type: typ.(Type),
+		Elems: argsSlice,
+
+    Position: pos(c),
+  }
+
+  return arr, nil
+}
+
+ArrayArgumentList <- _ exp:Expr _ rest:ArrayArgumentListComma? {
+  return append([]Expr{exp.(Expr)}, maybeSlice[Expr](rest)...), nil
+}
+
+ArrayArgumentListComma <- ',' __ rest:ArrayArgumentList {
+  return rest, nil
 }
 
 EscapedChar <- [\x00-\x1f"\\]

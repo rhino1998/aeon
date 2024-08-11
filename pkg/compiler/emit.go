@@ -69,6 +69,17 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 		pkg.bytecode.Mount(fun)
 	}
 
+	for _, drv := range pkg.DerivedTypes() {
+		for _, met := range drv.MethodFunctions() {
+			err := met.compileBytecode(ctx, scope)
+			if err != nil {
+				return err
+			}
+
+			pkg.bytecode.Mount(met)
+		}
+	}
+
 	for i, bc := range pkg.bytecode {
 		log.Printf("%02x: %v", i, bc)
 	}
@@ -83,6 +94,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 
 func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Function, error) {
 	f := newFunction(VarInitFuncName, pkg)
+	f.receiver = &Variable{typ: VoidType}
 
 	scope = scope.sub(pkg.scope)
 
@@ -146,10 +158,11 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	}
 
 	for _, fun := range pkg.Functions() {
-		ptr := scope.newGlobal(fun.Name(), funcType)
+		fName := fun.Name()
+		ptr := scope.newGlobal(fName, funcType)
 		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
 			NewLiteral(Int(1)),
-			NewLiteral(String(fun.Name())),
+			NewLiteral(String(fun.pkg.qualifiedName)),
 			NewLiteral(Int(0)),
 			&CompilerFunctionReferenceExpression{fun},
 		}, scope, ptr)
@@ -158,6 +171,24 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		}
 
 		f.bytecode.Add(hdrBC...)
+	}
+
+	for _, drv := range pkg.DerivedTypes() {
+		for _, met := range drv.MethodFunctions() {
+			ptr := scope.newGlobal(met.Name(), funcType)
+			hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+				NewLiteral(Int(1)),
+				NewLiteral(String(met.QualifiedName())),
+				NewLiteral(Int(0)),
+				&CompilerFunctionReferenceExpression{met},
+			}, scope, ptr)
+			if err != nil {
+				return nil, err
+			}
+
+			f.bytecode.Add(hdrBC...)
+
+		}
 	}
 
 	f.bytecode.Add(Return{})
@@ -173,7 +204,7 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 	scope = scope.sub(f.symbols)
 
 	f.bytecode.Add(scope.Push("__funcname", scope.newImmediate(
-		String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
+		String(fmt.Sprintf("func %s", f.QualifiedName())),
 	)))
 
 	numLocals := ImmediateOperand(Int(0))
@@ -186,12 +217,16 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 	})
 
 	var offset Size = 0
+	if f.Receiver().Name() != "" {
+		scope.newParam(f.Receiver().Name(), -Size(f.pkg.prog.FrameSize()+offset), f.Receiver().Type())
+	}
+	offset += f.Receiver().Type().Size()
+
 	for _, param := range f.Parameters() {
-		if param.Name() == "" {
-			continue
+		if param.Name() != "" {
+			scope.newParam(param.Name(), -Size(f.pkg.prog.FrameSize()+offset), param.Type())
 		}
 
-		scope.newParam(param.Name(), -Size(f.pkg.prog.FrameSize()+offset), param.Type())
 		offset += param.Type().Size()
 	}
 
@@ -329,8 +364,12 @@ func (prog *Program) compileBCLHSDotExpression(ctx context.Context, expr *DotExp
 
 		return nil, elemLoc, nil
 	case *StructType:
-		// TODO:
-		return nil, nil, expr.WrapError(fmt.Errorf("struct type not yet implemented"))
+		fieldLoc, err := receiverLoc.IndexFieldConst(expr.Key)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		return nil, fieldLoc, nil
 	case *PointerType:
 		receiverLocValue, err := receiverLoc.Dereference()
 		if err != nil {
@@ -352,12 +391,12 @@ func (prog *Program) compileBCLHSIndexExpression(ctx context.Context, expr *Inde
 		}
 
 		return nil, elemLoc, nil
-	case *StructType:
-		// TODO:
-		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
-	case *MapType:
+	case *SliceType:
 		// TODO:
 		return nil, nil, expr.WrapError(fmt.Errorf("slice type not yet implemented"))
+	case *MapType:
+		// TODO:
+		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
 	}
@@ -371,7 +410,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		var initBC []Bytecode
 		var rhsLoc *Location
 
-		local := scope.newLocal(stmt.Variable.Name(), stmt.Expression.Type())
+		local := scope.newLocal(stmt.Variable.Name(), stmt.Type)
 
 		if stmt.Expression != nil {
 			initBC, rhsLoc, err = prog.compileBCExpression(ctx, stmt.Expression, scope, local)
@@ -483,6 +522,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 	case *ReturnStatement:
 		var offset Size
 		offset += scope.function.Return().Size()
+		offset += scope.function.Receiver().Type().Size()
 		for _, param := range scope.function.Parameters() {
 			offset += param.Type().Size()
 		}
@@ -660,10 +700,32 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 		default:
 			return nil, nil, pos.WrapError(fmt.Errorf("unhandled zero value for type %s", typ))
 		}
-
 		return nil, scope.newImmediate(imm), nil
 	case *PointerType:
 		return nil, scope.newImmediate(Int(0)), nil
+	case *StructType:
+		var offset Size
+		for _, field := range typ.Fields() {
+			fieldDst, err := dst.IndexFieldConst(field.Name)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+
+			fieldBC, fieldLoc, err := p.compileBCZeroValue(ctx, pos, field.Type, scope, fieldDst)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			offset += field.Type.Size()
+
+			bc.Add(fieldBC...)
+
+			if fieldLoc != fieldDst {
+				bc.Mov(fieldDst, fieldLoc)
+			}
+		}
+
+		return bc, dst, nil
 	case *ArrayType:
 		elem := typ.Elem()
 
@@ -674,7 +736,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 				return nil, nil, pos.WrapError(err)
 			}
 
-			elemBC, elemLoc, err := p.compileBCZeroValue(ctx, pos, elem, scope, dst)
+			elemBC, elemLoc, err := p.compileBCZeroValue(ctx, pos, elem, scope, elemDst)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -812,8 +874,25 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		case *FunctionType:
 			var offset Size
 
+			callTmp := callScope.allocTemp(expr.Function.Type())
+			defer callScope.deallocTemp(callTmp)
+
 			retVar := callScope.newArg("__return", offset, ftype.Return)
 			offset += ftype.Return.Size()
+
+			recvVar := callScope.newArg("__recv", offset, ftype.Receiver)
+			offset += ftype.Receiver.Size()
+
+			callBC, callLoc, err := prog.compileBCCallReceiverExpression(ctx, expr.Function, callScope, recvVar, callTmp)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			bc.Add(callBC...)
+
+			if callLoc != callTmp {
+				bc.Mov(callTmp, callLoc)
+			}
 
 			for i, arg := range expr.Args {
 				argVar := callScope.newArg(fmt.Sprintf("%d", i), offset, ftype.Parameters[i])
@@ -827,22 +906,9 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 				bc.Add(argBC...)
 
 				if argVar != argLoc {
-					bc.Mov(
-						argVar,
-						argLoc,
-					)
+					bc.Mov(argVar, argLoc)
 				}
 			}
-
-			callReg := callScope.allocTemp(expr.Function.Type())
-			defer callScope.deallocTemp(callReg)
-
-			callBC, callLoc, err := prog.compileBCExpression(ctx, expr.Function, callScope, callReg)
-			if err != nil {
-				return nil, nil, err
-			}
-
-			bc.Add(callBC...)
 
 			bc.Add(Call{
 				Args: offset,
@@ -891,8 +957,76 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		bc.Add(indexBC...)
 
 		return prog.compileBCIndexExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
+	case *TupleExpression:
+		for i, elem := range expr.Elems {
+			dst, err := dst.IndexTuple(i)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			elemBC, elemLoc, err := prog.compileBCExpression(ctx, elem, scope, dst)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			bc.Add(elemBC...)
+
+			if dst != elemLoc {
+				bc.Mov(dst, elemLoc)
+			}
+		}
+
+		return bc, dst, nil
+	case *ArrayExpression:
+		for i, elem := range expr.Elems {
+			dst, err := dst.IndexArrayConst(i)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			elemBC, elemLoc, err := prog.compileBCExpression(ctx, elem, scope, dst)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			bc.Add(elemBC...)
+
+			if dst != elemLoc {
+				bc.Mov(dst, elemLoc)
+			}
+		}
+
+		return bc, dst, nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
+	}
+}
+
+func (prog *Program) compileBCCallReceiverExpression(ctx context.Context, expr Expression, scope *ValueScope, recvDst, callDst *Location) (BytecodeSnippet, *Location, error) {
+	var bc BytecodeSnippet
+	switch expr := expr.(type) {
+	case *MethodExpression:
+		recvBC, recvLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, recvDst)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(recvBC...)
+
+		if recvLoc != recvDst {
+			bc.Mov(recvDst, recvLoc)
+		}
+
+		callLoc, ok := scope.Get(expr.Function.Name())
+		if !ok {
+			return nil, nil, expr.WrapError(fmt.Errorf("could not resolve location for method %q", expr.Function.Name()))
+		}
+
+		return bc, callLoc, nil
+	case *ParenthesizedExpression:
+		return prog.compileBCCallReceiverExpression(ctx, expr.Expression, scope, recvDst, callDst)
+	default:
+		return prog.compileBCExpression(ctx, expr, scope, callDst)
 	}
 }
 
@@ -917,6 +1051,13 @@ func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpres
 		}
 
 		return prog.compileBCDotExpression(ctx, expr, typ.Pointee(), scope, receiverLocValue)
+	case *StructType:
+		fieldLoc, err := receiverLoc.IndexFieldConst(expr.Key)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		return nil, fieldLoc, nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
 	}

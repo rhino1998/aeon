@@ -32,7 +32,7 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 		"print3": {
 			ArgSize: 3,
 			Func: func(s []any) any {
-				log.Println(s[0])
+				log.Println(s...)
 				return nil
 			},
 		},
@@ -359,7 +359,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 		default:
 		}
 
-		if r.sp() > 0x1000 {
+		if r.sp() > 0x50 {
 			return fmt.Errorf("stack overflow")
 		}
 
