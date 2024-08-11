@@ -166,6 +166,8 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 	v := &Variable{
 		name:   string(decl.Name),
 		global: true,
+
+		Position: decl.Position,
 	}
 	if decl.Type != nil {
 		typ, err := c.compileTypeReference(scope, *decl.Type)
@@ -204,6 +206,8 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl parser.ConstDeclaration) (*Constant, error) {
 	v := &Constant{
 		name: string(decl.Name),
+
+		Position: decl.Position,
 	}
 	if decl.Type != nil {
 		typ, err := c.compileTypeReference(scope, *decl.Type)
@@ -289,6 +293,16 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 
 		return &TupleType{
 			elems: elems,
+		}, nil
+	case parser.ArrayType:
+		elem, err := c.compileTypeReference(scope, typ.Element)
+		if err != nil {
+			return nil, err
+		}
+
+		return &ArrayType{
+			length: int(typ.Length.Value),
+			elem:   elem,
 		}, nil
 	default:
 		return nil, fmt.Errorf("unhandled type reference %q", typ)
@@ -684,10 +698,10 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 		}
 
 		var exprs []Expression
-		for i, arg := range expr.Args {
+		for _, arg := range expr.Args {
 			argExpr, err := c.compileExpression(scope, arg)
 			if err != nil {
-				return nil, fmt.Errorf("failed to compile argument %d expression: %w", i, err)
+				return nil, err
 			}
 
 			exprs = append(exprs, argExpr)
@@ -704,12 +718,29 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.DotExpr:
 		receiver, err := c.compileExpression(scope, expr.Expr)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile dot expression: %w", err)
+			return nil, err
 		}
 
 		return &DotExpression{
 			Receiver: receiver,
 			Key:      string(expr.Key),
+
+			Position: expr.Position,
+		}, nil
+	case parser.IndexExpr:
+		receiver, err := c.compileExpression(scope, expr.Expr)
+		if err != nil {
+			return nil, err
+		}
+
+		index, err := c.compileExpression(scope, expr.Index)
+		if err != nil {
+			return nil, err
+		}
+
+		return &IndexExpression{
+			Receiver: receiver,
+			Index:    index,
 
 			Position: expr.Position,
 		}, nil

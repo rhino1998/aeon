@@ -9,6 +9,7 @@ const (
 	OperandKindRegister  OperandKind = 1
 	OperandKindIndirect  OperandKind = 2
 	OperandKindOffset    OperandKind = 3
+	OperandKindStride    OperandKind = 4
 )
 
 func (s OperandKind) MarshalXenon() ([]byte, error) {
@@ -18,9 +19,11 @@ func (s OperandKind) MarshalXenon() ([]byte, error) {
 	case OperandKindRegister:
 		return []byte("R"), nil
 	case OperandKindIndirect:
-		return []byte("*"), nil
+		return []byte("@"), nil
 	case OperandKindOffset:
 		return []byte("+"), nil
+	case OperandKindStride:
+		return []byte("*"), nil
 	default:
 		return nil, fmt.Errorf("invalid value source %x", s)
 	}
@@ -40,7 +43,16 @@ type Offset struct {
 }
 
 func (o Offset) String() string {
-	return fmt.Sprintf("%s + %s", o.A, o.B)
+	return fmt.Sprintf("(%s + %s)", o.A, o.B)
+}
+
+type Stride struct {
+	A *Operand `xc:"a"`
+	B *Operand `xc:"b"`
+}
+
+func (o Stride) String() string {
+	return fmt.Sprintf("(%s*%s)", o.A, o.B)
 }
 
 type Operand struct {
@@ -68,6 +80,16 @@ func (o *Operand) Offset(offset *Operand) *Operand {
 	return &Operand{
 		Kind: OperandKindOffset,
 		Value: Offset{
+			A: o,
+			B: offset,
+		},
+	}
+}
+
+func (o *Operand) Stride(offset *Operand) *Operand {
+	return &Operand{
+		Kind: OperandKindStride,
+		Value: Stride{
 			A: o,
 			B: offset,
 		},

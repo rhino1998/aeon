@@ -27,8 +27,6 @@ func resolveDotExpressionType(e *DotExpression, typ Type) Type {
 	switch typ := typ.(type) {
 	case *StructType:
 		return UnknownType
-	case *MapType:
-		return typ.Value()
 	case *TupleType:
 		index, err := strconv.Atoi(e.Key)
 		if err != nil {
@@ -45,7 +43,30 @@ func resolveDotExpressionType(e *DotExpression, typ Type) Type {
 	default:
 		return UnknownType
 	}
+}
 
+type IndexExpression struct {
+	Receiver Expression
+	Index    Expression
+
+	parser.Position
+}
+
+func (e *IndexExpression) Type() Type {
+	return resolveIndexExpressionType(e, BaseType(e.Receiver.Type()))
+}
+
+func resolveIndexExpressionType(e *IndexExpression, typ Type) Type {
+	switch typ := typ.(type) {
+	case *MapType:
+		return typ.Value()
+	case *SliceType:
+		return typ.Elem()
+	case *ArrayType:
+		return typ.Elem()
+	default:
+		return UnknownType
+	}
 }
 
 type ParenthesizedExpression struct {

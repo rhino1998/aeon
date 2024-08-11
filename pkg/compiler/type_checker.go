@@ -387,6 +387,15 @@ func (c *Compiler) resolveLHSTypes(scope *SymbolScope, expr Expression) (_ Expre
 		expr.Receiver = receiver
 
 		return c.resolveLHSDotExpressionReceiverTypes(expr, expr.Receiver.Type())
+	case *IndexExpression:
+		receiver, err := c.resolveExpressionTypes(scope, expr.Receiver, nil)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		expr.Receiver = receiver
+
+		return c.resolveLHSIndexExpressionReceiverTypes(scope, expr, expr.Receiver.Type())
 	default:
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to expression type: %T", expr))
 	}
@@ -417,6 +426,53 @@ func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ
 		return c.resolveLHSDotExpressionReceiverTypes(expr, typ.Pointee())
 	default:
 		return expr, expr.WrapError(fmt.Errorf("cannot dot index assign receiver type: %T", expr.Receiver))
+	}
+}
+
+func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(scope *SymbolScope, expr *IndexExpression, typ Type) (_ Expression, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	switch typ := typ.(type) {
+	case *ArrayType:
+		index, err := c.resolveExpressionTypes(scope, expr.Index, nil)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		if index.Type().Kind() != KindInt {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot index type %s with non-integer type %s", typ, index.Type())))
+		}
+
+		expr.Index = index
+
+		return expr, nil
+	case *SliceType:
+		index, err := c.resolveExpressionTypes(scope, expr.Index, nil)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		if index.Type().Kind() != KindInt {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot index type %s with non-integer type %s", typ, index.Type())))
+		}
+
+		expr.Index = index
+
+		return expr, nil
+	case *MapType:
+		index, err := c.resolveExpressionTypes(scope, expr.Index, typ.Key())
+		if err != nil {
+			errs.Add(err)
+		}
+
+		expr.Index = index
+
+		return expr, nil
+	default:
+		return expr, expr.WrapError(fmt.Errorf("cannot index assign receiver type: %T", expr.Receiver))
 	}
 }
 
@@ -716,6 +772,14 @@ func (c *Compiler) resolveExpressionTypes(scope *SymbolScope, expr Expression, b
 		expr.Receiver = receiver
 
 		return c.resolveDotExpressionReceiverTypes(expr, expr.Receiver.Type(), bound)
+	case *IndexExpression:
+		receiver, err := c.resolveExpressionTypes(scope, expr.Receiver, nil)
+		if err != nil {
+			errs.Add(err)
+		}
+		expr.Receiver = receiver
+
+		return c.resolveIndexExpressionReceiverTypes(scope, expr, expr.Receiver.Type(), bound)
 	default:
 		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %T", expr))
 	}
@@ -749,7 +813,54 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 	case *PointerType:
 		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), bound)
 	default:
-		return expr, expr.WrapError(fmt.Errorf("a cannot dot index receiver type %T", typ))
+		return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", typ))
+	}
+}
+
+func (c *Compiler) resolveIndexExpressionReceiverTypes(scope *SymbolScope, expr *IndexExpression, typ Type, bound Type) (_ Expression, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	switch typ := typ.(type) {
+	case *ArrayType:
+		index, err := c.resolveExpressionTypes(scope, expr.Index, nil)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		if index.Type().Kind() != KindInt {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot index type %s with non-integer type %s", typ, index.Type())))
+		}
+
+		expr.Index = index
+
+		return expr, nil
+	case *SliceType:
+		index, err := c.resolveExpressionTypes(scope, expr.Index, nil)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		if index.Type().Kind() != KindInt {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot index type %s with non-integer type %s", typ, index.Type())))
+		}
+
+		expr.Index = index
+
+		return expr, nil
+	case *MapType:
+		index, err := c.resolveExpressionTypes(scope, expr.Index, typ.Key())
+		if err != nil {
+			errs.Add(err)
+		}
+
+		expr.Index = index
+
+		return expr, nil
+	default:
+		return expr, expr.WrapError(fmt.Errorf("cannot index receiver type %T", typ))
 	}
 }
 

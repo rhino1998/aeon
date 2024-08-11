@@ -16,21 +16,11 @@ var x = "hello"
 
 var y (string,int)
 
+var z [3]string
+
 #init
-func init() {
-  print(x)
-  x = "there"
-	y.0 = "test"
-  return
-}
-
-func main() {
-  // test comment
-
-  return
-}
-
-func f(x *string) {
-	*x = "test3"
+func whatever() {
+	z[0] = "hello"
+  print(z[0])
   return
 }

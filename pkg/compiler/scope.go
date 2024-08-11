@@ -301,6 +301,32 @@ func (l *Location) IndexTuple(index int) (*Location, error) {
 	}, nil
 }
 
+func (l *Location) IndexArrayConst(index int) (*Location, error) {
+	typ := BaseType(l.Type).(*ArrayType)
+
+	if index >= typ.Length() {
+		return nil, fmt.Errorf("compile-time array index %d out of bounds", index)
+	}
+
+	return &Location{
+		Kind:    l.Kind,
+		Name:    fmt.Sprintf("%s.%d", l.Name, index),
+		Type:    typ.Elem(),
+		Operand: l.Operand.AddressOf().ConstOffset(typ.Elem().Size() * Size(index)).Dereference(),
+	}, nil
+}
+
+func (l *Location) IndexArray(index *Location) (*Location, error) {
+	typ := BaseType(l.Type).(*ArrayType)
+
+	return &Location{
+		Kind:    l.Kind,
+		Name:    fmt.Sprintf("%s.%d", l.Name, index),
+		Type:    typ.Elem(),
+		Operand: l.Operand.AddressOf().Offset(index.Operand.Stride(ImmediateOperand(Int(typ.Elem().Size())))).Dereference(),
+	}, nil
+}
+
 func (l *Location) IndexSlice(index *Location) (*Location, error) {
 	typ := BaseType(l.Type).(*SliceType)
 

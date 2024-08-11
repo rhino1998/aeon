@@ -111,6 +111,15 @@ type SliceType struct {
 	Position
 }
 
+type ArrayType struct {
+	baseType
+
+	Length  IntLiteral
+	Element Type
+
+	Position
+}
+
 type TupleType struct {
 	baseType
 
@@ -371,6 +380,15 @@ type DotExpr struct {
 
 	Expr Expr
 	Key  Identifier
+
+	Position
+}
+
+type IndexExpr struct {
+	baseExpr
+
+	Expr  Expr
+	Index Expr
 
 	Position
 }

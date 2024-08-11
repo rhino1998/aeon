@@ -65,6 +65,16 @@ func (p *Program) GlobalSize() int {
 }
 
 // TODO: topological sort by import
+func (p *Program) VarInitFunctions() []*Function {
+	var ret []*Function
+	for _, pkg := range p.Packages() {
+		ret = append(ret, pkg.VarInitFunction())
+	}
+
+	return ret
+}
+
+// TODO: topological sort by import
 func (p *Program) InitFunctions() []*Function {
 	var ret []*Function
 	for _, pkg := range p.Packages() {
@@ -141,10 +151,6 @@ func (p *Package) SetAddr(addr Addr) {
 	for _, fun := range p.Functions() {
 		fun.SetAddr(fun.Addr() + addr)
 	}
-
-	if p.varinit != nil {
-		p.varinit.SetAddr(p.varinit.Addr() + addr)
-	}
 }
 
 func (p *Package) Globals() []*Variable {
@@ -157,6 +163,10 @@ func (p *Package) Constants() []*Constant {
 
 func (p *Package) Imports() *Package {
 	return nil
+}
+
+func (p *Package) VarInitFunction() *Function {
+	return p.varinit
 }
 
 func (p *Package) InitFunctions() []*Function {

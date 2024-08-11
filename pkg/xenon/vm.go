@@ -225,6 +225,22 @@ func (r *Runtime) loadOffset(offset compiler.Offset) loadFunc {
 	})
 }
 
+func (r *Runtime) loadStride(stride compiler.Stride) loadFunc {
+	return loadFunc(func() (any, error) {
+		a, err := r.load(stride.A)()
+		if err != nil {
+			return nil, err
+		}
+
+		b, err := r.load(stride.B)()
+		if err != nil {
+			return nil, err
+		}
+
+		return a.(Int) * b.(Int), nil
+	})
+}
+
 func (r *Runtime) loadIndirectWithOffset(indirect *compiler.Operand, offset Size) loadFunc {
 	return loadFunc(func() (any, error) {
 		base, err := r.load(indirect)()
@@ -252,6 +268,8 @@ func (r *Runtime) load(operand *compiler.Operand) loadFunc {
 		return r.loadRegister(operand.Value.(compiler.Register))
 	case compiler.OperandKindOffset:
 		return r.loadOffset(operand.Value.(compiler.Offset))
+	case compiler.OperandKindStride:
+		return r.loadStride(operand.Value.(compiler.Stride))
 	default:
 		return nil
 	}
@@ -294,7 +312,32 @@ func (r *Runtime) store(operand *compiler.Operand) storeFunc {
 	}
 }
 
-func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
+func (r *Runtime) Run(ctx context.Context) error {
+	for _, varinit := range r.prog.VarInitFunctions() {
+		err := r.RunFrom(ctx, varinit.Addr())
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, init := range r.prog.InitFunctions() {
+		err := r.RunFrom(ctx, init.Addr())
+		if err != nil {
+			return err
+		}
+	}
+
+	for _, update := range r.prog.UpdateFunctions() {
+		err := r.RunFrom(ctx, update.Addr())
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 	for reg := range r.registers {
 		r.registers[reg] = Int(0)
 	}
@@ -307,18 +350,6 @@ func (r *Runtime) Run(ctx context.Context, entryPoint string) (err error) {
 	r.push(compiler.Int(0))
 
 	r.setFP(r.sp() - 1)
-
-	parts := strings.Split(entryPoint, ".")
-	pkg, ok := r.prog.Package(parts[0])
-	if !ok {
-		return fmt.Errorf("failed to get entry point package: %s", parts[0])
-	}
-	f, ok := pkg.Function(parts[1])
-	if !ok {
-		return fmt.Errorf("failed to get entry point: %s", entryPoint)
-	}
-
-	pc := f.Addr()
 
 	for {
 		select {

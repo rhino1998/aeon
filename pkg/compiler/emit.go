@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+
+	"github.com/rhino1998/aeon/pkg/parser"
 )
 
 func (prog *Program) compileBytecode(ctx context.Context) error {
@@ -80,7 +82,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 }
 
 func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Function, error) {
-	f := newFunction("varinit", pkg)
+	f := newFunction(VarInitFuncName, pkg)
 
 	scope = scope.sub(pkg.scope)
 
@@ -115,7 +117,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 				})
 			}
 		} else {
-			exprBC, exprLoc, err := pkg.prog.compileBCZeroValue(ctx, global.Type(), scope, ptr)
+			exprBC, exprLoc, err := pkg.prog.compileBCZeroValue(ctx, global.Position, global.Type(), scope, ptr)
 			if err != nil {
 				return nil, err
 			}
@@ -161,6 +163,8 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	f.bytecode.Add(Return{})
 
 	numLocals.Value = Int(*scope.maxLocal)
+
+	pkg.varinit = f
 
 	return f, nil
 }
@@ -245,14 +249,41 @@ func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *V
 
 		bc.Add(receiverBC...)
 
-		indexBC, indexLoc, err := prog.compileBCLHSDotExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc)
+		lhsBC, lhsLoc, err := prog.compileBCLHSDotExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(lhsBC...)
+
+		return bc, lhsLoc, nil
+	case *IndexExpression:
+		receiverTmp := scope.allocTemp(expr.Receiver.Type())
+		defer scope.deallocTemp(receiverTmp)
+		receiverBC, receiverLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(receiverBC...)
+
+		indexTmp := scope.allocTemp(expr.Index.Type())
+		defer scope.deallocTemp(indexTmp)
+		indexBC, indexLoc, err := prog.compileBCExpression(ctx, expr.Index, scope, indexTmp)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		bc.Add(indexBC...)
 
-		return bc, indexLoc, nil
+		lhsBC, lhsLoc, err := prog.compileBCLHSIndexExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(lhsBC...)
+
+		return bc, lhsLoc, nil
 	case *UnaryExpression:
 		switch expr.Operator {
 		case OperatorDereference:
@@ -310,7 +341,26 @@ func (prog *Program) compileBCLHSDotExpression(ctx context.Context, expr *DotExp
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
 	}
+}
 
+func (prog *Program) compileBCLHSIndexExpression(ctx context.Context, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
+	switch BaseType(typ).(type) {
+	case *ArrayType:
+		elemLoc, err := receiverLoc.IndexArray(indexLoc)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		return nil, elemLoc, nil
+	case *StructType:
+		// TODO:
+		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
+	case *MapType:
+		// TODO:
+		return nil, nil, expr.WrapError(fmt.Errorf("slice type not yet implemented"))
+	default:
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+	}
 }
 
 func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, scope *ValueScope) (BytecodeSnippet, error) {
@@ -329,7 +379,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 				return nil, err
 			}
 		} else {
-			initBC, rhsLoc, err = prog.compileBCZeroValue(ctx, stmt.Type, scope, local)
+			initBC, rhsLoc, err = prog.compileBCZeroValue(ctx, stmt.Position, stmt.Type, scope, local)
 			if err != nil {
 				return nil, err
 			}
@@ -592,7 +642,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 	}
 }
 
-func (p *Program) compileBCZeroValue(ctx context.Context, typ Type, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, typ Type, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
 	var bc BytecodeSnippet
 
 	switch typ := BaseType(typ).(type) {
@@ -608,21 +658,46 @@ func (p *Program) compileBCZeroValue(ctx context.Context, typ Type, scope *Value
 		case KindBool:
 			imm = Bool(false)
 		default:
-			return nil, nil, fmt.Errorf("unhandled zero value for type %s", typ)
+			return nil, nil, pos.WrapError(fmt.Errorf("unhandled zero value for type %s", typ))
 		}
 
 		return nil, scope.newImmediate(imm), nil
 	case *PointerType:
 		return nil, scope.newImmediate(Int(0)), nil
+	case *ArrayType:
+		elem := typ.Elem()
+
+		var offset Size
+		for i := range typ.Length() {
+			elemDst, err := dst.IndexArrayConst(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+
+			elemBC, elemLoc, err := p.compileBCZeroValue(ctx, pos, elem, scope, dst)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			offset += elem.Size()
+
+			bc.Add(elemBC...)
+
+			if elemLoc != elemDst {
+				bc.Mov(elemDst, elemLoc)
+			}
+		}
+
+		return bc, dst, nil
 	case *TupleType:
 		var offset Size
 		for i, elem := range typ.Elems() {
 			elemDst, err := dst.IndexTuple(i)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, pos.WrapError(err)
 			}
 
-			elemBC, elemLoc, err := p.compileBCZeroValue(ctx, elem, scope, dst)
+			elemBC, elemLoc, err := p.compileBCZeroValue(ctx, pos, elem, scope, dst)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -638,7 +713,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, typ Type, scope *Value
 
 		return bc, dst, nil
 	default:
-		return nil, nil, fmt.Errorf("unhandled zero value for type %s", typ)
+		return nil, nil, pos.WrapError(fmt.Errorf("unhandled zero value for type %s", typ))
 	}
 }
 
@@ -796,6 +871,26 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		bc.Add(receiverBC...)
 
 		return prog.compileBCDotExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc)
+	case *IndexExpression:
+		receiverTmp := scope.allocTemp(expr.Receiver.Type())
+		defer scope.deallocTemp(receiverTmp)
+		receiverBC, receiverLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(receiverBC...)
+
+		indexTmp := scope.allocTemp(expr.Receiver.Type())
+		defer scope.deallocTemp(indexTmp)
+		indexBC, indexLoc, err := prog.compileBCExpression(ctx, expr.Index, scope, indexTmp)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(indexBC...)
+
+		return prog.compileBCIndexExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
@@ -825,7 +920,26 @@ func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpres
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
 	}
+}
 
+func (prog *Program) compileBCIndexExpression(ctx context.Context, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
+	switch BaseType(typ).(type) {
+	case *ArrayType:
+		elemLoc, err := receiverLoc.IndexArray(indexLoc)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		return nil, elemLoc, nil
+	case *StructType:
+		// TODO:
+		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
+	case *MapType:
+		// TODO:
+		return nil, nil, expr.WrapError(fmt.Errorf("slice type not yet implemented"))
+	default:
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+	}
 }
 
 func (prog *Program) compileBCValuesLiteral(ctx context.Context, exprs []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, error) {

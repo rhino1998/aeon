@@ -48,3 +48,7 @@ func BuiltinValues(regs int, symbols *SymbolScope) *ValueScope {
 
 	return s
 }
+
+const (
+	VarInitFuncName = "__varinit"
+)

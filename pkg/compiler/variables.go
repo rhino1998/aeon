@@ -39,6 +39,8 @@ type Constant struct {
 	name string
 	typ  Type
 	expr Expression
+
+	parser.Position
 }
 
 func (v *Constant) Name() string {

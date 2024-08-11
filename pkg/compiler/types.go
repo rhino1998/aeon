@@ -152,6 +152,8 @@ func IsTypeResolvable(s *SymbolScope, typ Type) bool {
 		return IsTypeResolvable(s, typ.Underlying())
 	case *SliceType:
 		return IsTypeResolvable(s, typ.Elem())
+	case *ArrayType:
+		return IsTypeResolvable(s, typ.Elem())
 	case *MapType:
 		return IsTypeResolvable(s, typ.Key()) && IsTypeResolvable(s, typ.Value())
 	case *TupleType:
@@ -239,6 +241,7 @@ const (
 	KindStruct
 	KindTuple
 	KindSlice
+	KindArray
 	KindFunction
 	KindInterface
 	KindTypeConversion
@@ -263,6 +266,10 @@ func (k Kind) String() string {
 	case KindTuple:
 		return "tuple"
 	case KindSlice:
+		return "slice"
+	case KindArray:
+		return "array"
+	case KindFunction:
 		return "function"
 	case KindInterface:
 		return "interface"
@@ -468,6 +475,19 @@ var sliceHeader = NewTupleType(
 	IntType,
 	NewPointerType(VoidType),
 )
+
+type ArrayType struct {
+	length int
+	elem   Type
+}
+
+func (t ArrayType) Kind() Kind { return KindArray }
+
+func (t ArrayType) String() string { return fmt.Sprintf("[%d]%s", t.length, t.elem.String()) }
+
+func (t ArrayType) Elem() Type  { return t.elem }
+func (t ArrayType) Length() int { return t.length }
+func (t ArrayType) Size() Size  { return t.elem.Size() * Size(t.length) }
 
 type TupleType struct {
 	elems []Type

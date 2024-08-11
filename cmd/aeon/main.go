@@ -207,17 +207,7 @@ func main() {
 						return err
 					}
 
-					err = runtime.Run(ctx, "main.varinit")
-					if err != nil {
-						return err
-					}
-
-					err = runtime.Run(ctx, "main.init")
-					if err != nil {
-						return err
-					}
-
-					err = runtime.Run(ctx, "main.main")
+					err = runtime.Run(ctx)
 					if err != nil {
 						return err
 					}

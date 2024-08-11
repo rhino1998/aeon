@@ -106,18 +106,39 @@ ConstDeclaration <- "const" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr
   }, nil
 }
 
-Type <- Identifier / PointerType / MapType / SliceType / TupleType
+Type <- Identifier / PointerType / MapType / ArrayType / SliceType / TupleType
 
 PointerType <- '*' pointee:Type {
-  return PointerType{Pointee: pointee.(Type)}, nil
+  return PointerType{
+		Pointee: pointee.(Type),
+
+    Position: pos(c),
+	}, nil
 }
 
 SliceType <- '[' _ ']' element:Type {
-  return SliceType{Element: element.(Type)}, nil
+  return SliceType{
+		Element: element.(Type),
+
+    Position: pos(c),
+	}, nil
+}
+
+ArrayType <- '[' _ length:(IntLiteral) _ ']' element:Type {
+  return ArrayType{
+		Length: length.(IntLiteral),
+		Element: element.(Type),
+
+    Position: pos(c),
+	}, nil
 }
 
 TupleType <- '(' elems:TupleTypeList? ')' {
-  return TupleType{Elements: maybeSlice[Type](elems)}, nil
+  return TupleType{
+		Elements: maybeSlice[Type](elems),
+
+    Position: pos(c),
+	}, nil
 }
 
 TupleTypeList <- _ elem:Type _ rest:TupleTypeListComma? {
@@ -436,13 +457,22 @@ DotExpr <- exp:Expr '.' ident:(Identifier / TupleKey) {
   }, nil
 }
 
+IndexExpr <- expr:Expr _ '[' _ index:Expr _ ']' {
+	return IndexExpr{
+		Expr: expr.(Expr),
+		Index: index.(Expr),
+
+    Position: pos(c),
+	}, nil
+}
+
 Expr <- MaybeOrExpr
 
-TermExpr <- UnaryExpr / DotExpr / ParenthesizedExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / MaybeCallExpr
+TermExpr <- UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / MaybeCallExpr
 
 MaybeExpExpr <- ExpExpr / TermExpr
 
-ExpExpr <- left:TermExpr _ op:("**") _ right:MaybeExpExpr {
+ExpExpr <- left:TermExpr _ op:("**") __ right:MaybeExpExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -454,7 +484,7 @@ ExpExpr <- left:TermExpr _ op:("**") _ right:MaybeExpExpr {
 
 MaybeMulExpr <- MulExpr / MaybeExpExpr
 
-MulExpr <- left:MaybeExpExpr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") _ right:MaybeMulExpr {
+MulExpr <- left:MaybeExpExpr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") __ right:MaybeMulExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -466,7 +496,7 @@ MulExpr <- left:MaybeExpExpr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") _ right:
 
 MaybeAddExpr <- AddExpr / MaybeMulExpr
 
-AddExpr <- left:MaybeMulExpr _ op:("+" / "-" / "|" / "^") _ right:MaybeAddExpr {
+AddExpr <- left:MaybeMulExpr _ op:("+" / "-" / "|" / "^") __ right:MaybeAddExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -478,7 +508,7 @@ AddExpr <- left:MaybeMulExpr _ op:("+" / "-" / "|" / "^") _ right:MaybeAddExpr {
 
 MaybeCmpExpr <- CmpExpr / MaybeAddExpr
 
-CmpExpr <- left:MaybeAddExpr _ op:("==" / "!=" / ">=" / "<=" / ">" / "<") _ right:MaybeCmpExpr {
+CmpExpr <- left:MaybeAddExpr _ op:("==" / "!=" / ">=" / "<=" / ">" / "<") __ right:MaybeCmpExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -490,7 +520,7 @@ CmpExpr <- left:MaybeAddExpr _ op:("==" / "!=" / ">=" / "<=" / ">" / "<") _ righ
 
 MaybeAndExpr <- AndExpr / MaybeCmpExpr
 
-AndExpr <- left:MaybeCmpExpr _ op:("&&") _ right:MaybeCmpExpr {
+AndExpr <- left:MaybeCmpExpr _ op:("&&") __ right:MaybeCmpExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -502,7 +532,7 @@ AndExpr <- left:MaybeCmpExpr _ op:("&&") _ right:MaybeCmpExpr {
 
 MaybeOrExpr <- OrExpr / MaybeAndExpr
 
-OrExpr <- left:MaybeAndExpr _ op:("||") _ right:MaybeAndExpr {
+OrExpr <- left:MaybeAndExpr _ op:("||") __ right:MaybeAndExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: Operator(op.([]byte)),
@@ -533,5 +563,7 @@ _ "spaces" <- [ \t]*
 comment <- "//" [^\n]* '\n' {
   return nil, nil
 }
+
+nl <- _ (';' / '\n' / "\r\n") __
 
 EOF <- !.
