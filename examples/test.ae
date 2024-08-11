@@ -22,5 +22,8 @@ var z [3]string
 func whatever() {
 	z[0] = "hello"
   print(z[0])
+
+	y.1 = 5 +
+	3
   return
 }
