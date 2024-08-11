@@ -21,7 +21,9 @@ var z [3]string
 #init
 func whatever() {
 	z[0] = "hello"
-  print(z[0])
+  print(
+		z[0],
+	)
 
 	y.1 = 5 +
 	3

@@ -426,7 +426,7 @@ IdentifierExpr <- ident:Identifier {
 
 MaybeCallExpr <- CallExpr / IdentifierExpr
 
-CallExpr <- exp:MaybeCallExpr '(' args:CallArgumentList? ')' {
+CallExpr <- exp:MaybeCallExpr '(' __ args:CallArgumentList? __ ','? __ ')' {
   call := CallExpr{
     Expr: exp.(Expr),
 
@@ -444,7 +444,7 @@ CallArgumentList <- _ exp:Expr _ rest:CallArgumentListComma? {
   return append([]Expr{exp.(Expr)}, maybeSlice[Expr](rest)...), nil
 }
 
-CallArgumentListComma <- ',' rest:CallArgumentList {
+CallArgumentListComma <- ',' __ rest:CallArgumentList {
   return rest, nil
 }
 
