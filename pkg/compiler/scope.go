@@ -514,7 +514,7 @@ func (vs *ValueScope) allocTemp(typ Type) *Location {
 	if typ.Size() == 1 {
 		for reg := range Register(vs.numRegisters) {
 			switch reg {
-			case RegisterZero, RegisterFP, RegisterSP:
+			case RegisterPC, RegisterFP, RegisterSP:
 				continue
 			default:
 				if !vs.usedRegisters[reg] {

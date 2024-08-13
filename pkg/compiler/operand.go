@@ -11,7 +11,11 @@ const (
 	OperandKindIndirect
 	OperandKindOffset
 	OperandKindStride
+	OperandKindNot
 	OperandKindVTableLookup
+
+	// stripped out before end of compilation
+	OperandKindLabel
 )
 
 func (s OperandKind) MarshalXenon() ([]byte, error) {
@@ -26,10 +30,19 @@ func (s OperandKind) MarshalXenon() ([]byte, error) {
 		return []byte("+"), nil
 	case OperandKindStride:
 		return []byte("*"), nil
+	case OperandKindNot:
+		return []byte("!"), nil
 	case OperandKindVTableLookup:
 		return []byte("V"), nil
 	default:
 		return nil, fmt.Errorf("invalid operand kind %x", s)
+	}
+}
+
+func LabelOperand(label Label) *Operand {
+	return &Operand{
+		Kind:  OperandKindLabel,
+		Value: label,
 	}
 }
 
@@ -45,6 +58,12 @@ type Indirect struct {
 func (i Indirect) String() string {
 	return fmt.Sprintf("[%s]", i.Ptr)
 }
+
+type Not struct {
+	A *Operand `xc:"a"`
+}
+
+func (n Not) String() string { return fmt.Sprintf("!%s", n.A) }
 
 type Offset struct {
 	A *Operand `xc:"a"`
@@ -134,6 +153,15 @@ func (o *Operand) Dereference() *Operand {
 		Kind: OperandKindIndirect,
 		Value: Indirect{
 			Ptr: o,
+		},
+	}
+}
+
+func (o *Operand) Not() *Operand {
+	return &Operand{
+		Kind: OperandKindNot,
+		Value: Not{
+			A: o,
 		},
 	}
 }

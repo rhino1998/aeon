@@ -242,6 +242,11 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 		f.bytecode.Add(bcs...)
 	}
 
+	err := f.bytecode.ResolveLabels()
+	if err != nil {
+		return err
+	}
+
 	numLocals.Value = Int(*scope.maxLocal)
 
 	return nil
@@ -579,6 +584,8 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			}
 		}
 
+		end := newLabel()
+
 		var condBC BytecodeSnippet
 		if stmt.Condition != nil {
 			condTmp := forScope.allocTemp(stmt.Condition.Type())
@@ -591,20 +598,17 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 				return nil, err
 			}
 
-			condBC.Add(JmpRC{
-				Invert: true,
-				Src:    condLoc.Operand,
-				Dst:    ImmediateOperand(Int(len(stepBC) + len(bodyBC) + 1)),
-			})
+			condBC.JumpAfter(end, condLoc.Operand.Not())
 		}
 
 		bc.Add(initBC...)
+		loop := newLabel()
 		bc.Add(condBC...)
 		bc.Add(bodyBC...)
 		bc.Add(stepBC...)
-		bc.Add(JmpR{
-			Dst: ImmediateOperand(Int(-(len(bodyBC) + len(condBC) + len(stepBC) + 1))),
-		})
+		bc.JumpTo(loop, nil)
+		bc.LabelFirst(loop)
+		bc.LabelLast(end)
 
 		return bc, nil
 	case *ExpressionStatement:
@@ -656,24 +660,28 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			bodyBC = append(bodyBC, bodyStmtBC...)
 		}
 
+		elseLabel := newLabel()
+		endLabel := newLabel()
+
 		if stmt.Condition != nil {
-			condBC = append(condBC, JmpRC{
-				Invert: true,
-				Src:    condLoc.Operand,
-				Dst:    ImmediateOperand(Int(len(bodyBC))),
-			})
+			condBC.JumpAfter(elseLabel, condLoc.Operand.Not())
 		}
 
 		bc.Add(condBC...)
 		bc.Add(bodyBC...)
+		if stmt.Condition != nil {
+		}
 
 		if stmt.Else != nil {
+			bc.JumpAfter(endLabel, nil)
+			bc.LabelLast(elseLabel)
 			elseBC, err := prog.compileBCStatement(ctx, stmt.Else, scope)
 			if err != nil {
 				return nil, err
 			}
 
 			bc.Add(elseBC...)
+			bc.LabelLast(endLabel)
 		}
 
 		return bc, nil
@@ -917,8 +925,6 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			return bc, dst, nil
 		case *TypeConversionType:
-
-			log.Println(ftype.Type, expr.Args[0].Type())
 			if ftype.Type.Kind() == expr.Args[0].Type().Kind() {
 				argsBC, argsLoc, err := prog.compileBCExpression(ctx, expr.Args[0], scope, dst)
 				if err != nil {

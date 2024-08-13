@@ -26,10 +26,12 @@ func (c *C) C() D {
 
 #init
 func whatever() {
-	var g C
-
-	print(string(D(g.A)))
-	print(string(g.C()))
-	print(g.A)
+	for {
+		if false {
+			print("HELLO")
+		} else {
+			print("BYE")
+		}
+	}
   return
 }

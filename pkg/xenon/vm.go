@@ -90,6 +90,14 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages int
 	return r, nil
 }
 
+func (r *Runtime) pc() compiler.Addr {
+	return Addr(r.registers[compiler.RegisterPC].(compiler.Int))
+}
+
+func (r *Runtime) setPC(addr compiler.Addr) {
+	r.registers[compiler.RegisterPC] = Int(addr)
+}
+
 func (r *Runtime) fp() compiler.Addr {
 	return Addr(r.registers[compiler.RegisterFP].(compiler.Int))
 }
@@ -241,6 +249,17 @@ func (r *Runtime) loadStride(stride compiler.Stride) loadFunc {
 	})
 }
 
+func (r *Runtime) loadNot(not compiler.Not) loadFunc {
+	return loadFunc(func() (any, error) {
+		a, err := r.load(not.A)()
+		if err != nil {
+			return nil, err
+		}
+
+		return !a.(Bool), nil
+	})
+}
+
 func (r *Runtime) loadIndirectWithOffset(indirect *compiler.Operand, offset Size) loadFunc {
 	return loadFunc(func() (any, error) {
 		base, err := r.load(indirect)()
@@ -270,6 +289,8 @@ func (r *Runtime) load(operand *compiler.Operand) loadFunc {
 		return r.loadOffset(operand.Value.(compiler.Offset))
 	case compiler.OperandKindStride:
 		return r.loadStride(operand.Value.(compiler.Stride))
+	case compiler.OperandKindNot:
+		return r.loadNot(operand.Value.(compiler.Not))
 	default:
 		return nil
 	}
@@ -350,6 +371,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 	r.push(compiler.Int(0))
 
 	r.setFP(r.sp() - 1)
+	r.setPC(pc)
 
 	for {
 		select {
@@ -363,7 +385,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			return fmt.Errorf("stack overflow")
 		}
 
-		code, err := r.fetch(pc)
+		code, err := r.fetch(r.pc())
 		if err != nil {
 			return err
 		}
@@ -373,12 +395,12 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			log.Printf("%s", code)
 			log.Printf("fp: %v", r.fp())
 			log.Printf("sp: %v", r.sp())
-			log.Printf("pc: %v", pc)
+			log.Printf("pc: %v", r.pc())
 			r.printRegisters()
 			r.printStack()
 		}
 
-		pc++
+		r.setPC(r.pc() + 1)
 
 		switch code := code.(type) {
 		case nil:
@@ -429,6 +451,8 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 					log.Printf("extern call %s(%s) = %v", string(externName.(String)), strings.Join(argStrs, ", "), ret)
 				}
 
+				r.setSP(r.sp() - compiler.Addr(code.Args))
+
 				continue
 			case RuntimeFuncTypeFunc:
 				faddr, err := r.loadIndirectWithOffset(code.Func, 3)()
@@ -453,7 +477,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 				r.setSP(r.sp() + frameSize)
 				r.setFP(r.sp() - 1)
-				pc = Addr(faddr.(Int))
+				r.setPC(Addr(faddr.(Int)))
 				continue
 			}
 
@@ -466,7 +490,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				return fmt.Errorf("failed to load pc from fp: %w", err)
 			}
 
-			pc = Addr(pcInt)
+			r.setPC(Addr(pcInt))
 
 			for reg := range r.registers[1:] {
 				r.registers[reg+1], err = r.loadAddr(fp.Offset(-1).Offset(-compiler.Size(reg)))
@@ -491,32 +515,18 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				return nil
 			}
 		case compiler.Jmp:
-			val, err := r.load(code.Dst)()
+			cond, err := r.load(code.Cond)()
 			if err != nil {
 				return err
 			}
 
-			pc = Addr(val.(Int))
-		case compiler.JmpR:
-			val, err := r.load(code.Dst)()
-			if err != nil {
-				return err
-			}
-
-			pc = pc.Offset(Size(val.(Int)))
-		case compiler.JmpRC:
-			cond, err := r.load(code.Src)()
-			if err != nil {
-				return err
-			}
-
-			if cond.(Bool) != Bool(code.Invert) {
-				val, err := r.load(code.Dst)()
+			if cond.(Bool) {
+				val, err := r.load(code.Target)()
 				if err != nil {
 					return err
 				}
 
-				pc = pc.Offset(Size(val.(Int)))
+				r.setPC(Addr(val.(Int)))
 			}
 		case compiler.BinOp:
 			err = r.store(code.Dst)(

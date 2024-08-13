@@ -14,7 +14,154 @@ type Relocatable interface {
 	Bytecode() BytecodeSnippet
 }
 
+type LabelledBytecode struct {
+	Labels []Label
+	Bytecode
+}
+
 type BytecodeSnippet []Bytecode
+
+type Label string
+
+func (l Label) String() string {
+	return fmt.Sprintf("<%s>", string(l))
+}
+
+var labelIndex int64
+
+func newLabel() Label {
+	labelIndex++
+	return Label(fmt.Sprintf("%d", labelIndex))
+}
+
+func (s BytecodeSnippet) ResolveLabels() error {
+	labelIndices := make(map[Label]int)
+	for i, bc := range s {
+		if lbc, ok := bc.(LabelledBytecode); ok {
+			for _, label := range lbc.Labels {
+				labelIndices[label] = i
+			}
+
+			s[i] = lbc.Bytecode
+		}
+	}
+
+	var resolveOperands func(int, *Operand) (*Operand, error)
+	resolveOperands = func(index int, o *Operand) (*Operand, error) {
+		var err error
+		switch o.Kind {
+		case OperandKindImmediate, OperandKindRegister:
+			return o, nil
+		case OperandKindVTableLookup:
+			v := o.Value.(VTableLookup)
+			v.Type, err = resolveOperands(index, v.Type)
+			if err != nil {
+				return nil, err
+			}
+			v.Method, err = resolveOperands(index, v.Method)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+
+		case OperandKindOffset:
+			v := o.Value.(Offset)
+			v.A, err = resolveOperands(index, v.A)
+			if err != nil {
+				return nil, err
+			}
+			v.B, err = resolveOperands(index, v.B)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+		case OperandKindStride:
+			v := o.Value.(Stride)
+			v.A, err = resolveOperands(index, v.A)
+			if err != nil {
+				return nil, err
+			}
+			v.B, err = resolveOperands(index, v.B)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+		case OperandKindIndirect:
+			v := o.Value.(Indirect)
+			v.Ptr, err = resolveOperands(index, v.Ptr)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+		case OperandKindNot:
+			v := o.Value.(Not)
+			v.A, err = resolveOperands(index, v.A)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+		case OperandKindLabel:
+			label := o.Value.(Label)
+
+			labelIndex, ok := labelIndices[label]
+			if !ok {
+				return nil, fmt.Errorf("unknown label %q in operand", label)
+			}
+
+			// TODO: maybe off by one
+			return ImmediateOperand(Int(labelIndex - index)), nil
+		default:
+			return nil, fmt.Errorf("unknonw operand kind %d", o.Kind)
+		}
+	}
+
+	var err error
+	for i := range s {
+		switch bc := ((s)[i]).(type) {
+		case Jmp:
+			bc.Target, err = resolveOperands(i, bc.Target)
+			if err != nil {
+				return fmt.Errorf("could not resolve label in %v: %w", bc, err)
+			}
+			s[i] = bc
+		default:
+		}
+	}
+
+	// TODO: actual functionality
+
+	return nil
+}
+
+func (s *BytecodeSnippet) LabelFirst(labels ...Label) {
+	s.LabelIndex(0, labels...)
+}
+
+func (s *BytecodeSnippet) LabelLast(labels ...Label) {
+	s.LabelIndex(len(*s)-1, labels...)
+}
+
+func (s *BytecodeSnippet) LabelIndex(i int, labels ...Label) {
+	if lbc, ok := (*s)[i].(LabelledBytecode); ok {
+		lbc.Labels = append(lbc.Labels, labels...)
+		(*s)[i] = lbc
+	} else {
+		(*s)[i] = LabelledBytecode{
+			Labels:   labels,
+			Bytecode: (*s)[i],
+		}
+	}
+}
 
 func (s *BytecodeSnippet) Mount(rel Relocatable) {
 	rel.SetAddr(Addr(len(*s)))
@@ -23,6 +170,35 @@ func (s *BytecodeSnippet) Mount(rel Relocatable) {
 
 func (s *BytecodeSnippet) Add(bcs ...Bytecode) {
 	*s = append(*s, bcs...)
+}
+
+func (s *BytecodeSnippet) JumpTo(label Label, cond *Operand) {
+	if cond == nil {
+		*s = append(*s, Jmp{
+			Cond:   ImmediateOperand(Bool(true)),
+			Target: OperandRegisterPC.Offset(LabelOperand(label)).ConstOffset(-1),
+		})
+	} else {
+		*s = append(*s, Jmp{
+			Cond:   cond,
+			Target: OperandRegisterPC.Offset(LabelOperand(label)).ConstOffset(-1),
+		})
+	}
+}
+
+func (s *BytecodeSnippet) JumpAfter(label Label, cond *Operand) {
+	if cond == nil {
+		*s = append(*s, Jmp{
+			Cond:   ImmediateOperand(Bool(true)),
+			Target: OperandRegisterPC.Offset(LabelOperand(label)),
+		})
+	} else {
+		*s = append(*s, Jmp{
+			Cond:   cond,
+			Target: OperandRegisterPC.Offset(LabelOperand(label)),
+		})
+
+	}
 }
 
 func (s *BytecodeSnippet) BinOp(dst *Location, left *Location, operator Operator, right *Location) {
@@ -271,7 +447,8 @@ func shortKind(k Kind) string {
 }
 
 type Jmp struct {
-	Dst *Operand `xc:"d"`
+	Cond   *Operand `xc:"s"`
+	Target *Operand `xc:"d"`
 }
 
 func (j Jmp) Name() string {
@@ -279,71 +456,5 @@ func (j Jmp) Name() string {
 }
 
 func (j Jmp) String() string {
-	return fmt.Sprintf("JMP %v", j.Dst)
-}
-
-type JmpR struct {
-	Dst *Operand `xc:"d"`
-}
-
-func (j JmpR) Name() string {
-	return "jmpr"
-}
-
-func (j JmpR) String() string {
-	return fmt.Sprintf("JMPR %v", j.Dst)
-}
-
-type JmpRC struct {
-	Invert bool     `xc:"i"`
-	Src    *Operand `xc:"s"`
-	Dst    *Operand `xc:"d"`
-}
-
-func (j JmpRC) Name() string {
-	return "jmprc"
-}
-
-func (j JmpRC) String() string {
-	not := ""
-	if j.Invert {
-		not = "not "
-	}
-	return fmt.Sprintf("JMPRC %v if %s%v", j.Dst, not, j.Src)
-}
-
-type Make struct {
-	Kind string   `xc:"k"`
-	Dst  *Operand `xc:"d"`
-	Size *Operand `xc:"s"`
-}
-
-func (Make) Name() string {
-	return "make"
-}
-
-func (m Make) String() string {
-	return fmt.Sprintf("MAKE(%s) %v %d", m.Kind, m.Dst, m.Size)
-}
-
-type Index struct {
-	Kind  string   `xc:"k"`
-	Base  *Operand `xc:"b"`
-	Index *Operand `xc:"i"`
-	Dst   *Operand `xc:"d"`
-}
-
-func (Index) xenon() string {
-	return "ind"
-}
-
-type SetIndex struct {
-	Kind  string   `xc:"k"`
-	Base  *Operand `xc:"b"`
-	Index *Operand `xc:"i"`
-	Src   *Operand `xc:"s"`
-}
-
-func (SetIndex) xenon() string {
-	return "set"
+	return fmt.Sprintf("JMP %v %v", j.Target, j.Cond)
 }

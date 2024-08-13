@@ -3,9 +3,9 @@ package compiler
 import "fmt"
 
 const (
-	RegisterZero Register = 0
-	RegisterSP   Register = 1
-	RegisterFP   Register = 2
+	RegisterPC Register = 0
+	RegisterSP Register = 1
+	RegisterFP Register = 2
 )
 
 type Register int64
@@ -22,7 +22,7 @@ func RegisterOperand(reg Register) *Operand {
 }
 
 var (
-	OperandRegisterZero = RegisterOperand(RegisterZero)
-	OperandRegisterSP   = RegisterOperand(RegisterSP)
-	OperandRegisterFP   = RegisterOperand(RegisterFP)
+	OperandRegisterPC = RegisterOperand(RegisterPC)
+	OperandRegisterSP = RegisterOperand(RegisterSP)
+	OperandRegisterFP = RegisterOperand(RegisterFP)
 )
