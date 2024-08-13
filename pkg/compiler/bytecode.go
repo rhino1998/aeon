@@ -125,14 +125,14 @@ func (s BytecodeSnippet) ResolveLabels() error {
 		}
 	}
 
-	var err error
 	for i := range s {
 		switch bc := ((s)[i]).(type) {
 		case Jmp:
-			bc.Target, err = resolveOperands(i, bc.Target)
+			target, err := resolveOperands(i, bc.Target)
 			if err != nil {
 				return fmt.Errorf("could not resolve label in %v: %w", bc, err)
 			}
+			bc.Target = target
 			s[i] = bc
 		default:
 		}

@@ -37,6 +37,7 @@ type xenonContext struct {
 	ExternFuncs  []ExternFuncEntry
 	NumMemPages  int
 	NumRegisters int
+	GlobalSize   int
 	MaxLoadDepth int
 	Debug        bool
 }
@@ -54,13 +55,15 @@ func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Functi
 	return f, nil
 }
 
-func EmitXenonCode(w io.Writer, prog *compiler.Program) error {
+func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	var xeCtx xenonContext
 	xeCtx.PageSize = PageSize
 	xeCtx.NumCodePages = (len(prog.Bytecode()) + xeCtx.PageSize) / xeCtx.PageSize
 	xeCtx.NumMemPages = 10
 	xeCtx.NumRegisters = 16
-	xeCtx.MaxLoadDepth = 3
+	xeCtx.MaxLoadDepth = 5
+	xeCtx.GlobalSize = int(prog.GlobalSize())
+	xeCtx.Debug = debug
 
 	var err error
 

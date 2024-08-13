@@ -31,6 +31,11 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 		prog.bytecode.Mount(pkg)
 	}
 
+	err := prog.bytecode.ResolveLabels()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -242,10 +247,11 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 		f.bytecode.Add(bcs...)
 	}
 
-	err := f.bytecode.ResolveLabels()
-	if err != nil {
-		return err
-	}
+	// Can resolve here for debugging
+	// err := f.bytecode.ResolveLabels()
+	// if err != nil {
+	// 	return err
+	// }
 
 	numLocals.Value = Int(*scope.maxLocal)
 
@@ -566,6 +572,8 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			}
 		}
 
+		var loopBC BytecodeSnippet
+
 		var bodyBC []Bytecode
 		for _, subStmt := range stmt.Body {
 			bodyStmtBC, err := prog.compileBCStatement(ctx, subStmt, forScope)
@@ -603,11 +611,12 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		bc.Add(initBC...)
 		loop := newLabel()
-		bc.Add(condBC...)
-		bc.Add(bodyBC...)
-		bc.Add(stepBC...)
-		bc.JumpTo(loop, nil)
-		bc.LabelFirst(loop)
+		loopBC.Add(condBC...)
+		loopBC.Add(bodyBC...)
+		loopBC.Add(stepBC...)
+		loopBC.JumpTo(loop, nil)
+		loopBC.LabelFirst(loop)
+		bc.Add(loopBC...)
 		bc.LabelLast(end)
 
 		return bc, nil
@@ -664,6 +673,9 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		endLabel := newLabel()
 
 		if stmt.Condition != nil {
+			if stmt.Else == nil {
+				elseLabel = endLabel
+			}
 			condBC.JumpAfter(elseLabel, condLoc.Operand.Not())
 		}
 
@@ -681,8 +693,9 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			}
 
 			bc.Add(elseBC...)
-			bc.LabelLast(endLabel)
 		}
+
+		bc.LabelLast(endLabel)
 
 		return bc, nil
 	default:
@@ -809,7 +822,15 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *ParenthesizedExpression:
 		return prog.compileBCExpression(ctx, expr.Expression, scope, dst)
 	case *BinaryExpression:
-		lhsBC, lhsOp, err := prog.compileBCExpression(ctx, expr.Left, scope, dst)
+		var lhsTmp *Location
+		if expr.Left.Type().Size() == dst.Type.Size() {
+			lhsTmp = dst.AsType(expr.Left.Type())
+		} else {
+			lhsTmp := scope.allocTemp(expr.Left.Type())
+			defer scope.deallocTemp(lhsTmp)
+		}
+
+		lhsBC, lhsOp, err := prog.compileBCExpression(ctx, expr.Left, scope, lhsTmp)
 		if err != nil {
 			return nil, nil, err
 		}

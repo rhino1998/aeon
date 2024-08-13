@@ -27,6 +27,12 @@ func main() {
 			{
 				Name:  "build",
 				Usage: "Compile Aeon source code into bytecode and a XenonCode VM",
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "debug",
+						Aliases: []string{"d"},
+					},
+				},
 				Action: func(ctx context.Context, c *cli.Command) error {
 					if c.Args().Len() != 1 {
 						return fmt.Errorf("must provide at least one aeon file or directory as argument")
@@ -81,7 +87,7 @@ func main() {
 					}
 					defer out.Close()
 
-					err = xenon.EmitXenonCode(out, prog)
+					err = xenon.EmitXenonCode(out, prog, c.Bool("debug"))
 					if err != nil {
 						return err
 					}

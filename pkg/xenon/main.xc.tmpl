@@ -8,6 +8,12 @@ function @__builtin_cos($n:number):number
 function @print($s:text)
 	print($s)
 
+function @printInt($n:number)
+	print($n)
+
+function @itoa($n:number):text
+	return $n:text
+
 function @print3($a:text, $b:text, $c:text)
 	print(text("print3 {} {} {}", $a, $b, $c))
 
@@ -78,16 +84,19 @@ function @aeon_mem_init()
 {{ range $i := loop 0 .MaxLoadDepth}}
 function @aeon_load_{{$i}}($op:text):text
 	;print(text("load: {}", $op))
+	var $val = $op.v
 	if ($op.k == "I")
-		return $op.v
+		return $val
 	elseif ($op.k == "R")
 		{{if eq $i 0}}@aeon_fatal(){{else}}return @aeon_reg_load($op.v:number){{end}}
-	elseif ($op.k == "*")
-		var $indirect = $op.v
-		{{if eq $i 0}}@aeon_fatal(){{else}}return @aeon_mem_load(@aeon_load_{{sub $i 1}}($indirect.p):number){{end}}
+	elseif ($op.k == "@")
+		{{if eq $i 0}}@aeon_fatal(){{else}}return @aeon_mem_load(@aeon_load_{{sub $i 1}}($val.p):number){{end}}
 	elseif ($op.k == "+")
-		var $offset = $op.v
-		{{if eq $i 0}}@aeon_fatal(){{else}}return (@aeon_load_{{sub $i 1}}($offset.a):number + @aeon_load_{{sub $i 1}}($offset.b):number):text{{end}}
+		{{if eq $i 0}}@aeon_fatal(){{else}}return (@aeon_load_{{sub $i 1}}($val.a):number + @aeon_load_{{sub $i 1}}($val.b):number):text{{end}}
+	elseif ($op.k == "*")
+		{{if eq $i 0}}@aeon_fatal(){{else}}return (@aeon_load_{{sub $i 1}}($val.a):number * @aeon_load_{{sub $i 1}}($val.b):number):text{{end}}
+	elseif ($op.k == "!")
+		{{if eq $i 0}}@aeon_fatal(){{else}}return (!(@aeon_load_{{sub $i 1}}($val.a):number)):text{{end}}
 	else
 		print(text("bad operand for load {}", $op))
 		@aeon_fatal()
@@ -101,11 +110,11 @@ function @aeon_load_field($op:text, $offset:number):text
 
 function @aeon_store($op:text, $v:text)
 	;print(text("store: {}", $op))
+	var $val = $op.v
 	if ($op.k == "R")
-		@aeon_reg_store($op.v:number, $v)
-	elseif ($op.k == "*")
-		var $indirect = $op.v
-		@aeon_mem_store(@aeon_load($indirect.p), $v)
+		@aeon_reg_store($val:number, $v)
+	elseif ($op.k == "@")
+		@aeon_mem_store(@aeon_load($val.p), $v)
 	else
 		print(text("bad operand for store {}", $op))
 		@aeon_fatal()
@@ -161,23 +170,35 @@ function @aeon_lte($a:text, $b:text):text
 function @aeon_gte($a:text, $b:text):text
 	return ($a:number > $b:number):text
 
-function @aeon_eq($a:text, $b:text):text
+function @aeon_eq_int($a:text, $b:text):text
+	return (@aeon_trunc($a:number) == @aeon_trunc($b:number)):text
+
+function @aeon_eq_float($a:text, $b:text):text
 	return ($a:number == $b:number):text
 
-function @aeon_ne($a:text, $b:text):text
-	return ($a:number == $b:number):text
+function @aeon_eq_bool($a:text, $b:text):text
+	return (!$a:number == !$b:number):text
 
-function @aeon_extern_args($bc:text):number
-	{{ range $entry := .ExternFuncs }}
-	if ($bc.f == "{{$entry.Name}}")
-		return {{len $entry.ArgTypes}}
-	{{ end }}
+function @aeon_eq_string($a:text, $b:text):text
+	return ($a == $b):text
 
-function @aeon_call_extern($fname:text):text
+function @aeon_ne_int($a:text, $b:text):text
+	return (@aeon_trunc($a:number) != @aeon_trunc($b:number)):text
+
+function @aeon_ne_float($a:text, $b:text):text
+	return ($a:number != $b:number):text
+
+function @aeon_ne_bool($a:text, $b:text):text
+	return (!$a:number != !$b:number):text
+
+function @aeon_ne_string($a:text, $b:text):text
+	return ($a != $b):text
+
+function @aeon_call_extern($fname:text, $size:number)
 	var $sp = @aeon_reg_load(1):number
 	{{ range $entry := .ExternFuncs }}
 	if ($fname == "{{$entry.Name}}")
-		{{if $entry.HasReturn}}return{{end}} @{{$entry.Name}}({{range $i, $t := $entry.ArgTypes}}{{if $i }},{{end}}@aeon_mem_load($sp-{{len $entry.ArgTypes}}+{{$i}}){{$t}}{{end}})
+		{{if $entry.HasReturn}}@aeon_mem_store(@aeon_reg_load(1):number - $size, {{end}}@{{$entry.Name}}({{range $i, $t := $entry.ArgTypes}}{{if $i }},{{end}}@aeon_mem_load($sp-{{len $entry.ArgTypes}}+{{$i}}){{$t}}{{end}}){{if $entry.HasReturn}}){{end}}
 	{{ end }}
 
 function @aeon_bop($op:text, $a:text, $b:text):text
@@ -225,28 +246,29 @@ function @aeon_bop($op:text, $a:text, $b:text):text
 	elseif ($op == "F>=F")
 		return @aeon_gte($av, $bv)
 	elseif ($op == "I==I")
-		return @aeon_eq($av, $bv)
+		return @aeon_eq_int($av, $bv)
 	elseif ($op == "F==F")
-		return @aeon_eq($av, $bv)
+		return @aeon_eq_float($av, $bv)
 	elseif ($op == "S==S")
-		return @aeon_eq($av, $bv)
+		return @aeon_eq_string($av, $bv)
 	elseif ($op == "B==B")
-		return @aeon_eq($av, $bv)
+		return @aeon_eq_bool($av, $bv)
 	elseif ($op == "I!=I")
-		return @aeon_ne($av, $bv)
+		return @aeon_ne_int($av, $bv)
 	elseif ($op == "F!=F")
-		return @aeon_ne($av, $bv)
+		return @aeon_ne_float($av, $bv)
 	elseif ($op == "S!=S")
-		return @aeon_ne($av, $bv)
+		return @aeon_ne_string($av, $bv)
 	elseif ($op == "B!=B")
-		return @aeon_ne($av, $bv)
+		return @aeon_ne_bool($av, $bv)
 	else
 		print(text("bad binary operand {} {} {}", $op, $a, $b))
 		@aeon_fatal()
 
 function @aeon_run($pc:number):text
 	@aeon_reg_init()
-	@aeon_reg_store(1, "32") ; TODO
+	@aeon_reg_store(0, $pc:text)
+	@aeon_reg_store(1, "{{.GlobalSize}}")
 	repeat {{.NumRegisters}} ($reg)
 		if ($reg == 0)
 			continue
@@ -259,48 +281,44 @@ function @aeon_run($pc:number):text
 
 	var $i = 0
 
-	while ($i < 5000)
+	while ($i < 10000000)
 		$i++
 
-		var $bc = @aeon_code($pc)
-		$pc++
-		{{if .Debug}}print(text("{} {} {} {} {}", $i, $pc, @aeon_reg_load(1), @aeon_reg_load(2), $bc)){{end}}
+		var $bc = @aeon_code($aeon_reg.0:number)
+		$aeon_reg.0 = ($aeon_reg.0:number + 1):text
+		{{if .Debug}}print(text("{} {} {} {} {}", $i, @aeon_reg_load(0), @aeon_reg_load(1), @aeon_reg_load(2), $bc)){{end}}
 
 		if ($bc.t == "nop")
 			continue
-		elseif ($bc.t == "bop")
-			@aeon_store($bc.d, @aeon_bop($bc.o, $bc.l, $bc.r))
 		elseif ($bc.t == "mov")
 			@aeon_store($bc.d, @aeon_load($bc.s))
+		elseif ($bc.t == "bop")
+			@aeon_store($bc.d, @aeon_bop($bc.o, $bc.l, $bc.r))
 		elseif ($bc.t == "jmp")
-			$pc = @aeon_load($bc.s):number
-		elseif ($bc.t == "jmpr")
-			$pc += @aeon_load($bc.d):number
-		elseif ($bc.t == "jmprc")
-			var $cond = @aeon_load($bc.s):number
-			if ($cond xor ($bc.i:number))
-				$pc += @aeon_load($bc.d):number
+			if (@aeon_load($bc.s):number)
+				$aeon_reg.0 = @aeon_load($bc.d)
 		elseif ($bc.t == "call")
 			var $ftype = @aeon_load_field($bc.f, 0):number
-			@aeon_reg_store(1, (@aeon_reg_load(1):number + $bc.a:number):text)
+			$aeon_reg.1 = ($aeon_reg.1:number + $bc.a:number):text)
 			if ($ftype == 0)
 				var $fname = @aeon_load_field($bc.f, 3)
 			 	{{if .Debug}}print(text("extern {}", $fname)){{end}}
-				@aeon_call_extern($fname)
+				@aeon_call_extern($fname, $bc.a:number)
+				$aeon_reg.1 = ($aeon_reg.1:number - $bc.a:number):text
 			else
 				print("unrecognized call function type")
 				@aeon_fatal()
 		elseif ($bc.t == "ret")
-			var $fp = @aeon_reg_load(2):number
-			$pc = @aeon_mem_load($fp):number
+			var $fp = $aeon_reg.2:number
+			$aeon_reg.0 = @aeon_mem_load($fp)
 			repeat {{$.NumRegisters}} ($reg)
 				if ($reg == 0)
 					continue
-				@aeon_reg_store($reg, @aeon_mem_load($fp-1-$reg))
+				$aeon_reg.$reg = @aeon_mem_load($fp-1-$reg)
 
-			@aeon_reg_store(1, (@aeon_reg_load(1):number - $bc.a:number):text)
+			$aeon_reg.1 = ($aeon_reg.1:number - $bc.a:number):text
 
-			if (@aeon_reg_load(1):number == 0) {
+			if ($aeon_reg.0:number == 0) {
 				return
 			}
 		else
@@ -314,7 +332,6 @@ init
 	@aeon_mem_init()
 {{range $addr := .VarInitFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}
 {{range $addr := .InitFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}
-	print("hello")
 
 tick
 {{range $addr := .UpdateFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}

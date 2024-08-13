@@ -29,10 +29,23 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				return nil
 			},
 		},
+		"itoa": {
+			ArgSize: 1,
+			Func: func(s []any) any {
+				return String(fmt.Sprintf("%d", int(s[0].(Int))))
+			},
+		},
 		"print3": {
 			ArgSize: 3,
 			Func: func(s []any) any {
 				log.Println(s...)
+				return nil
+			},
+		},
+		"printInt": {
+			ArgSize: 1,
+			Func: func(s []any) any {
+				log.Println(s[0])
 				return nil
 			},
 		},
@@ -155,8 +168,6 @@ func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]any, error) {
 		}
 
 		args = append(args, arg)
-
-		log.Println(args)
 	}
 
 	return args, nil
@@ -439,7 +450,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				}
 				ret := entry.Func(args)
 				if ret != nil {
-					r.storeAddr(r.sp()-Addr(entry.ArgSize+1), ret)
+					r.storeAddr(r.sp().Offset(-code.Args), ret)
 				}
 
 				if r.debug {

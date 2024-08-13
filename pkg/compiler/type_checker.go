@@ -192,7 +192,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		_, err = validateBinaryExpression(left.Type(), stmt.Operator, right.Type())
 		if err != nil {
-			errs.Add(err)
+			errs.Add(stmt.WrapError(err))
 		}
 
 		return nil

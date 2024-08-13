@@ -286,6 +286,15 @@ type Location struct {
 	*Operand
 }
 
+func (l *Location) AsType(typ Type) *Location {
+	return &Location{
+		Kind:    l.Kind,
+		Name:    l.Name,
+		Type:    typ,
+		Operand: l.Operand,
+	}
+}
+
 func (l *Location) AddressOf() *Location {
 	return &Location{
 		Kind:    l.Kind,

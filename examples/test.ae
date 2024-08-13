@@ -6,7 +6,11 @@ type A *B
 
 type B [3]int
 
+extern func itoa(int) string
+
 extern func print(string)
+
+extern func printInt(int)
 
 extern func print3(a string, b string, c string)
 
@@ -26,12 +30,13 @@ func (c *C) C() D {
 
 #init
 func whatever() {
-	for {
-		if false {
-			print("HELLO")
-		} else {
-			print("BYE")
-		}
+	for i := 0; i < 10000; i++ {
 	}
   return
+}
+
+#update
+func hello() {
+	print("HELLO")
+	return
 }

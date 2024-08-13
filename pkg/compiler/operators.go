@@ -75,9 +75,12 @@ var binaryOperatorKinds = map[BinaryOperatorKinds]Kind{
 	{OperatorExponentiation, KindFloat, KindFloat}: KindFloat,
 
 	// +
-	{OperatorAddition, KindInt, KindInt}:       KindInt,
-	{OperatorAddition, KindFloat, KindFloat}:   KindFloat,
-	{OperatorAddition, KindString, KindString}: KindString,
+	{OperatorAddition, KindInt, KindInt}:         KindInt,
+	{OperatorAddition, KindFloat, KindFloat}:     KindFloat,
+	{OperatorAddition, KindString, KindString}:   KindString,
+	{OperatorPlusEquals, KindInt, KindInt}:       KindInt,
+	{OperatorPlusEquals, KindFloat, KindFloat}:   KindFloat,
+	{OperatorPlusEquals, KindString, KindString}: KindString,
 
 	// -
 	{OperatorSubtraction, KindInt, KindInt}:     KindInt,
@@ -92,8 +95,7 @@ var binaryOperatorKinds = map[BinaryOperatorKinds]Kind{
 	{OperatorDivision, KindFloat, KindFloat}: KindFloat,
 
 	// %
-	{OperatorModulo, KindInt, KindInt}:     KindInt,
-	{OperatorModulo, KindFloat, KindFloat}: KindFloat,
+	{OperatorModulo, KindInt, KindInt}: KindInt,
 
 	// ==
 	{OperatorEqual, KindInt, KindInt}:       KindBool,
