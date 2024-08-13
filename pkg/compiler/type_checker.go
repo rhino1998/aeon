@@ -747,6 +747,10 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 					errs.Add(err)
 				}
 
+				if !IsAssignableTo(arg.Type(), ftype.Parameters[i]) {
+					errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in argument %d in function call", arg.Type(), ftype.Parameters[i], i)))
+				}
+
 				expr.Args[i] = arg
 			}
 		case *TypeConversionType:

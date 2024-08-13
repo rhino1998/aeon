@@ -312,7 +312,7 @@ init
 	@aeon_reg_init()
 	@aeon_code_init()
 	@aeon_mem_init()
-	@aeon_run({{.VarInitFunc}})
+{{range $addr := .VarInitFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}
 {{range $addr := .InitFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}
 	print("hello")
 

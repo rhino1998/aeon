@@ -890,10 +890,6 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			bc.Add(callBC...)
 
-			if callLoc != callTmp {
-				bc.Mov(callTmp, callLoc)
-			}
-
 			for i, arg := range expr.Args {
 				argVar := callScope.newArg(fmt.Sprintf("%d", i), offset, ftype.Parameters[i])
 				offset += arg.Type().Size()
@@ -921,6 +917,17 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			return bc, dst, nil
 		case *TypeConversionType:
+			if ftype.Type.Kind() == expr.Args[0].Type().Kind() {
+				argsBC, argsLoc, err := prog.compileBCExpression(ctx, expr.Args[0], scope, dst)
+				if err != nil {
+					return nil, nil, err
+				}
+
+				bc.Add(argsBC...)
+
+				// basic type conversions are no-ops
+				return bc, argsLoc, nil
+			}
 			// TODO
 			return nil, nil, expr.WrapError(fmt.Errorf("type conversions not yet implemented"))
 		default:

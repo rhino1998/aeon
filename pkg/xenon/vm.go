@@ -359,7 +359,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 		default:
 		}
 
-		if r.sp() > 0x50 {
+		if r.sp() > 0x45 {
 			return fmt.Errorf("stack overflow")
 		}
 
@@ -426,7 +426,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 						argStrs = append(argStrs, fmt.Sprintf("%v", arg))
 
 					}
-					log.Printf("extern call %s = %s(%s)", ret, string(externName.(String)), strings.Join(argStrs, ", "))
+					log.Printf("extern call %s(%s) = %v", string(externName.(String)), strings.Join(argStrs, ", "), ret)
 				}
 
 				continue

@@ -30,7 +30,7 @@ type xenonContext struct {
 	PageSize     int
 	NumCodePages int
 	Code         map[PageAddr]string
-	VarInitFunc  int
+	VarInitFuncs []int
 	InitFuncs    []int
 	UpdateFuncs  []int
 
@@ -63,12 +63,11 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program) error {
 	xeCtx.MaxLoadDepth = 3
 
 	var err error
-	varinitFunc, err := getFunc(prog, "main", "varinit")
-	if err != nil {
-		return err
+
+	for _, f := range prog.VarInitFunctions() {
+		xeCtx.VarInitFuncs = append(xeCtx.VarInitFuncs, int(f.Addr()))
 	}
 
-	xeCtx.VarInitFunc = int(varinitFunc.Addr())
 	for _, f := range prog.InitFunctions() {
 		xeCtx.InitFuncs = append(xeCtx.InitFuncs, int(f.Addr()))
 	}

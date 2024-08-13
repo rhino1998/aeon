@@ -22,10 +22,14 @@ func (c C) C() string {
 	return c.B
 }
 
+
+
+type D string
+
 #init
 func whatever() {
 	var g C
-	print(g.A)
+	print(D(g.A))
 	print(g.C())
 	print(g.A)
   return
