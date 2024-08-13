@@ -174,6 +174,7 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 
 	t := &DerivedType{
 		name:       string(decl.Name),
+		pkg:        p,
 		underlying: underlying,
 
 		methodFuncs: make(map[string]*Function),

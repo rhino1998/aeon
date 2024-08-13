@@ -9,33 +9,42 @@ const (
 	OperandKindImmediate
 	OperandKindRegister
 	OperandKindIndirect
-	OperandKindOffset
-	OperandKindStride
+	OperandKindBinary
 	OperandKindNot
 	OperandKindVTableLookup
 
 	// stripped out before end of compilation
 	OperandKindLabel
+	OperandKindType
 )
 
-func (s OperandKind) MarshalXenon() ([]byte, error) {
+func (s OperandKind) String() string {
 	switch s {
 	case OperandKindImmediate:
-		return []byte("I"), nil
+		return "I"
 	case OperandKindRegister:
-		return []byte("R"), nil
+		return "R"
 	case OperandKindIndirect:
-		return []byte("@"), nil
-	case OperandKindOffset:
-		return []byte("+"), nil
-	case OperandKindStride:
-		return []byte("*"), nil
+		return "@"
+	case OperandKindBinary:
+		return "B"
 	case OperandKindNot:
-		return []byte("!"), nil
+		return "!"
 	case OperandKindVTableLookup:
-		return []byte("V"), nil
+		return "V"
+	case OperandKindLabel:
+		return "<compiler label>"
+	case OperandKindType:
+		return "<compiler type>"
 	default:
-		return nil, fmt.Errorf("invalid operand kind %x", s)
+		return "?"
+	}
+}
+
+func TypeOperand(name TypeName) *Operand {
+	return &Operand{
+		Kind:  OperandKindType,
+		Value: name,
 	}
 }
 
@@ -65,22 +74,14 @@ type Not struct {
 
 func (n Not) String() string { return fmt.Sprintf("!%s", n.A) }
 
-type Offset struct {
-	A *Operand `xc:"a"`
-	B *Operand `xc:"b"`
+type BinaryOperand struct {
+	A  *Operand `xc:"a"`
+	Op Operator `xc:"o"`
+	B  *Operand `xc:"b"`
 }
 
-func (o Offset) String() string {
-	return fmt.Sprintf("(%s + %s)", o.A, o.B)
-}
-
-type Stride struct {
-	A *Operand `xc:"a"`
-	B *Operand `xc:"b"`
-}
-
-func (o Stride) String() string {
-	return fmt.Sprintf("(%s*%s)", o.A, o.B)
+func (o BinaryOperand) String() string {
+	return fmt.Sprintf("(%s %s %s)", o.A, o.Op, o.B)
 }
 
 type Operand struct {
@@ -126,20 +127,22 @@ func (o *Operand) ConstOffset(offset Size) *Operand {
 
 func (o *Operand) Offset(offset *Operand) *Operand {
 	return &Operand{
-		Kind: OperandKindOffset,
-		Value: Offset{
-			A: o,
-			B: offset,
+		Kind: OperandKindBinary,
+		Value: BinaryOperand{
+			A:  o,
+			Op: "+",
+			B:  offset,
 		},
 	}
 }
 
 func (o *Operand) Stride(offset *Operand) *Operand {
 	return &Operand{
-		Kind: OperandKindStride,
-		Value: Stride{
-			A: o,
-			B: offset,
+		Kind: OperandKindBinary,
+		Value: BinaryOperand{
+			A:  o,
+			Op: "*",
+			B:  offset,
 		},
 	}
 }
@@ -166,7 +169,7 @@ func (o *Operand) Not() *Operand {
 	}
 }
 
-func (o Operand) String() string {
+func (o *Operand) String() string {
 	return fmt.Sprintf("%s", o.Value)
 }
 
@@ -174,5 +177,50 @@ func ImmediateOperand(imm Immediate) *Operand {
 	return &Operand{
 		Value: imm,
 		Kind:  OperandKindImmediate,
+	}
+}
+
+func (o *Operand) Optimize() *Operand {
+	switch v := o.Value.(type) {
+	case Indirect:
+		v.Ptr = v.Ptr.Optimize()
+		o.Value = v
+		return o
+	case BinaryOperand:
+		v.A = v.A.Optimize()
+		v.B = v.B.Optimize()
+
+		o.Value = v
+
+		if v.A.Kind == OperandKindImmediate && v.B.Kind == OperandKindImmediate && v.Op == "+" {
+			return ImmediateOperand(v.A.Value.(Int) + v.B.Value.(Int))
+		} else if v.A.Kind == OperandKindBinary && v.Op == "+" {
+			rot := &Operand{
+				Kind: OperandKindBinary,
+				Value: BinaryOperand{
+					A:  v.A.Value.(BinaryOperand).A,
+					Op: "+",
+					B:  v.A.Value.(BinaryOperand).B.Offset(v.B),
+				},
+			}
+
+			rot = rot.Optimize()
+
+			return rot
+		}
+
+		return o
+	case Not:
+		v.A = v.A.Optimize()
+
+		o.Value = v
+
+		if v.A.Kind == OperandKindImmediate {
+			return ImmediateOperand(!v.A.Value.(Bool))
+		}
+
+		return o
+	default:
+		return o
 	}
 }

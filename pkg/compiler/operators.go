@@ -156,6 +156,9 @@ var unaryOperatorKinds = map[UnaryOperatorKinds]Kind{
 	{OperatorAddress, KindInt}:     KindPointer,
 	{OperatorAddress, KindFloat}:   KindPointer,
 	{OperatorAddress, KindString}:  KindPointer,
+
+	{OperatorNegate, KindInt}:   KindInt,
+	{OperatorNegate, KindFloat}: KindFloat,
 }
 
 type BinaryExpression struct {

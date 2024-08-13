@@ -427,7 +427,7 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 		parent:  vs,
 		symbols: scope,
 
-		function:  scope.function,
+		function:  scope.Function(),
 		variables: maps.Clone(vs.variables),
 		maxLocal:  vs.maxLocal,
 		nextLocal: vs.nextLocal,
@@ -550,10 +550,9 @@ func (vs *ValueScope) allocTemp(typ Type) *Location {
 func (vs *ValueScope) deallocTemp(l *Location) {
 	switch l.Kind {
 	case LocationKindLocal:
-		offset := Size(l.Value.(Indirect).Ptr.Value.(Offset).B.Value.(Int))
+		offset := Size(l.Value.(Indirect).Ptr.Value.(BinaryOperand).B.Value.(Int))
 		if offset == vs.nextLocal-l.Type.Size() {
 			vs.nextLocal -= l.Type.Size()
-
 		}
 	case LocationKindRegister:
 		vs.usedRegisters[l.Value.(Register)] = false
@@ -579,4 +578,14 @@ func (vs *ValueScope) Get(name string) (*Location, bool) {
 	}
 
 	return op, true
+}
+
+func (vs *ValueScope) typeName(typ Type) *Location {
+	name := typ.GlobalName()
+	return &Location{
+		Kind:    LocationKindConstant,
+		Name:    fmt.Sprintf("type %s", name),
+		Type:    TypeKind(KindType),
+		Operand: TypeOperand(name),
+	}
 }

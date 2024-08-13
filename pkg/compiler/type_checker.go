@@ -215,6 +215,13 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable of type %v", right.Type(), left.Type())))
 		}
 
+		if stmt.Left.Type().Kind() == KindInterface && stmt.Right.Type().Kind() != KindInterface {
+			stmt.Right = &InterfaceTypeCoercionExpression{
+				Interface:  BaseType(stmt.Left.Type()).(*InterfaceType),
+				Expression: stmt.Right,
+			}
+		}
+
 		return nil
 	case *PostfixStatement:
 		expr, err := c.resolveExpressionTypes(stmt.Expression, nil)

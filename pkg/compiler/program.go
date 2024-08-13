@@ -1,12 +1,11 @@
 package compiler
 
-import "log"
-
 type Program struct {
 	root *SymbolScope
 
 	externFuncs map[string]*ExternFunction
 	packages    map[string]*Package
+	types       map[TypeName]Type
 
 	registers int
 	bytecode  BytecodeSnippet
@@ -18,10 +17,15 @@ func newProgram() *Program {
 
 		externFuncs: make(map[string]*ExternFunction),
 		packages:    make(map[string]*Package),
+		types:       make(map[TypeName]Type),
 		registers:   16,
 	}
 
 	return p
+}
+
+func (p *Program) Registers() int {
+	return p.registers
 }
 
 func (p *Program) Bytecode() []Bytecode {
@@ -58,6 +62,10 @@ func (p *Program) ExternFuncs() []*ExternFunction {
 	return sortedMapByKey(p.externFuncs)
 }
 
+func (p *Program) Types() []Type {
+	return sortedMapByKey(p.types)
+}
+
 func (p *Program) GlobalSize() Size {
 	var size Size
 	for _, global := range p.Globals() {
@@ -70,9 +78,6 @@ func (p *Program) GlobalSize() Size {
 	for _, drv := range p.DerivedTypes() {
 		size += funcType.Size() * Size(len(drv.MethodFunctions()))
 	}
-
-	log.Println("f", len(p.Functions()))
-	log.Println("e", len(p.ExternFuncs()))
 
 	return size
 }

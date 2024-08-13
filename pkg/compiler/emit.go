@@ -36,6 +36,12 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 		return err
 	}
 
+	prog.bytecode.OptimizeOperands()
+
+	for i, bc := range prog.bytecode {
+		log.Printf("%02x: %v", i, bc)
+	}
+
 	return nil
 }
 
@@ -46,7 +52,8 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 		// TODO: evaluate const exprs
 		switch expr := constant.expr.(type) {
 		case *Literal[String]:
-			scope.newConstant(constant.Name(), constant.Type(), expr.Value())
+			// TODO: string consts
+			// scope.newConstant(constant.Name(), constant.Type(), expr.Value())
 		case *Literal[Int]:
 			scope.newConstant(constant.Name(), constant.Type(), expr.Value())
 		case *Literal[Bool]:
@@ -85,10 +92,6 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 		}
 	}
 
-	for i, bc := range pkg.bytecode {
-		log.Printf("%02x: %v", i, bc)
-	}
-
 	err = pkg.scope.put(varInitFunc)
 	if err != nil {
 		return err
@@ -103,9 +106,13 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 
 	scope = scope.sub(pkg.scope)
 
-	f.bytecode.Add(scope.Push("__funcname", scope.newImmediate(
+	// TODO: string alloc
+
+	fnameLocal := scope.newLocal("__funcname", StringType)
+	f.bytecode.Str(
+		fnameLocal.Operand,
 		String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
-	)))
+	)
 
 	numLocals := ImmediateOperand(Int(0))
 
@@ -208,9 +215,11 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error {
 	scope = scope.sub(f.symbols)
 
-	f.bytecode.Add(scope.Push("__funcname", scope.newImmediate(
+	fnameLocal := scope.newLocal("__funcname", StringType)
+	f.bytecode.Str(
+		fnameLocal.Operand,
 		String(fmt.Sprintf("func %s", f.QualifiedName())),
-	)))
+	)
 
 	numLocals := ImmediateOperand(Int(0))
 
@@ -715,7 +724,9 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 		case KindFloat:
 			imm = Float(0)
 		case KindString:
-			imm = String("")
+			// TODO: interning
+			bc.Str(dst.Operand, "")
+			return bc, dst, nil
 		case KindBool:
 			imm = Bool(false)
 		default:
@@ -795,6 +806,18 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 		}
 
 		return bc, dst, nil
+	case *InterfaceType:
+		valBC, err := p.compileBCValuesLiteral(ctx, []Expression{
+			NewLiteral(NilType.GlobalName()),
+			NewLiteral(NilType),
+		}, scope, dst.AsType(interfaceTuple))
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(valBC...)
+
+		return bc, dst, nil
 	default:
 		return nil, nil, pos.WrapError(fmt.Errorf("unhandled zero value for type %s", typ))
 	}
@@ -808,9 +831,14 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *Literal[Float]:
 		return nil, scope.newImmediate(expr.Value()), nil
 	case *Literal[String]:
-		return nil, scope.newImmediate(expr.Value()), nil
+		bc.Str(dst.Operand, expr.value)
+		return bc, dst, nil
 	case *Literal[Bool]:
 		return nil, scope.newImmediate(expr.Value()), nil
+	case *Literal[TypeName]:
+		return nil, scope.typeName(expr.Type()), nil
+	case *Literal[nilType]:
+		return prog.compileBCZeroValue(ctx, expr.Position, dst.Type, scope, dst)
 	case *CompilerFunctionReferenceExpression:
 		return nil, scope.newFunctionRef(expr.Function), nil
 	case *SymbolReferenceExpression:
@@ -845,6 +873,21 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		defer scope.deallocTemp(rhsReg)
 
 		bc.Add(rhsBC...)
+
+		if expr.Type().Kind().IsPrimitive() && expr.Left.Type().Kind().IsPrimitive() && expr.Right.Type().Kind().IsPrimitive() {
+			return bc, &Location{
+				Kind: LocationKindLocal,
+				Type: dst.Type,
+				Operand: &Operand{
+					Kind: OperandKindBinary,
+					Value: BinaryOperand{
+						A:  lhsOp.Operand,
+						Op: expr.Operator,
+						B:  rhsOp.Operand,
+					},
+				},
+			}, nil
+		}
 
 		bc.BinOp(dst, lhsOp, expr.Operator, rhsOp)
 
@@ -1033,6 +1076,36 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		}
 
 		return bc, dst, nil
+	case *InterfaceTypeCoercionExpression:
+		ifaceDst := dst.AsType(interfaceTuple)
+		typElem, err := ifaceDst.IndexTuple(0)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		bc.Mov(typElem, scope.typeName(expr.Expression.Type()))
+
+		valElem, err := ifaceDst.IndexTuple(1)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		if expr.Expression.Type().Size() > 1 {
+			return nil, nil, expr.WrapError(fmt.Errorf("currently interfaces with values of size > 1 not implemented"))
+		}
+
+		valBC, valOp, err := prog.compileBCExpression(ctx, expr.Expression, scope, valElem)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(valBC...)
+
+		if valOp != valElem {
+			bc.Mov(valElem, valOp)
+		}
+
+		return bc, dst, nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
@@ -1135,7 +1208,7 @@ func (prog *Program) compileBCValuesLiteral(ctx context.Context, exprs []Express
 		}
 
 		bc.Add(exprBC...)
-		if exprOp != dst {
+		if exprOp != elemDst {
 			bc.Mov(elemDst, exprOp)
 		}
 

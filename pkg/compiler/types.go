@@ -10,21 +10,42 @@ import (
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
+type TypeName string
+
+func (TypeName) Kind() Kind {
+	return KindType
+}
+
+func (n TypeName) String() string {
+	return fmt.Sprintf("Type(%s)", string(n))
+}
+
 var UnknownType = unknownType{}
 
 type unknownType struct{}
 
-func (unknownType) String() string { return "<unknown>" }
-func (unknownType) Kind() Kind     { return KindUnknown }
-func (unknownType) Size() Size     { return 0 }
+func (unknownType) String() string       { return "<unknown>" }
+func (unknownType) GlobalName() TypeName { return "<unknown>" }
+func (unknownType) Kind() Kind           { return KindUnknown }
+func (unknownType) Size() Size           { return 0 }
 
 var VoidType = voidType{}
 
 type voidType struct{}
 
-func (voidType) String() string { return "<void>" }
-func (voidType) Kind() Kind     { return KindVoid }
-func (voidType) Size() Size     { return 0 }
+func (voidType) String() string       { return "<void>" }
+func (voidType) GlobalName() TypeName { return "<void>" }
+func (voidType) Kind() Kind           { return KindVoid }
+func (voidType) Size() Size           { return 0 }
+
+var NilType = nilType{}
+
+type nilType struct{}
+
+func (nilType) String() string       { return "<nil>" }
+func (nilType) GlobalName() TypeName { return "<nil>" }
+func (nilType) Kind() Kind           { return KindNil }
+func (nilType) Size() Size           { return 0 }
 
 func IsValidMethodReceiverType(t Type) bool {
 	switch t := resolveType(t).(type) {
@@ -58,8 +79,7 @@ func IsAssignableTo(v, to Type) bool {
 			return true
 		}
 	}
-
-	if to, ok := to.(*InterfaceType); ok {
+	if to, ok := BaseType(to).(*InterfaceType); ok {
 		return to.ImplementedBy(v)
 	}
 
@@ -246,11 +266,11 @@ func IsTypeResolvable(typ Type) bool {
 type TypeKind Kind
 
 func (t TypeKind) String() string {
-	return t.Name()
+	return string(t.GlobalName())
 }
 
-func (t TypeKind) Name() string {
-	return fmt.Sprintf("<kind %s>", t.Kind())
+func (t TypeKind) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("<kind %s>", t.Kind()))
 }
 
 func (t TypeKind) Kind() Kind {
@@ -259,9 +279,9 @@ func (t TypeKind) Kind() Kind {
 
 func (t TypeKind) Size() Size {
 	switch t.Kind() {
-	case KindVoid:
+	case KindVoid, KindNil:
 		return 0
-	case KindBool, KindInt, KindFloat, KindString, KindPointer:
+	case KindBool, KindInt, KindFloat, KindString, KindPointer, KindType:
 		return 1
 	case KindFunction:
 		return 4
@@ -277,6 +297,7 @@ type Kind int
 const (
 	KindUnknown Kind = iota
 	KindVoid
+	KindNil
 	KindBool
 	KindInt
 	KindFloat
@@ -290,7 +311,13 @@ const (
 	KindFunction
 	KindInterface
 	KindTypeConversion
+	KindType
 )
+
+func (k Kind) IsPrimitive() bool {
+	// TODO: maybe pointers here too
+	return k == KindBool || k == KindInt || k == KindFloat
+}
 
 func (k Kind) String() string {
 	switch k {
@@ -320,6 +347,8 @@ func (k Kind) String() string {
 		return "interface"
 	case KindTypeConversion:
 		return "type conversion"
+	case KindType:
+		return "type"
 	default:
 		return "<unknown>"
 	}
@@ -332,6 +361,7 @@ func (k Kind) IsNumeric() bool {
 type Type interface {
 	Kind() Kind
 	String() string
+	GlobalName() TypeName
 	Size() Size
 }
 
@@ -341,10 +371,11 @@ type BasicType struct {
 	size Size
 }
 
-func (t BasicType) Kind() Kind     { return t.kind }
-func (t BasicType) Name() string   { return t.name }
-func (t BasicType) String() string { return t.name }
-func (t BasicType) Size() Size     { return t.size }
+func (t BasicType) Kind() Kind           { return t.kind }
+func (t BasicType) Name() string         { return t.name }
+func (t BasicType) GlobalName() TypeName { return TypeName(t.name) }
+func (t BasicType) String() string       { return t.name }
+func (t BasicType) Size() Size           { return t.size }
 
 type ReferencedType struct {
 	s    *SymbolScope
@@ -369,12 +400,16 @@ func (t ReferencedType) String() string {
 	return t.name
 }
 
+func (t ReferencedType) GlobalName() TypeName {
+	return t.Dereference().GlobalName()
+}
+
 func (t ReferencedType) Size() Size {
 	return t.Dereference().Size()
 }
 
 type Method struct {
-	Name       string
+	GlobalName string
 	Receiver   Type
 	Parameters []Type
 	Return     Type
@@ -388,14 +423,29 @@ func (e Method) String() string {
 
 	var retStr string
 	if e.Return != VoidType {
-		retStr = e.Return.String()
+		retStr = fmt.Sprintf(" %s", e.Return)
+
 	}
 
-	return fmt.Sprintf("%s(%s) %s", e.Name, strings.Join(params, ", "), retStr)
+	return fmt.Sprintf("%s(%s) %s", e.GlobalName, strings.Join(params, ", "), retStr)
+}
+
+func (e Method) typeNameString() string {
+	params := make([]string, 0, len(e.Parameters))
+	for _, param := range e.Parameters {
+		params = append(params, param.String())
+	}
+
+	var retStr string
+	if e.Return != VoidType {
+		retStr = fmt.Sprintf(" %s", string(e.Return.GlobalName()))
+	}
+
+	return fmt.Sprintf("%s(%s)%s", e.GlobalName, strings.Join(params, ", "), retStr)
 }
 
 func (e Method) Equal(o Method) bool {
-	if e.Name != o.Name {
+	if e.GlobalName != o.GlobalName {
 		return false
 	}
 
@@ -430,7 +480,7 @@ type MethodSet []Method
 
 func (m *MethodSet) Add(name string, params []Type, ret Type) error {
 	entry := Method{
-		Name:       name,
+		GlobalName: name,
 		Parameters: params,
 		Return:     ret,
 	}
@@ -442,7 +492,7 @@ func (m *MethodSet) Add(name string, params []Type, ret Type) error {
 	*m = append(*m, entry)
 
 	slices.SortStableFunc(*m, func(a, b Method) int {
-		return cmp.Compare(a.Name, b.Name)
+		return cmp.Compare(a.GlobalName, b.GlobalName)
 	})
 
 	return nil
@@ -450,7 +500,7 @@ func (m *MethodSet) Add(name string, params []Type, ret Type) error {
 
 func (m MethodSet) Has(name string) bool {
 	return slices.ContainsFunc(m, func(method Method) bool {
-		return method.Name == name
+		return method.GlobalName == name
 	})
 }
 
@@ -470,6 +520,7 @@ func (m MethodSet) Subset(o MethodSet) bool {
 
 type DerivedType struct {
 	name       string
+	pkg        *Package
 	methods    MethodSet
 	ptrMethods MethodSet
 	underlying Type
@@ -479,6 +530,14 @@ type DerivedType struct {
 
 func (t *DerivedType) Name() string {
 	return t.name
+}
+
+func (t *DerivedType) Package() *Package {
+	return t.pkg
+}
+
+func (t *DerivedType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("%s.%s", t.pkg.QualifiedName(), t.GlobalName()))
 }
 
 func (t *DerivedType) Kind() Kind {
@@ -527,7 +586,7 @@ func (t *DerivedType) Methods(ptr bool) MethodSet {
 	}
 
 	slices.SortStableFunc(ret, func(a, b Method) int {
-		return cmp.Compare(a.Name, b.Name)
+		return cmp.Compare(a.GlobalName, b.GlobalName)
 	})
 
 	return ret
@@ -572,14 +631,18 @@ func NewPointerType(pointee Type) *PointerType {
 	return &PointerType{pointee: pointee}
 }
 
-func (PointerType) Kind() Kind { return KindPointer }
-func (PointerType) Size() Size { return 1 }
+func (*PointerType) Kind() Kind { return KindPointer }
+func (*PointerType) Size() Size { return 1 }
 
-func (t PointerType) String() string {
+func (t *PointerType) String() string {
 	return fmt.Sprintf("*%s", t.Pointee().String())
 }
 
-func (t PointerType) Pointee() Type {
+func (t *PointerType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("*%s", t.Pointee().String()))
+}
+
+func (t *PointerType) Pointee() Type {
 	return t.pointee
 }
 
@@ -589,12 +652,15 @@ type SliceType struct {
 	parser.Position
 }
 
-func (t SliceType) Kind() Kind { return KindSlice }
+func (t *SliceType) Kind() Kind { return KindSlice }
 
-func (t SliceType) String() string { return fmt.Sprintf("[]%s", t.elem.String()) }
+func (t *SliceType) String() string { return fmt.Sprintf("[]%s", t.elem.String()) }
+func (t *SliceType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("[]%s", string(t.elem.GlobalName())))
+}
 
-func (t SliceType) Elem() Type { return t.elem }
-func (SliceType) Size() Size   { return 3 }
+func (t *SliceType) Elem() Type { return t.elem }
+func (*SliceType) Size() Size   { return 3 }
 
 var sliceHeader = NewTupleType(
 	IntType,
@@ -609,13 +675,16 @@ type ArrayType struct {
 	parser.Position
 }
 
-func (t ArrayType) Kind() Kind { return KindArray }
+func (t *ArrayType) Kind() Kind { return KindArray }
 
-func (t ArrayType) String() string { return fmt.Sprintf("[%d]%s", t.length, t.elem.String()) }
+func (t *ArrayType) String() string { return fmt.Sprintf("[%d]%s", t.length, t.elem.String()) }
+func (t *ArrayType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("[%d]%s", t.length, string(t.elem.GlobalName())))
+}
 
-func (t ArrayType) Elem() Type  { return t.elem }
-func (t ArrayType) Length() int { return t.length }
-func (t ArrayType) Size() Size  { return t.elem.Size() * Size(t.length) }
+func (t *ArrayType) Elem() Type  { return t.elem }
+func (t *ArrayType) Length() int { return t.length }
+func (t *ArrayType) Size() Size  { return t.elem.Size() * Size(t.length) }
 
 type TupleType struct {
 	elems []Type
@@ -627,9 +696,9 @@ func NewTupleType(elems ...Type) *TupleType {
 	return &TupleType{elems: elems}
 }
 
-func (t TupleType) Kind() Kind { return KindTuple }
+func (t *TupleType) Kind() Kind { return KindTuple }
 
-func (t TupleType) String() string {
+func (t *TupleType) String() string {
 	var strs []string
 	for _, elem := range t.elems {
 		strs = append(strs, elem.String())
@@ -638,9 +707,18 @@ func (t TupleType) String() string {
 	return fmt.Sprintf("(%s)", strings.Join(strs, ", "))
 }
 
-func (t TupleType) Elems() []Type { return t.elems }
+func (t *TupleType) GlobalName() TypeName {
+	var strs []string
+	for _, elem := range t.elems {
+		strs = append(strs, string(elem.GlobalName()))
+	}
 
-func (t TupleType) ElemOffset(index int) Size {
+	return TypeName(fmt.Sprintf("(%s)", strings.Join(strs, ", ")))
+}
+
+func (t *TupleType) Elems() []Type { return t.elems }
+
+func (t *TupleType) ElemOffset(index int) Size {
 	var size Size
 	for _, typ := range t.elems[:index] {
 		size += typ.Size()
@@ -648,7 +726,7 @@ func (t TupleType) ElemOffset(index int) Size {
 
 	return size
 }
-func (t TupleType) Size() Size {
+func (t *TupleType) Size() Size {
 	return t.ElemOffset(len(t.elems))
 }
 
@@ -663,6 +741,10 @@ func (*MapType) Kind() Kind { return KindMap }
 
 func (t *MapType) String() string {
 	return fmt.Sprintf("map[%s]%s", t.key.String(), t.value.String())
+}
+
+func (t *MapType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("map[%s]%s", string(t.key.GlobalName()), string(t.value.GlobalName())))
 }
 
 func (t *MapType) Key() Type {
@@ -768,15 +850,39 @@ func (t *FunctionType) Kind() Kind { return KindFunction }
 func (t *FunctionType) String() string {
 	params := make([]string, 0, len(t.Parameters))
 	for _, param := range t.Parameters {
-		params = append(params, param.String())
+		params = append(params, string(param.GlobalName()))
+	}
+
+	var recvStr string
+	if t.Receiver != VoidType {
+		recvStr = fmt.Sprintf("(%s) ", t.Receiver)
 	}
 
 	var retStr string
-	if t.Return != nil {
-		retStr = t.Return.String()
+	if t.Return != VoidType {
+		retStr = fmt.Sprintf(" %s", t.Return)
 	}
 
-	return fmt.Sprintf("func(%s) %s", strings.Join(params, ", "), retStr)
+	return fmt.Sprintf("%sfunc(%s)%s", recvStr, strings.Join(params, ", "), retStr)
+}
+
+func (t *FunctionType) GlobalName() TypeName {
+	params := make([]string, 0, len(t.Parameters))
+	for _, param := range t.Parameters {
+		params = append(params, string(param.GlobalName()))
+	}
+
+	var recvStr string
+	if t.Receiver != VoidType {
+		recvStr = fmt.Sprintf("(%s) ", string(t.Receiver.GlobalName()))
+	}
+
+	var retStr string
+	if t.Return != VoidType {
+		retStr = fmt.Sprintf(" %s", string(t.Return.GlobalName()))
+	}
+
+	return TypeName(fmt.Sprintf("%sfunc(%s)%s", recvStr, strings.Join(params, ", "), retStr))
 }
 
 func (FunctionType) Size() Size {
@@ -798,6 +904,17 @@ func (t *InterfaceType) String() string {
 	return fmt.Sprintf("interface{%s}", strings.Join(parts, "; "))
 }
 
+func (t *InterfaceType) GlobalName() TypeName {
+	methods := t.Methods()
+
+	var parts []string
+	for _, entry := range methods {
+		parts = append(parts, entry.typeNameString())
+	}
+
+	return TypeName(fmt.Sprintf("interface{%s}", strings.Join(parts, "; ")))
+}
+
 func (t *InterfaceType) Methods() MethodSet {
 	return t.methods
 }
@@ -811,7 +928,7 @@ func (*InterfaceType) Size() Size {
 }
 
 var interfaceTuple = NewTupleType(
-	IntType,
+	TypeKind(KindType),
 	NewPointerType(VoidType),
 )
 
@@ -838,3 +955,21 @@ type TypeConversionType struct {
 func (*TypeConversionType) Kind() Kind       { return KindTypeConversion }
 func (*TypeConversionType) Size() Size       { return 0 }
 func (t *TypeConversionType) String() string { return fmt.Sprintf("%s()", t.Type) }
+func (t *TypeConversionType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("%s()", string(t.Type.GlobalName())))
+}
+
+type InterfaceTypeCoercionExpression struct {
+	Interface  *InterfaceType
+	Expression Expression
+
+	parser.Position
+}
+
+func (e *InterfaceTypeCoercionExpression) Type() Type {
+	return e.Interface
+}
+
+func (e *InterfaceTypeCoercionExpression) WrapError(err error) error {
+	return e.Expression.WrapError(err)
+}

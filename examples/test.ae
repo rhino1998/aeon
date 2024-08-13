@@ -16,6 +16,8 @@ extern func print3(a string, b string, c string)
 
 extern func add(a int, b int) int
 
+var d any
+
 type D string
 
 type C struct {
@@ -28,11 +30,23 @@ func (c *C) C() D {
 	return D(c.A)
 }
 
-#init
 func whatever() {
-	for i := 0; i < 10000; i++ {
+  y := D("hello")
+  d = &y
+	for i := 0; i < 16; i++ {
+		print(itoa(f(i)))
 	}
   return
+}
+
+func f(a int) int {
+	if a <= 0 {
+		return 0
+	} else if a == 1 {
+		return 1
+	}
+
+	return f(a-1) + f(a-2)
 }
 
 #update

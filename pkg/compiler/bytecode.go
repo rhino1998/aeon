@@ -34,6 +34,13 @@ func newLabel() Label {
 	return Label(fmt.Sprintf("%d", labelIndex))
 }
 
+func (s *BytecodeSnippet) Str(dst *Operand, str String) {
+	*s = append(*s, Str{
+		Dst: dst,
+		Str: str,
+	})
+}
+
 func (s BytecodeSnippet) ResolveLabels() error {
 	labelIndices := make(map[Label]int)
 	for i, bc := range s {
@@ -66,21 +73,8 @@ func (s BytecodeSnippet) ResolveLabels() error {
 
 			return o, nil
 
-		case OperandKindOffset:
-			v := o.Value.(Offset)
-			v.A, err = resolveOperands(index, v.A)
-			if err != nil {
-				return nil, err
-			}
-			v.B, err = resolveOperands(index, v.B)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
-		case OperandKindStride:
-			v := o.Value.(Stride)
+		case OperandKindBinary:
+			v := o.Value.(BinaryOperand)
 			v.A, err = resolveOperands(index, v.A)
 			if err != nil {
 				return nil, err
@@ -141,6 +135,34 @@ func (s BytecodeSnippet) ResolveLabels() error {
 	// TODO: actual functionality
 
 	return nil
+}
+
+func (s BytecodeSnippet) OptimizeOperands() {
+	for i, bc := range s {
+		switch bc := bc.(type) {
+		case Jmp:
+			bc.Cond = bc.Cond.Optimize()
+			bc.Target = bc.Target.Optimize()
+			s[i] = bc
+		case Mov:
+			bc.Src = bc.Src.Optimize()
+			bc.Dst = bc.Dst.Optimize()
+			s[i] = bc
+		case BinOp:
+			bc.Left = bc.Left.Optimize()
+			bc.Right = bc.Right.Optimize()
+			bc.Dst = bc.Dst.Optimize()
+			s[i] = bc
+		case UnOp:
+			bc.Src = bc.Src.Optimize()
+			bc.Dst = bc.Dst.Optimize()
+			s[i] = bc
+		case Str:
+			bc.Dst = bc.Dst.Optimize()
+			s[i] = bc
+		}
+	}
+
 }
 
 func (s *BytecodeSnippet) LabelFirst(labels ...Label) {
@@ -235,8 +257,6 @@ func (Float) immediate() {}
 func (Float) Kind() Kind { return KindFloat }
 
 type String string
-
-func (String) immediate() {}
 
 func (String) Kind() Kind { return KindString }
 
@@ -414,11 +434,11 @@ type Call struct {
 }
 
 func (c Call) String() string {
-	return fmt.Sprintf("CALL(%s) %s", c.Args, c.Func)
+	return fmt.Sprintf("CAL(%s) %s", c.Args, c.Func)
 }
 
 func (c Call) Name() string {
-	return "call"
+	return "cal"
 }
 
 func shortKind(k Kind) string {
@@ -457,4 +477,17 @@ func (j Jmp) Name() string {
 
 func (j Jmp) String() string {
 	return fmt.Sprintf("JMP %v %v", j.Target, j.Cond)
+}
+
+type Str struct {
+	Dst *Operand
+	Str String
+}
+
+func (s Str) Name() string {
+	return "str"
+}
+
+func (s Str) String() string {
+	return fmt.Sprintf("STR %v = %q", s.Dst, s.Str)
 }

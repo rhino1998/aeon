@@ -16,48 +16,62 @@ const (
 )
 
 type RuntimeExternFuncEntry struct {
-	ArgSize Size
-	Func    RuntimeExternFunc
+	ArgSize    Size
+	ReturnSize Size
+	Func       RuntimeExternFunc
 }
 
 func DefaultExternFuncs() RuntimeExternFuncs {
 	return RuntimeExternFuncs{
 		"print": {
-			ArgSize: 1,
-			Func: func(s []any) any {
-				log.Println(s[0])
-				return nil
+			ArgSize:    1,
+			ReturnSize: 0,
+			Func: func(r *Runtime, s []float64) float64 {
+				str, err := r.loadStr(Addr(s[0]))
+				if err != nil {
+					panic(err)
+				}
+				fmt.Println(str)
+				return 0
 			},
 		},
 		"itoa": {
-			ArgSize: 1,
-			Func: func(s []any) any {
-				return String(fmt.Sprintf("%d", int(s[0].(Int))))
+			ArgSize:    1,
+			ReturnSize: 1,
+			Func: func(r *Runtime, s []float64) float64 {
+				addr, err := r.allocStr(String(fmt.Sprintf("%d", int(s[0]))))
+				if err != nil {
+					panic(err)
+				}
+				return float64(addr)
 			},
 		},
 		"print3": {
-			ArgSize: 3,
-			Func: func(s []any) any {
-				log.Println(s...)
-				return nil
+			ArgSize:    3,
+			ReturnSize: 0,
+			Func: func(_ *Runtime, s []float64) float64 {
+				fmt.Println(s)
+				return 0
 			},
 		},
 		"printInt": {
-			ArgSize: 1,
-			Func: func(s []any) any {
-				log.Println(s[0])
-				return nil
+			ArgSize:    1,
+			ReturnSize: 0,
+			Func: func(_ *Runtime, s []float64) float64 {
+				fmt.Println(s[0])
+				return 0
 			},
 		},
 		"panic": {
 			ArgSize: 1,
-			Func: func(s []any) any {
+			Func: func(_ *Runtime, s []float64) float64 {
 				panic(s[0])
 			},
 		},
 		"add": {
-			ArgSize: 2,
-			Func: func(s []any) any {
+			ArgSize:    2,
+			ReturnSize: 1,
+			Func: func(r *Runtime, s []float64) float64 {
 				return opAdd[Int](s[0], s[1])
 			},
 		},
@@ -66,9 +80,9 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 
 const PageSize = 65535 // annoyingly not a power of 2
 
-type RuntimeExternFuncs map[string]RuntimeExternFuncEntry
+type RuntimeExternFuncs map[String]RuntimeExternFuncEntry
 
-type RuntimeExternFunc func([]any) any
+type RuntimeExternFunc func(*Runtime, []float64) float64
 
 type Runtime struct {
 	prog        *compiler.Program
@@ -78,12 +92,14 @@ type Runtime struct {
 
 	codePages [][PageSize]compiler.Bytecode
 
-	registers []any
+	registers []float64
 
-	memPages [][PageSize]any
+	memPages [][PageSize]float64
+	strIndex Addr
+	strPages [][PageSize]String
 }
 
-func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages int, registers int, debug bool) (*Runtime, error) {
+func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, strPages int, debug bool) (*Runtime, error) {
 	r := &Runtime{
 		prog:        prog,
 		externFuncs: externs,
@@ -91,8 +107,9 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages int
 		debug: debug,
 
 		codePages: make([][PageSize]compiler.Bytecode, (len(prog.Bytecode())+PageSize-1)/PageSize),
-		memPages:  make([][PageSize]any, memPages),
-		registers: make([]any, registers),
+		memPages:  make([][PageSize]float64, memPages),
+		strPages:  make([][PageSize]String, strPages),
+		registers: make([]float64, prog.Registers()),
 	}
 
 	for i, code := range prog.Bytecode() {
@@ -104,27 +121,27 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages int
 }
 
 func (r *Runtime) pc() compiler.Addr {
-	return Addr(r.registers[compiler.RegisterPC].(compiler.Int))
+	return Addr(r.registers[compiler.RegisterPC])
 }
 
 func (r *Runtime) setPC(addr compiler.Addr) {
-	r.registers[compiler.RegisterPC] = Int(addr)
+	r.registers[compiler.RegisterPC] = float64(addr)
 }
 
 func (r *Runtime) fp() compiler.Addr {
-	return Addr(r.registers[compiler.RegisterFP].(compiler.Int))
+	return Addr(r.registers[compiler.RegisterFP])
 }
 
 func (r *Runtime) setFP(addr compiler.Addr) {
-	r.registers[compiler.RegisterFP] = Int(addr)
+	r.registers[compiler.RegisterFP] = float64(addr)
 }
 
 func (r *Runtime) sp() compiler.Addr {
-	return Addr(r.registers[compiler.RegisterSP].(compiler.Int))
+	return Addr(r.registers[compiler.RegisterSP])
 }
 
 func (r *Runtime) setSP(addr compiler.Addr) {
-	r.registers[compiler.RegisterSP] = Int(addr)
+	r.registers[compiler.RegisterSP] = float64(addr)
 }
 
 func (r *Runtime) splitAddr(addr compiler.Addr) (uint64, uint64) {
@@ -145,22 +162,36 @@ func (r *Runtime) fetch(addr compiler.Addr) (compiler.Bytecode, error) {
 	return r.codePages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadAddr(addr compiler.Addr) (any, error) {
+func (r *Runtime) loadAddr(addr compiler.Addr) (float64, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
-		return nil, fmt.Errorf("invalid page 0x%08x for addr 0x%08x", page, addr)
+		return 0, fmt.Errorf("invalid page 0x%08x for addr 0x%08x", page, addr)
 	}
 
 	if pageAddr >= uint64(len(r.memPages[page])) {
-		return nil, fmt.Errorf("invalid page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, addr)
+		return 0, fmt.Errorf("invalid page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, addr)
 	}
 
 	return r.memPages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]any, error) {
-	var args []any
+func (r *Runtime) loadStr(addr compiler.Addr) (String, error) {
+	page, pageAddr := r.splitAddr(addr)
+
+	if page >= uint64(len(r.strPages)) {
+		return "", fmt.Errorf("invalid str page 0x%08x for addr 0x%08x", page, addr)
+	}
+
+	if pageAddr >= uint64(len(r.strPages[page])) {
+		return "", fmt.Errorf("invalid str page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, addr)
+	}
+
+	return r.strPages[page][pageAddr], nil
+}
+
+func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]float64, error) {
+	var args []float64
 	for offset := Size(0); offset < size; offset++ {
 		arg, err := r.loadAddr(sp.Offset(offset - size))
 		if err != nil {
@@ -173,7 +204,7 @@ func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]any, error) {
 	return args, nil
 }
 
-func (env *Runtime) storeAddr(addr compiler.Addr, val any) error {
+func (env *Runtime) storeAddr(addr compiler.Addr, val float64) error {
 	page := addr / 65536
 	pageAddr := addr % 65536
 
@@ -186,41 +217,70 @@ func (env *Runtime) storeAddr(addr compiler.Addr, val any) error {
 	}
 
 	env.memPages[page][pageAddr] = val
+
 	return nil
 }
 
-func (env *Runtime) push(val any) error {
+func (r *Runtime) storeStr(addr compiler.Addr, val String) error {
+	page, pageAddr := r.splitAddr(addr)
+
+	if page >= uint64(len(r.strPages)) {
+		return fmt.Errorf("invalid str page 0x%08x for addr 0x%08x", page, addr)
+	}
+
+	if pageAddr >= uint64(len(r.strPages[page])) {
+		return fmt.Errorf("invalid str page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, addr)
+	}
+
+	r.strPages[page][pageAddr] = val
+
+	return nil
+}
+
+func (r *Runtime) allocStr(val String) (Addr, error) {
+	r.strIndex++
+	page, pageAddr := r.splitAddr(r.strIndex)
+
+	if page >= uint64(len(r.strPages)) {
+		return 0, fmt.Errorf("invalid str page 0x%08x for addr 0x%08x", page, r.strIndex)
+	}
+
+	if pageAddr >= uint64(len(r.strPages[page])) {
+		return 0, fmt.Errorf("invalid str page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, r.strIndex)
+	}
+
+	r.strPages[page][pageAddr] = val
+
+	return r.strIndex, nil
+}
+
+func (env *Runtime) push(val float64) error {
 	err := env.storeAddr(env.sp(), val)
 	env.setSP(env.sp() + 1)
 	return err
 }
 
-func (r *Runtime) pop() (any, error) {
+func (r *Runtime) pop() (float64, error) {
 	val, err := r.loadAddr(r.sp())
-	r.zeroStack()
 	r.setSP(r.sp() - 1)
 	return val, err
 }
 
-func (r *Runtime) zeroStack() {
-	addr := r.sp()
-	for {
-		val, err := r.loadAddr(addr)
-		if err != nil {
-			return
-		}
-
-		if val == nil {
-			return
-		}
-
-		_ = r.storeAddr(addr, nil)
-	}
-}
-
 func (r *Runtime) loadImmediate(imm compiler.Immediate) loadFunc {
-	return loadFunc(func() (any, error) {
-		return imm, nil
+	return loadFunc(func() (float64, error) {
+		switch imm := imm.(type) {
+		case Int:
+			return float64(imm), nil
+		case Float:
+			return float64(imm), nil
+		case Bool:
+			if imm {
+				return 1, nil
+			}
+			return 0, nil
+		default:
+			panic("BAD IMMEDIATE TYPE")
+		}
 	})
 }
 
@@ -228,62 +288,83 @@ func (r *Runtime) loadIndirect(indirect compiler.Indirect) loadFunc {
 	return r.loadIndirectWithOffset(indirect.Ptr, 0)
 }
 
-func (r *Runtime) loadOffset(offset compiler.Offset) loadFunc {
-	return loadFunc(func() (any, error) {
-		a, err := r.load(offset.A)()
+func (r *Runtime) loadBinary(binop compiler.BinaryOperand) loadFunc {
+	return loadFunc(func() (float64, error) {
+		a, err := r.load(binop.A)()
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 
-		b, err := r.load(offset.B)()
+		b, err := r.load(binop.B)()
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 
-		return a.(Int) + b.(Int), nil
-	})
-}
-
-func (r *Runtime) loadStride(stride compiler.Stride) loadFunc {
-	return loadFunc(func() (any, error) {
-		a, err := r.load(stride.A)()
-		if err != nil {
-			return nil, err
+		switch binop.Op {
+		case "+":
+			return a + b, nil
+		case "-":
+			return a - b, nil
+		case "*":
+			return a * b, nil
+		case "<":
+			if a < b {
+				return 1, nil
+			} else {
+				return 0, nil
+			}
+		case "<=":
+			if a <= b {
+				return 1, nil
+			} else {
+				return 0, nil
+			}
+		case "==":
+			if a == b {
+				return 1, nil
+			} else {
+				return 0, nil
+			}
+		case "!=":
+			if a != b {
+				return 1, nil
+			} else {
+				return 0, nil
+			}
+		default:
+			return 0, fmt.Errorf("unhandled binary operand %v", binop.Op)
 		}
-
-		b, err := r.load(stride.B)()
-		if err != nil {
-			return nil, err
-		}
-
-		return a.(Int) * b.(Int), nil
 	})
 }
 
 func (r *Runtime) loadNot(not compiler.Not) loadFunc {
-	return loadFunc(func() (any, error) {
+	return loadFunc(func() (float64, error) {
 		a, err := r.load(not.A)()
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 
-		return !a.(Bool), nil
+		if a == 0 {
+			return 1, nil
+		}
+
+		return 0, nil
 	})
 }
 
 func (r *Runtime) loadIndirectWithOffset(indirect *compiler.Operand, offset Size) loadFunc {
-	return loadFunc(func() (any, error) {
+	return loadFunc(func() (float64, error) {
 		base, err := r.load(indirect)()
 		if err != nil {
-			return nil, err
+			return 0, err
 		}
 
-		return r.loadAddr(Addr(base.(compiler.Int)).Offset(offset))
+		return r.loadAddr(Addr(base).Offset(offset))
 	})
 }
 
 func (r *Runtime) loadRegister(reg compiler.Register) loadFunc {
-	return loadFunc(func() (any, error) {
+	return loadFunc(func() (float64, error) {
 		return r.registers[reg], nil
 	})
 }
@@ -296,19 +377,19 @@ func (r *Runtime) load(operand *compiler.Operand) loadFunc {
 		return r.loadIndirect(operand.Value.(compiler.Indirect))
 	case compiler.OperandKindRegister:
 		return r.loadRegister(operand.Value.(compiler.Register))
-	case compiler.OperandKindOffset:
-		return r.loadOffset(operand.Value.(compiler.Offset))
-	case compiler.OperandKindStride:
-		return r.loadStride(operand.Value.(compiler.Stride))
+	case compiler.OperandKindBinary:
+		return r.loadBinary(operand.Value.(compiler.BinaryOperand))
 	case compiler.OperandKindNot:
 		return r.loadNot(operand.Value.(compiler.Not))
 	default:
-		return nil
+		return func() (float64, error) {
+			return 0, fmt.Errorf("bad %s operand in runtime", operand.Kind)
+		}
 	}
 }
 
 func (r *Runtime) storeIndirect(indirect compiler.Indirect) storeFunc {
-	return storeFunc(func(val any, err error) error {
+	return storeFunc(func(val float64, err error) error {
 		if err != nil {
 			return err
 		}
@@ -318,12 +399,12 @@ func (r *Runtime) storeIndirect(indirect compiler.Indirect) storeFunc {
 			return err
 		}
 
-		return r.storeAddr(Addr(ptr.(compiler.Int)), val)
+		return r.storeAddr(Addr(ptr), val)
 	})
 }
 
 func (r *Runtime) storeRegister(reg compiler.Register) storeFunc {
-	return storeFunc(func(val any, err error) error {
+	return storeFunc(func(val float64, err error) error {
 		if err != nil {
 			return err
 		}
@@ -340,7 +421,12 @@ func (r *Runtime) store(operand *compiler.Operand) storeFunc {
 	case compiler.OperandKindRegister:
 		return r.storeRegister(operand.Value.(compiler.Register))
 	default:
-		return nil
+		return func(_ float64, err error) error {
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("bad %s store operand in runtime", operand.Kind)
+		}
 	}
 }
 
@@ -371,15 +457,15 @@ func (r *Runtime) Run(ctx context.Context) error {
 
 func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 	for reg := range r.registers {
-		r.registers[reg] = Int(0)
+		r.registers[reg] = 0
 	}
 
 	r.setSP(Addr(r.prog.GlobalSize()))
 	for range len(r.registers) - 2 {
-		r.push(Int(0))
+		r.push(0)
 	}
 
-	r.push(compiler.Int(0))
+	r.push(0)
 
 	r.setFP(r.sp() - 1)
 	r.setPC(pc)
@@ -392,7 +478,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 		default:
 		}
 
-		if r.sp() > 0x80 {
+		if r.sp() > 0x1000 {
 			return fmt.Errorf("stack overflow")
 		}
 
@@ -432,25 +518,32 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 			r.setSP(r.sp().Offset(code.Args))
 
-			switch funcType.(Int) {
+			switch int(funcType) {
 			case RuntimeFuncTypeExtern:
 				externName, err := r.loadIndirectWithOffset(code.Func, 3)()
 				if err != nil {
 					return fmt.Errorf("could not resolve extern function name")
 				}
 
-				entry, ok := r.externFuncs[string(externName.(String))]
+				externNameStr, err := r.loadStr(Addr(externName))
+				if err != nil {
+					return fmt.Errorf("could not load extern function name string")
+				}
+
+				// TODO load string
+
+				entry, ok := r.externFuncs[externNameStr]
 				if !ok {
-					return fmt.Errorf("undefined extern func %q", string(externName.(String)))
+					return fmt.Errorf("undefined extern func %q", string(externNameStr))
 				}
 
 				args, err := r.loadArgs(r.sp(), entry.ArgSize)
 				if err != nil {
 					return fmt.Errorf("failed to load %d args for extern %q", entry.ArgSize, code.Func)
 				}
-				ret := entry.Func(args)
-				if ret != nil {
-					r.storeAddr(r.sp().Offset(-code.Args), ret)
+				ret := entry.Func(r, args)
+				for i := range entry.ReturnSize {
+					r.storeAddr(r.sp().Offset(-code.Args).Offset(-i), ret)
 				}
 
 				if r.debug {
@@ -459,7 +552,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 						argStrs = append(argStrs, fmt.Sprintf("%v", arg))
 
 					}
-					log.Printf("extern call %s(%s) = %v", string(externName.(String)), strings.Join(argStrs, ", "), ret)
+					log.Printf("extern call %s(%s) = %v", string(externNameStr), strings.Join(argStrs, ", "), ret)
 				}
 
 				r.setSP(r.sp() - compiler.Addr(code.Args))
@@ -473,22 +566,16 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 				frameSize := Addr(len(r.registers))
 
-				for i := len(r.registers) - 1; i >= 1; i-- {
-					reg := Register(i)
-					err := r.storeAddr(r.sp()+frameSize-Addr(i)-1, r.registers[reg])
+				for reg := range Register(len(r.registers)) {
+					err := r.storeAddr(r.sp()+frameSize-Addr(reg)-1, r.registers[reg])
 					if err != nil {
 						return fmt.Errorf("failed to push %s", compiler.Register(reg))
 					}
 				}
 
-				err = r.storeAddr(r.sp()+frameSize-1, Int(pc))
-				if err != nil {
-					return fmt.Errorf("failed to push next pc: %w", err)
-				}
-
 				r.setSP(r.sp() + frameSize)
 				r.setFP(r.sp() - 1)
-				r.setPC(Addr(faddr.(Int)))
+				r.setPC(Addr(faddr))
 				continue
 			}
 
@@ -496,15 +583,8 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 		case compiler.Return:
 			fp := r.fp()
 
-			pcInt, err := loadType[Int](r, fp)
-			if err != nil {
-				return fmt.Errorf("failed to load pc from fp: %w", err)
-			}
-
-			r.setPC(Addr(pcInt))
-
-			for reg := range r.registers[1:] {
-				r.registers[reg+1], err = r.loadAddr(fp.Offset(-1).Offset(-compiler.Size(reg)))
+			for reg := range r.registers {
+				r.registers[reg], err = r.loadAddr(fp.Offset(-compiler.Size(reg)))
 				if err != nil {
 					return fmt.Errorf("failed to push %s", Register(reg))
 				}
@@ -531,27 +611,42 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				return err
 			}
 
-			if cond.(Bool) {
+			if cond != 0 {
 				val, err := r.load(code.Target)()
 				if err != nil {
 					return err
 				}
 
-				r.setPC(Addr(val.(Int)))
+				r.setPC(Addr(val))
 			}
 		case compiler.BinOp:
 			err = r.store(code.Dst)(
 				binaryOp(
+					r,
 					binaryOperatorFuncs[code.Op],
 					r.load(code.Left),
 					r.load(code.Right),
 				),
 			)
 		case compiler.UnOp:
-			switch code.Op {
-			default:
-				return fmt.Errorf("unrecognized unary operator %q", code.Op)
+			err = r.store(code.Dst)(
+				unaryOp(
+					r,
+					unaryOperatorFuncs[code.Op],
+					r.load(code.Src),
+				),
+			)
+		case compiler.Str:
+			addr, err := r.allocStr(code.Str)
+			if err != nil {
+				return err
 			}
+
+			err = r.store(code.Dst)(float64(addr), nil)
+			if err != nil {
+				return err
+			}
+
 		// case compiler.LAddr:
 		// 	addr, err := r.load(code.Src)()
 		// 	if err != nil {
@@ -572,28 +667,43 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 	}
 }
 
-type loadFunc func() (any, error)
+type loadFunc func() (float64, error)
 
-type storeFunc func(any, error) error
+type storeFunc func(float64, error) error
 
-type binaryOperatorFunc func(any, any) any
+type binaryOperatorFunc func(*Runtime, float64, float64) (float64, error)
 
-func binaryOp(op binaryOperatorFunc, loadA, loadB loadFunc) (any, error) {
+func binaryOp(r *Runtime, op binaryOperatorFunc, loadA, loadB loadFunc) (float64, error) {
 	if op == nil {
-		return nil, fmt.Errorf("invalid binary operation")
+		return 0, fmt.Errorf("invalid binary operation")
 	}
 
 	a, err := loadA()
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	b, err := loadB()
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 
-	return op(a, b), nil
+	return op(r, a, b)
+}
+
+type unaryOperatorFunc func(*Runtime, float64) (float64, error)
+
+func unaryOp(r *Runtime, op unaryOperatorFunc, loadA loadFunc) (float64, error) {
+	if op == nil {
+		return 0, fmt.Errorf("invalid unary operation")
+	}
+
+	a, err := loadA()
+	if err != nil {
+		return 0, err
+	}
+
+	return op(r, a)
 }
 
 type Float = compiler.Float
@@ -605,93 +715,189 @@ type Size = compiler.Size
 type Register = compiler.Register
 
 var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{
-	"I**I": opExp[Int],
-	"F**F": opExp[Float],
+	"I**I": mathBinOp(opExp[Int]),
+	"F**F": mathBinOp(opExp[Float]),
 
-	"I+I": opAdd[Int],
-	"F+F": opAdd[Float],
-	"S+S": opAdd[String],
+	"I+I": mathBinOp(opAdd[Int]),
+	"F+F": mathBinOp(opAdd[Float]),
+	"S+S": opAddStr,
 
-	"I-I": opSub[Int],
-	"F-F": opSub[Float],
+	"I-I": mathBinOp(opSub[Int]),
+	"F-F": mathBinOp(opSub[Float]),
 
-	"I*I": opMul[Int],
-	"F*F": opMul[Float],
+	"I*I": mathBinOp(opMul[Int]),
+	"F*F": mathBinOp(opMul[Float]),
 
-	"I/I": opDiv[Int],
-	"F/F": opDiv[Float],
+	"I/I": mathBinOp(opDiv[Int]),
+	"F/F": mathBinOp(opDiv[Float]),
 
-	"I%I": opMod[Int],
+	"I%I": mathBinOp(opMod[Int]),
 
-	"I<I": opLT[Int],
-	"F<F": opLT[Float],
+	"I<I": mathBinOp(opLT[Int]),
+	"F<F": mathBinOp(opLT[Float]),
 
-	"I<=I": opLTE[Int],
-	"F<=F": opLTE[Float],
+	"I<=I": mathBinOp(opLTE[Int]),
+	"F<=F": mathBinOp(opLTE[Float]),
 
-	"I>I": opGT[Int],
-	"F>F": opGT[Float],
+	"I>I": mathBinOp(opGT[Int]),
+	"F>F": mathBinOp(opGT[Float]),
 
-	"I>=I": opGTE[Int],
-	"F>=F": opGTE[Float],
+	"I>=I": mathBinOp(opGTE[Int]),
+	"F>=F": mathBinOp(opGTE[Float]),
 
-	"I==I": opEQ[Int],
-	"F==F": opEQ[Float],
-	"S==S": opEQ[String],
-	"B==B": opEQ[Bool],
+	"I==I": mathBinOp(opEQ[Int]),
+	"F==F": mathBinOp(opEQ[Float]),
+	"S==S": opEQStr,
+	"B==B": mathBinOp(opEQ[Bool]),
 
-	"I!=I": opNE[Int],
-	"F!=F": opNE[Float],
-	"S!=S": opNE[String],
-	"B!=B": opNE[Bool],
+	"I!=I": mathBinOp(opNE[Int]),
+	"F!=F": mathBinOp(opNE[Float]),
+	"S!=S": opNEStr,
+	"B!=B": mathBinOp(opNE[Bool]),
 }
 
-func opExp[T Int | Float](a, b any) any {
-	return T(math.Pow(float64(a.(T)), float64(b.(T))))
+func mathBinOp(f func(a, b float64) float64) binaryOperatorFunc {
+	return binaryOperatorFunc(func(_ *Runtime, a, b float64) (float64, error) {
+		return f(a, b), nil
+	})
 }
 
-func opAdd[T Int | String | Float](a, b any) any {
-	return a.(T) + b.(T)
+var unaryOperatorFuncs = map[compiler.Operation]unaryOperatorFunc{
+	"-I": mathUnOp(opNeg[Int]),
+	"-F": mathUnOp(opNeg[Float]),
 }
 
-func opSub[T Int | Float](a, b any) any {
-	return T(a.(T) - b.(T))
+func mathUnOp(f func(a float64) float64) unaryOperatorFunc {
+	return unaryOperatorFunc(func(_ *Runtime, a float64) (float64, error) {
+		return f(a), nil
+	})
 }
 
-func opMul[T Int | Float](a, b any) any {
-	return T(a.(T) * b.(T))
+func opNeg[T Int | Float](a float64) float64 {
+	return -float64(T(a))
 }
 
-func opDiv[T Int | Float](a, b any) any {
-	return T(a.(T) / b.(T))
+func opExp[T Int | Float](a, b float64) float64 {
+	return math.Pow(a, b)
 }
 
-func opMod[T Int](a, b any) any {
-	return T(a.(T) % b.(T))
+func opAdd[T Int | Float](a, b float64) float64 {
+	return float64(T(a) + T(b))
 }
 
-func opLT[T Int | Float](a, b any) any {
-	return Bool(a.(T) < b.(T))
+func opAddStr(r *Runtime, a, b float64) (float64, error) {
+	aStr, err := r.loadStr(Addr(a))
+	if err != nil {
+		return 0, err
+	}
+
+	bStr, err := r.loadStr(Addr(b))
+	if err != nil {
+		return 0, err
+	}
+
+	cStr := aStr + bStr
+
+	addr, err := r.allocStr(cStr)
+	if err != nil {
+		return 0, err
+	}
+
+	return float64(addr), nil
 }
 
-func opLTE[T Int | Float](a, b any) any {
-	return Bool(a.(T) <= b.(T))
+func opSub[T Int | Float](a, b float64) float64 {
+	return float64(T(a) - T(b))
 }
 
-func opGT[T Int | Float](a, b any) any {
-	return Bool(a.(T) > b.(T))
+func opMul[T Int | Float](a, b float64) float64 {
+	return float64(T(a) * T(b))
 }
 
-func opGTE[T Int | Float](a, b any) any {
-	return Bool(a.(T) >= b.(T))
+func opDiv[T Int | Float](a, b float64) float64 {
+	return float64(T(a) / T(b))
 }
 
-func opEQ[T Int | String | Float | Bool](a, b any) any {
-	return Bool(a.(T) == b.(T))
+func opMod[T Int](a, b float64) float64 {
+	return float64(T(a) % T(b))
 }
 
-func opNE[T Int | String | Float | Bool](a, b any) any {
-	return Bool(a.(T) != b.(T))
+func opLT[T Int | Float](a, b float64) float64 {
+	if a < b {
+		return 1
+	}
+	return 0
+}
+
+func opLTE[T Int | Float](a, b float64) float64 {
+	if a <= b {
+		return 1
+	}
+	return 0
+}
+
+func opGT[T Int | Float](a, b float64) float64 {
+	if a > b {
+		return 1
+	}
+	return 0
+}
+
+func opGTE[T Int | Float](a, b float64) float64 {
+	if a >= b {
+		return 1
+	}
+	return 0
+}
+
+func opEQ[T Int | Float | Bool](a, b float64) float64 {
+	if a == b {
+		return 1
+	}
+	return 0
+}
+
+func opEQStr(r *Runtime, a, b float64) (float64, error) {
+	aStr, err := r.loadStr(Addr(a))
+	if err != nil {
+		return 0, err
+	}
+
+	bStr, err := r.loadStr(Addr(b))
+	if err != nil {
+		return 0, err
+	}
+
+	if aStr == bStr {
+		return 1, nil
+	}
+
+	return 0, nil
+}
+
+func opNE[T Int | String | Float | Bool](a, b float64) float64 {
+	if a != b {
+		return 1
+	}
+	return 0
+}
+
+func opNEStr(r *Runtime, a, b float64) (float64, error) {
+	aStr, err := r.loadStr(Addr(a))
+	if err != nil {
+		return 0, err
+	}
+
+	bStr, err := r.loadStr(Addr(a))
+	if err != nil {
+		return 0, err
+	}
+
+	if aStr != bStr {
+		return 1, nil
+	}
+
+	return 0, nil
 }
 
 func (r *Runtime) printRegisters() {
@@ -716,41 +922,9 @@ func (r *Runtime) printStack() {
 			return
 		}
 
-		log.Printf("%s - %s", addr, val)
+		log.Printf("%s - 0x%04x", addr, int(val))
 
 		addr++
 	}
 
-}
-
-func loadType[T any](env *Runtime, addr Addr) (T, error) {
-	raw, err := env.loadAddr(addr)
-	if err != nil {
-		var ret T
-		return ret, err
-	}
-
-	t, ok := raw.(T)
-	if !ok {
-		var ret T
-		return ret, fmt.Errorf("expected type %T, got %T", ret, raw)
-	}
-
-	return t, nil
-}
-
-func pop[T any](env *Runtime) (T, error) {
-	raw, err := env.pop()
-	if err != nil {
-		var ret T
-		return ret, err
-	}
-
-	t, ok := raw.(T)
-	if !ok {
-		var ret T
-		return ret, fmt.Errorf("expected type %T, got %T", ret, raw)
-	}
-
-	return t, nil
 }
