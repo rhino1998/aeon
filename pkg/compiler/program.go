@@ -199,6 +199,12 @@ func (p *Package) SetAddr(addr Addr) {
 	for _, fun := range p.Functions() {
 		fun.SetAddr(fun.Addr() + addr)
 	}
+
+	for _, drv := range p.DerivedTypes() {
+		for _, met := range drv.MethodFunctions() {
+			met.SetAddr(met.Addr() + addr)
+		}
+	}
 }
 
 func (p *Package) Globals() []*Variable {

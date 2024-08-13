@@ -758,6 +758,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				errs.Add(expr.WrapError(fmt.Errorf("type conversion expects 1 parameter, got %d", len(expr.Args))))
 			}
 
+			arg, err := c.resolveExpressionTypes(expr.Args[0], TypeKind(ftype.Type.Kind()))
+			if err != nil {
+				errs.Add(err)
+			}
+
+			expr.Args[0] = arg
+
 			if len(expr.Args) > 0 && !IsConvertibleTo(expr.Args[0].Type(), ftype.Type) {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot convert type %v to %v", expr.Args[0].Type(), ftype.Type)))
 			}
@@ -892,6 +899,25 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 					Expression: receiver,
 					Operator:   OperatorDereference,
 				}
+			}
+
+			if !TypesEqual(receiver.Type(), targetReceiverType) {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot call method %q on type %s", expr.Key, typ)))
+			}
+
+			return &BoundMethodExpression{
+				Receiver: receiver,
+				Function: methodFunc,
+
+				Position: expr.Position,
+			}, nil
+		} else if !ptr && typ.Methods(true).Has(expr.Key) {
+			methodFunc := typ.Method(expr.Key)
+			targetReceiverType := methodFunc.Receiver().Type()
+			receiver := expr.Receiver
+			receiver = &UnaryExpression{
+				Expression: receiver,
+				Operator:   OperatorAddress,
 			}
 
 			if !TypesEqual(receiver.Type(), targetReceiverType) {

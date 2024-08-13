@@ -359,7 +359,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 		default:
 		}
 
-		if r.sp() > 0x45 {
+		if r.sp() > 0x80 {
 			return fmt.Errorf("stack overflow")
 		}
 

@@ -12,25 +12,24 @@ extern func print3(a string, b string, c string)
 
 extern func add(a int, b int) int
 
+type D string
+
 type C struct {
 	A string
 	B int
 }
 
-func (c C) C() string {
-	c.B = "9"
-	return c.B
+func (c *C) C() D {
+	c.A = "9"
+	return D(c.A)
 }
-
-
-
-type D string
 
 #init
 func whatever() {
 	var g C
-	print(D(g.A))
-	print(g.C())
+
+	print(string(D(g.A)))
+	print(string(g.C()))
 	print(g.A)
   return
 }

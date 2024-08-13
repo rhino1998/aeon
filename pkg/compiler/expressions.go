@@ -20,11 +20,11 @@ type DotExpression struct {
 }
 
 func (e *DotExpression) Type() Type {
-	return resolveDotExpressionType(e, BaseType(e.Receiver.Type()))
+	return resolveDotExpressionType(e, e.Receiver.Type())
 }
 
 func resolveDotExpressionType(e *DotExpression, typ Type) Type {
-	switch typ := typ.(type) {
+	switch typ := BaseType(typ).(type) {
 	case *StructType:
 		field, ok := typ.GetField(e.Key)
 		if !ok {

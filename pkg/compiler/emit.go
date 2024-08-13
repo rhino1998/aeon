@@ -917,6 +917,8 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			return bc, dst, nil
 		case *TypeConversionType:
+
+			log.Println(ftype.Type, expr.Args[0].Type())
 			if ftype.Type.Kind() == expr.Args[0].Type().Kind() {
 				argsBC, argsLoc, err := prog.compileBCExpression(ctx, expr.Args[0], scope, dst)
 				if err != nil {

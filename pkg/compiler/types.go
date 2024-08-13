@@ -122,6 +122,13 @@ func typesEqual(t1, t2 Type) bool {
 		default:
 			return false
 		}
+	case *PointerType:
+		switch t2 := t2.(type) {
+		case *PointerType:
+			return TypesEqual(t1.Pointee(), t2.Pointee())
+		default:
+			return false
+		}
 	case *DerivedType:
 		return t1 == t2
 	case *SliceType:
@@ -523,7 +530,7 @@ func (t *DerivedType) Methods(ptr bool) MethodSet {
 		return cmp.Compare(a.Name, b.Name)
 	})
 
-	return t.methods
+	return ret
 }
 
 func (t *DerivedType) Method(name string) *Function {
