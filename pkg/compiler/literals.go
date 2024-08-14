@@ -2,24 +2,33 @@ package compiler
 
 import "github.com/rhino1998/aeon/pkg/parser"
 
-type Literal[T any] struct {
-	value T
+type LiteralValue interface {
+	Kind() Kind
+	Location(*ValueScope) *Location
+}
+
+type Literal struct {
+	value LiteralValue
 	typ   Type
 
 	parser.Position
 }
 
-func NewLiteral[T interface{ Kind() Kind }](val T) *Literal[T] {
-	return &Literal[T]{
+func NewLiteral(val LiteralValue) *Literal {
+	return &Literal{
 		value: val,
 		typ:   TypeKind(val.Kind()),
 	}
 }
 
-func (l Literal[T]) Value() T {
+func (l Literal) Value() LiteralValue {
 	return l.value
 }
 
-func (l Literal[T]) Type() Type {
+func (l Literal) Evaluate() (LiteralValue, error) {
+	return l.value, nil
+}
+
+func (l Literal) Type() Type {
 	return l.typ
 }

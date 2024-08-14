@@ -146,6 +146,7 @@ type Package struct {
 	qualifiedName string
 	prog          *Program
 	scope         *SymbolScope
+	values        *ValueScope
 
 	varinit     *Function
 	initFuncs   []*Function
@@ -187,8 +188,8 @@ func (p *Package) ExternFunctions() []*ExternFunction {
 	return p.scope.ExternFunctions()
 }
 
-func (p *Package) Types() []*DerivedType {
-	return p.scope.Types()
+func (p *Package) KnownTypes() []Type {
+	return p.values.Types()
 }
 
 func (p *Package) Addr() Addr {

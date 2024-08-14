@@ -35,22 +35,6 @@ func (v *Variable) SetEscaping(escaping bool) {
 	v.escaping = true
 }
 
-type Constant struct {
-	name string
-	typ  Type
-	expr Expression
-
-	parser.Position
-}
-
-func (v *Constant) Name() string {
-	return v.name
-}
-
-func (v *Constant) Type() Type {
-	return v.typ
-}
-
 type SymbolReferenceExpression struct {
 	scope *SymbolScope
 	name  string

@@ -3,7 +3,6 @@ package compiler
 import (
 	"errors"
 	"fmt"
-	"log"
 
 	"github.com/rhino1998/aeon/pkg/parser"
 )
@@ -250,7 +249,7 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 			return nil, err
 		}
 
-		v.expr = expr
+		v.ConstantExpression = expr.(ConstantExpression)
 
 		if v.typ == nil {
 			v.typ = expr.Type()
@@ -775,7 +774,6 @@ func (c *Compiler) compileStatements(scope *SymbolScope, stmts []parser.Statemen
 
 		ret = append(ret, retStmt)
 
-		log.Printf("%p %T", scope, stmt)
 		scope = nextScope
 	}
 
@@ -785,7 +783,7 @@ func (c *Compiler) compileStatements(scope *SymbolScope, stmts []parser.Statemen
 func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expression, error) {
 	switch expr := expr.(type) {
 	case parser.FloatLiteral:
-		return &Literal[Float]{
+		return &Literal{
 			value: Float(expr.Value),
 
 			typ: TypeKind(KindFloat),
@@ -793,7 +791,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 			Position: expr.Position,
 		}, nil
 	case parser.IntLiteral:
-		return &Literal[Int]{
+		return &Literal{
 			value: Int(expr.Value),
 
 			typ: TypeKind(KindInt),
@@ -801,7 +799,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 			Position: expr.Position,
 		}, nil
 	case parser.StringLiteral:
-		return &Literal[String]{
+		return &Literal{
 			value: String(expr.Value),
 
 			typ: TypeKind(KindString),
@@ -809,7 +807,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 			Position: expr.Position,
 		}, nil
 	case parser.BoolLiteral:
-		return &Literal[Bool]{
+		return &Literal{
 			value: Bool(expr.Value),
 
 			typ: TypeKind(KindBool),
@@ -939,7 +937,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 			return nil, err
 		}
 
-		lengthLiteral, ok := lengthExpr.(*Literal[Int])
+		lengthLiteral, ok := lengthExpr.(*Literal)
 		if !ok {
 			return nil, expr.WrapError(fmt.Errorf("array size must be an integer literal"))
 		}

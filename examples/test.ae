@@ -33,6 +33,7 @@ func (c *C) C() D {
 func whatever() {
   y := D("hello")
   d = &y
+  d = nil
 	for i := 0; i < 16; i++ {
 		print(itoa(f(i)))
 	}

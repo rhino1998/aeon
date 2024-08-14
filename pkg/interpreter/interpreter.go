@@ -301,13 +301,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 
 func (s *State) executeExpression(scope *Scope, expr compiler.Expression) (Value, error) {
 	switch expr := expr.(type) {
-	case *compiler.Literal[compiler.Int]:
-		return NewConstant(expr.Type(), expr.Value()), nil
-	case *compiler.Literal[compiler.String]:
-		return NewConstant(expr.Type(), expr.Value()), nil
-	case *compiler.Literal[compiler.Float]:
-		return NewConstant(expr.Type(), expr.Value()), nil
-	case *compiler.Literal[compiler.Bool]:
+	case *compiler.Literal:
 		return NewConstant(expr.Type(), expr.Value()), nil
 	case *compiler.SymbolReferenceExpression:
 		val, ok := scope.Get(expr.Name())

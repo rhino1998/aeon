@@ -73,22 +73,6 @@ func (s *SymbolScope) Function() *Function {
 	return s.parent.Function()
 }
 
-func (s *SymbolScope) Types() []*DerivedType {
-	var typs []*DerivedType
-	for _, val := range s.scope {
-		switch val := val.(type) {
-		case *DerivedType:
-			typs = append(typs, val)
-		}
-	}
-
-	slices.SortFunc(typs, func(a, b *DerivedType) int {
-		return cmp.Compare(a.Name(), b.Name())
-	})
-
-	return typs
-}
-
 func (s *SymbolScope) Packages() []*Package {
 	var pkgs []*Package
 	for _, val := range s.scope {
@@ -398,6 +382,7 @@ type ValueScope struct {
 
 	function *Function
 	symbols  *SymbolScope
+	types    map[TypeName]Type
 
 	nextGlobal Size
 
@@ -410,10 +395,15 @@ type ValueScope struct {
 }
 
 func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
+	types := make(map[TypeName]Type)
+	for _, typ := range symbols.DerivedTypes() {
+		types[typ.GlobalName()] = typ
+	}
 	return &ValueScope{
 		symbols:       symbols,
 		function:      symbols.function,
 		variables:     make(map[string]*Location),
+		types:         types,
 		nextGlobal:    1,
 		nextLocal:     1,
 		maxLocal:      new(Size),
@@ -429,6 +419,7 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 
 		function:  scope.Function(),
 		variables: maps.Clone(vs.variables),
+		types:     vs.types,
 		maxLocal:  vs.maxLocal,
 		nextLocal: vs.nextLocal,
 
@@ -454,12 +445,12 @@ func (vs *ValueScope) newImmediate(imm Immediate) *Location {
 	}
 }
 
-func (vs *ValueScope) newConstant(name string, typ Type, imm Immediate) {
+func (vs *ValueScope) newConstant(name string, typ Type, op *Operand) {
 	vs.variables[name] = &Location{
 		Kind:    LocationKindConstant,
 		Name:    name,
 		Type:    typ,
-		Operand: ImmediateOperand(imm),
+		Operand: op,
 	}
 }
 
@@ -581,11 +572,29 @@ func (vs *ValueScope) Get(name string) (*Location, bool) {
 }
 
 func (vs *ValueScope) typeName(typ Type) *Location {
-	name := typ.GlobalName()
+	name := vs.registerType(typ)
 	return &Location{
 		Kind:    LocationKindConstant,
 		Name:    fmt.Sprintf("type %s", name),
 		Type:    TypeKind(KindType),
 		Operand: TypeOperand(name),
 	}
+}
+
+func (vs *ValueScope) Types() []Type {
+	return sortedMapByKey(vs.types)
+}
+
+func (vs *ValueScope) registerType(typ Type) TypeName {
+	typ = resolveType(typ)
+	name := typ.GlobalName()
+	if other, ok := vs.types[name]; ok {
+		if !TypesEqual(typ, other) {
+			panic(fmt.Errorf("duplicate non-equal types %s %s", typ, other))
+		}
+	}
+
+	vs.types[name] = typ
+
+	return name
 }

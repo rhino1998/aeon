@@ -34,9 +34,9 @@ func newLabel() Label {
 	return Label(fmt.Sprintf("%d", labelIndex))
 }
 
-func (s *BytecodeSnippet) Str(dst *Operand, str String) {
+func (s *BytecodeSnippet) Str(dst *Location, str String) {
 	*s = append(*s, Str{
-		Dst: dst,
+		Dst: dst.Operand,
 		Str: str,
 	})
 }
@@ -127,6 +127,100 @@ func (s BytecodeSnippet) ResolveLabels() error {
 				return fmt.Errorf("could not resolve label in %v: %w", bc, err)
 			}
 			bc.Target = target
+			s[i] = bc
+		default:
+		}
+	}
+
+	// TODO: actual functionality
+
+	return nil
+}
+
+func (s BytecodeSnippet) ResolveTypes(types []Type) error {
+	typeIndices := make(map[TypeName]int)
+	for i, typ := range types {
+		typeIndices[typ.GlobalName()] = i
+	}
+
+	var resolveOperands func(int, *Operand) (*Operand, error)
+	resolveOperands = func(index int, o *Operand) (*Operand, error) {
+		var err error
+		switch o.Kind {
+		case OperandKindImmediate, OperandKindRegister, OperandKindLabel:
+			return o, nil
+		case OperandKindVTableLookup:
+			v := o.Value.(VTableLookup)
+			v.Type, err = resolveOperands(index, v.Type)
+			if err != nil {
+				return nil, err
+			}
+			v.Method, err = resolveOperands(index, v.Method)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+
+		case OperandKindBinary:
+			v := o.Value.(BinaryOperand)
+			v.A, err = resolveOperands(index, v.A)
+			if err != nil {
+				return nil, err
+			}
+			v.B, err = resolveOperands(index, v.B)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+		case OperandKindIndirect:
+			v := o.Value.(Indirect)
+			v.Ptr, err = resolveOperands(index, v.Ptr)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+		case OperandKindNot:
+			v := o.Value.(Not)
+			v.A, err = resolveOperands(index, v.A)
+			if err != nil {
+				return nil, err
+			}
+			o.Value = v
+
+			return o, nil
+		case OperandKindType:
+			index, ok := typeIndices[o.Value.(TypeName)]
+			if !ok {
+				return nil, fmt.Errorf("unresolvable type %s", o.Value.(TypeName))
+			}
+
+			return ImmediateOperand(Int(index)), nil
+		default:
+			return nil, fmt.Errorf("unknonw operand kind %d", o.Kind)
+		}
+	}
+
+	for i := range s {
+		switch bc := ((s)[i]).(type) {
+		case Mov:
+			dst, err := resolveOperands(i, bc.Dst)
+			if err != nil {
+				return fmt.Errorf("could not resolve type in %v: %w", bc, err)
+			}
+			bc.Dst = dst
+
+			src, err := resolveOperands(i, bc.Src)
+			if err != nil {
+				return fmt.Errorf("could not resolve type in %v: %w", bc, err)
+			}
+			bc.Src = src
+
 			s[i] = bc
 		default:
 		}
@@ -244,6 +338,10 @@ type Int int64
 
 func (Int) immediate() {}
 
+func (i Int) Location(vs *ValueScope) *Location {
+	return vs.newImmediate(i)
+}
+
 func (Int) Kind() Kind { return KindInt }
 
 func (i Int) String() string {
@@ -254,9 +352,18 @@ type Float float64
 
 func (Float) immediate() {}
 
+func (f Float) Location(vs *ValueScope) *Location {
+	return vs.newImmediate(f)
+}
+
 func (Float) Kind() Kind { return KindFloat }
 
 type String string
+
+func (s String) Location(vs *ValueScope) *Location {
+	// TODO: this
+	panic("UNIMP")
+}
 
 func (String) Kind() Kind { return KindString }
 
@@ -267,6 +374,10 @@ func (s String) String() string {
 type Bool bool
 
 func (Bool) immediate() {}
+
+func (b Bool) Location(vs *ValueScope) *Location {
+	return vs.newImmediate(b)
+}
 
 func (Bool) Kind() Kind { return KindBool }
 

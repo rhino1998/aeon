@@ -29,9 +29,25 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 		}
 
 		prog.bytecode.Mount(pkg)
+
+		for _, typ := range pkg.KnownTypes() {
+			name := typ.GlobalName()
+			if other, ok := prog.types[name]; ok {
+				if !TypesEqual(typ, other) {
+					panic(fmt.Errorf("non-equal duplicate types %s %s", typ, other))
+				}
+			} else {
+				prog.types[name] = typ
+			}
+		}
 	}
 
 	err := prog.bytecode.ResolveLabels()
+	if err != nil {
+		return err
+	}
+
+	err = prog.bytecode.ResolveTypes(prog.Types())
 	if err != nil {
 		return err
 	}
@@ -46,26 +62,19 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 }
 
 func (pkg *Package) compileBytecode(ctx context.Context) error {
-	scope := BuiltinValues(pkg.prog.registers, pkg.scope)
+	pkg.values = BuiltinValues(pkg.prog.registers, pkg.scope)
 
+	// TODO: sort topologically
 	for _, constant := range pkg.Constants() {
-		// TODO: evaluate const exprs
-		switch expr := constant.expr.(type) {
-		case *Literal[String]:
-			// TODO: string consts
-			// scope.newConstant(constant.Name(), constant.Type(), expr.Value())
-		case *Literal[Int]:
-			scope.newConstant(constant.Name(), constant.Type(), expr.Value())
-		case *Literal[Bool]:
-			scope.newConstant(constant.Name(), constant.Type(), expr.Value())
-		case *Literal[Float]:
-			scope.newConstant(constant.Name(), constant.Type(), expr.Value())
-		default:
-			return expr.WrapError(fmt.Errorf("invalid constant type %T", expr))
+		val, err := constant.Evaluate()
+		if err != nil {
+			return err
 		}
+
+		pkg.values.newConstant(constant.Name(), constant.Type(), val.Location(pkg.values).Operand)
 	}
 
-	varInitFunc, err := pkg.compileVarInit(ctx, scope)
+	varInitFunc, err := pkg.compileVarInit(ctx, pkg.values)
 	if err != nil {
 		return err
 	}
@@ -73,7 +82,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 	pkg.bytecode.Mount(varInitFunc)
 
 	for _, fun := range pkg.Functions() {
-		err := fun.compileBytecode(ctx, scope)
+		err := fun.compileBytecode(ctx, pkg.values)
 		if err != nil {
 			return err
 		}
@@ -83,7 +92,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 
 	for _, drv := range pkg.DerivedTypes() {
 		for _, met := range drv.MethodFunctions() {
-			err := met.compileBytecode(ctx, scope)
+			err := met.compileBytecode(ctx, pkg.values)
 			if err != nil {
 				return err
 			}
@@ -110,7 +119,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 
 	fnameLocal := scope.newLocal("__funcname", StringType)
 	f.bytecode.Str(
-		fnameLocal.Operand,
+		fnameLocal,
 		String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
 	)
 
@@ -217,7 +226,7 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 
 	fnameLocal := scope.newLocal("__funcname", StringType)
 	f.bytecode.Str(
-		fnameLocal.Operand,
+		fnameLocal,
 		String(fmt.Sprintf("func %s", f.QualifiedName())),
 	)
 
@@ -716,7 +725,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 	var bc BytecodeSnippet
 
 	switch typ := BaseType(typ).(type) {
-	case *BasicType:
+	case TypeKind:
 		var imm Immediate
 		switch typ.Kind() {
 		case KindInt:
@@ -725,7 +734,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 			imm = Float(0)
 		case KindString:
 			// TODO: interning
-			bc.Str(dst.Operand, "")
+			bc.Str(dst, "")
 			return bc, dst, nil
 		case KindBool:
 			imm = Bool(false)
@@ -809,7 +818,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 	case *InterfaceType:
 		valBC, err := p.compileBCValuesLiteral(ctx, []Expression{
 			NewLiteral(NilType.GlobalName()),
-			NewLiteral(NilType),
+			NewLiteral(NilValue),
 		}, scope, dst.AsType(interfaceTuple))
 		if err != nil {
 			return nil, nil, err
@@ -826,19 +835,16 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, scope *ValueScope, dst *Location) ([]Bytecode, *Location, error) {
 	var bc BytecodeSnippet
 	switch expr := expr.(type) {
-	case *Literal[Int]:
-		return nil, scope.newImmediate(expr.Value()), nil
-	case *Literal[Float]:
-		return nil, scope.newImmediate(expr.Value()), nil
-	case *Literal[String]:
-		bc.Str(dst.Operand, expr.value)
-		return bc, dst, nil
-	case *Literal[Bool]:
-		return nil, scope.newImmediate(expr.Value()), nil
-	case *Literal[TypeName]:
-		return nil, scope.typeName(expr.Type()), nil
-	case *Literal[nilType]:
-		return prog.compileBCZeroValue(ctx, expr.Position, dst.Type, scope, dst)
+	case *Literal:
+		switch expr.Type().Kind() {
+		case KindNil:
+			return prog.compileBCZeroValue(ctx, expr.Position, dst.Type, scope, dst)
+		case KindString:
+			bc.Str(dst, expr.Value().(String))
+			return bc, dst, nil
+		default:
+			return nil, expr.Value().Location(scope), nil
+		}
 	case *CompilerFunctionReferenceExpression:
 		return nil, scope.newFunctionRef(expr.Function), nil
 	case *SymbolReferenceExpression:

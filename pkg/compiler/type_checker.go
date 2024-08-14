@@ -338,14 +338,8 @@ func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
 	}()
 
 	switch expr := expr.(type) {
-	case *Literal[Int]:
-		return expr, expr.WrapError(fmt.Errorf("cannot assign to int literal"))
-	case *Literal[Float]:
-		return expr, expr.WrapError(fmt.Errorf("cannot assign to float literal"))
-	case *Literal[String]:
-		return expr, expr.WrapError(fmt.Errorf("cannot assign to string literal"))
-	case *Literal[Bool]:
-		return expr, expr.WrapError(fmt.Errorf("cannot assign to bool literal"))
+	case *Literal:
+		return expr, expr.WrapError(fmt.Errorf("cannot assign to literal"))
 	case *SymbolReferenceExpression:
 		sym, ok := expr.scope.get(expr.Name())
 		if !ok {
@@ -361,6 +355,8 @@ func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
 			return expr, expr.WrapError(fmt.Errorf("cannot assign to package %q", expr.Name()))
 		case *Variable:
 			return expr, nil
+		case *Constant:
+			return expr, expr.WrapError(fmt.Errorf("cannot assign to constant %q", expr.Name()))
 		default:
 			return expr, expr.WrapError(fmt.Errorf("cannot assign to expression type: %T", expr))
 		}
@@ -490,178 +486,183 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 	}()
 
 	switch expr := expr.(type) {
-	case *Literal[Int]:
-		if bound == nil && IsUnspecified(expr.Type()) {
-			return &Literal[Int]{
-				value: expr.value,
-				typ:   IntType,
+	case *Literal:
+		switch val := expr.value.(type) {
+		case Int:
+			if bound == nil && IsUnspecified(expr.Type()) {
+				return &Literal{
+					value: expr.value,
+					typ:   IntType,
 
-				Position: expr.Position,
-			}, nil
-		}
-
-		switch bound.Kind() {
-		case KindFloat:
-			if IsUnspecified(bound) {
-				bound = FloatType
+					Position: expr.Position,
+				}, nil
 			}
 
-			expr.typ = bound
-			return &Literal[Float]{
-				value: Float(expr.value),
-				typ:   bound,
+			switch bound.Kind() {
+			case KindFloat:
+				if IsUnspecified(bound) {
+					bound = FloatType
+				}
 
-				Position: expr.Position,
-			}, nil
-		case KindInt:
-			if IsUnspecified(bound) {
-				bound = IntType
+				expr.typ = bound
+				return &Literal{
+					value: Float(expr.value.(Int)),
+					typ:   bound,
+
+					Position: expr.Position,
+				}, nil
+			case KindInt:
+				if IsUnspecified(bound) {
+					bound = IntType
+				}
+
+				return &Literal{
+					value: expr.value,
+					typ:   bound,
+
+					Position: expr.Position,
+				}, nil
+			case KindInterface:
+				err := c.checkInterfaceTypeCoercion(expr, bound)
+				if err != nil {
+					errs.Add(err)
+				}
+
+				return &Literal{
+					value: expr.value,
+					typ:   IntType,
+
+					Position: expr.Position,
+				}, nil
+			default:
+				return expr, expr.WrapError(fmt.Errorf("cannot coerce int literal into %s", bound))
+			}
+		case Float:
+			if bound == nil && IsUnspecified(expr.Type()) {
+				return &Literal{
+					value: expr.value,
+					typ:   FloatType,
+
+					Position: expr.Position,
+				}, nil
 			}
 
-			return &Literal[Int]{
-				value: expr.value,
-				typ:   bound,
+			switch bound.Kind() {
+			case KindFloat:
+				if IsUnspecified(bound) {
+					bound = FloatType
+				}
 
-				Position: expr.Position,
-			}, nil
-		case KindInterface:
-			err := c.checkInterfaceTypeCoercion(expr, bound)
-			if err != nil {
-				errs.Add(err)
+				expr.typ = bound
+				return &Literal{
+					value: expr.value,
+					typ:   bound,
+
+					Position: expr.Position,
+				}, nil
+			case KindInt:
+				if IsUnspecified(bound) {
+					bound = IntType
+				}
+
+				return &Literal{
+					value: Int(expr.value.(Float)),
+					typ:   bound,
+
+					Position: expr.Position,
+				}, nil
+			case KindInterface:
+				err := c.checkInterfaceTypeCoercion(expr, bound)
+				if err != nil {
+					errs.Add(err)
+				}
+
+				return &Literal{
+					value: expr.value,
+					typ:   FloatType,
+
+					Position: expr.Position,
+				}, nil
+			default:
+				return expr, expr.WrapError(fmt.Errorf("cannot coerce float literal into %s", bound))
+			}
+		case String:
+			if bound == nil && IsUnspecified(expr.Type()) {
+				return &Literal{
+					value: expr.value,
+					typ:   StringType,
+
+					Position: expr.Position,
+				}, nil
 			}
 
-			return &Literal[Int]{
-				value: expr.value,
-				typ:   IntType,
+			switch bound.Kind() {
+			case KindString:
+				if IsUnspecified(bound) {
+					bound = StringType
+				}
 
-				Position: expr.Position,
-			}, nil
+				expr.typ = bound
+				return &Literal{
+					value: expr.value,
+					typ:   bound,
+
+					Position: expr.Position,
+				}, nil
+			case KindInterface:
+				err := c.checkInterfaceTypeCoercion(expr, bound)
+				if err != nil {
+					errs.Add(err)
+				}
+
+				return &Literal{
+					value: expr.value,
+					typ:   StringType,
+
+					Position: expr.Position,
+				}, nil
+			default:
+				return expr, expr.WrapError(fmt.Errorf("cannot coerce string literal into %s", bound))
+			}
+		case Bool:
+			if bound == nil && IsUnspecified(expr.Type()) {
+				return &Literal{
+					value: expr.value,
+					typ:   StringType,
+
+					Position: expr.Position,
+				}, nil
+			}
+
+			switch bound.Kind() {
+			case KindBool:
+				if IsUnspecified(bound) {
+					bound = BoolType
+				}
+				expr.typ = bound
+				return &Literal{
+					value: expr.value,
+					typ:   bound,
+
+					Position: expr.Position,
+				}, nil
+			case KindInterface:
+				err := c.checkInterfaceTypeCoercion(expr, bound)
+				if err != nil {
+					errs.Add(err)
+				}
+
+				return &Literal{
+					value: expr.value,
+					typ:   BoolType,
+
+					Position: expr.Position,
+				}, nil
+			default:
+				return expr, expr.WrapError(fmt.Errorf("cannot coerce bool literal into %s", bound))
+			}
 		default:
-			return expr, expr.WrapError(fmt.Errorf("cannot coerce int literal into %s", bound))
-		}
-	case *Literal[Float]:
-		if bound == nil && IsUnspecified(expr.Type()) {
-			return &Literal[Float]{
-				value: expr.value,
-				typ:   FloatType,
-
-				Position: expr.Position,
-			}, nil
-		}
-
-		switch bound.Kind() {
-		case KindFloat:
-			if IsUnspecified(bound) {
-				bound = FloatType
-			}
-
-			expr.typ = bound
-			return &Literal[Float]{
-				value: expr.value,
-				typ:   bound,
-
-				Position: expr.Position,
-			}, nil
-		case KindInt:
-			if IsUnspecified(bound) {
-				bound = IntType
-			}
-
-			return &Literal[Int]{
-				value: Int(expr.value),
-				typ:   bound,
-
-				Position: expr.Position,
-			}, nil
-		case KindInterface:
-			err := c.checkInterfaceTypeCoercion(expr, bound)
-			if err != nil {
-				errs.Add(err)
-			}
-
-			return &Literal[Float]{
-				value: expr.value,
-				typ:   FloatType,
-
-				Position: expr.Position,
-			}, nil
-		default:
-			return expr, expr.WrapError(fmt.Errorf("cannot coerce float literal into %s", bound))
-		}
-	case *Literal[String]:
-		if bound == nil && IsUnspecified(expr.Type()) {
-			return &Literal[String]{
-				value: expr.value,
-				typ:   StringType,
-
-				Position: expr.Position,
-			}, nil
-		}
-
-		switch bound.Kind() {
-		case KindString:
-			if IsUnspecified(bound) {
-				bound = StringType
-			}
-
-			expr.typ = bound
-			return &Literal[String]{
-				value: expr.value,
-				typ:   bound,
-
-				Position: expr.Position,
-			}, nil
-		case KindInterface:
-			err := c.checkInterfaceTypeCoercion(expr, bound)
-			if err != nil {
-				errs.Add(err)
-			}
-
-			return &Literal[String]{
-				value: expr.value,
-				typ:   StringType,
-
-				Position: expr.Position,
-			}, nil
-		default:
-			return expr, expr.WrapError(fmt.Errorf("cannot coerce string literal into %s", bound))
-		}
-	case *Literal[Bool]:
-		if bound == nil && IsUnspecified(expr.Type()) {
-			return &Literal[Bool]{
-				value: expr.value,
-				typ:   StringType,
-
-				Position: expr.Position,
-			}, nil
-		}
-
-		switch bound.Kind() {
-		case KindBool:
-			if IsUnspecified(bound) {
-				bound = BoolType
-			}
-			expr.typ = bound
-			return &Literal[Bool]{
-				value: expr.value,
-				typ:   bound,
-
-				Position: expr.Position,
-			}, nil
-		case KindInterface:
-			err := c.checkInterfaceTypeCoercion(expr, bound)
-			if err != nil {
-				errs.Add(err)
-			}
-
-			return &Literal[Bool]{
-				value: expr.value,
-				typ:   BoolType,
-
-				Position: expr.Position,
-			}, nil
-		default:
-			return expr, expr.WrapError(fmt.Errorf("cannot coerce bool literal into %s", bound))
+			return expr, expr.WrapError(fmt.Errorf("unhandled literal type %T", val))
 		}
 	case *SymbolReferenceExpression:
 		sym := expr.Dereference()
@@ -678,6 +679,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			return expr, nil
 		case *ExternFunction:
 			return expr, nil
+		case *Constant:
+			val, err := sym.Evaluate()
+			if err != nil {
+				errs.Add(expr.WrapError(err))
+			}
+
+			return NewLiteral(val), nil
 		default:
 			return expr, expr.WrapError(fmt.Errorf("unhandled symbol type %T", sym))
 		}

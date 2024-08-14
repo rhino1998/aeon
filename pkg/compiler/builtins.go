@@ -1,33 +1,37 @@
 package compiler
 
 var (
-	IntType = &BasicType{
-		kind: KindInt,
-		name: "int",
-		size: 1,
+	IntType = &DerivedType{
+		name:       "int",
+		underlying: TypeKind(KindInt),
 	}
 
-	BoolType = &BasicType{
-		kind: KindBool,
-		name: "bool",
-		size: 1,
+	BoolType = &DerivedType{
+		name:       "bool",
+		underlying: TypeKind(KindBool),
 	}
 
-	StringType = &BasicType{
-		kind: KindString,
-		name: "string",
-		size: 1,
+	FloatType = &DerivedType{
+		name:       "float",
+		underlying: TypeKind(KindFloat),
 	}
 
-	FloatType = &BasicType{
-		kind: KindFloat,
-		name: "float",
-		size: 1,
+	StringType = &DerivedType{
+		name:       "string",
+		underlying: TypeKind(KindString),
 	}
 
 	AnyType = &DerivedType{
 		name:       "any",
 		underlying: &InterfaceType{},
+	}
+)
+
+var (
+	NilConstant = &Constant{
+		name:               "nil",
+		typ:                NilType,
+		ConstantExpression: NewLiteral(NilValue),
 	}
 )
 
@@ -39,12 +43,15 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(StringType)
 	s.put(FloatType)
 	s.put(AnyType)
+	s.put(NilConstant)
 
 	return s
 }
 
 func BuiltinValues(regs int, symbols *SymbolScope) *ValueScope {
 	s := NewValueScope(regs, symbols)
+
+	s.registerType(NilType)
 
 	return s
 }

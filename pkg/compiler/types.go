@@ -20,6 +20,14 @@ func (n TypeName) String() string {
 	return fmt.Sprintf("Type(%s)", string(n))
 }
 
+func (n TypeName) Location(vs *ValueScope) *Location {
+	typ, ok := vs.types[n]
+	if !ok {
+		panic(fmt.Errorf("bug: failed to resolve type %s", n))
+	}
+	return vs.typeName(typ)
+}
+
 var UnknownType = unknownType{}
 
 type unknownType struct{}
@@ -46,6 +54,17 @@ func (nilType) String() string       { return "<nil>" }
 func (nilType) GlobalName() TypeName { return "<nil>" }
 func (nilType) Kind() Kind           { return KindNil }
 func (nilType) Size() Size           { return 0 }
+
+var NilValue = nilValue{}
+
+type nilValue struct{}
+
+func (nilValue) immediate() {}
+
+func (nilValue) Kind() Kind { return KindNil }
+func (v nilValue) Location(vs *ValueScope) *Location {
+	panic("bug: evaluated nil location")
+}
 
 func IsValidMethodReceiverType(t Type) bool {
 	switch t := resolveType(t).(type) {
@@ -133,15 +152,10 @@ func typesEqual(t1, t2 Type) bool {
 	}
 
 	switch t1 := t1.(type) {
+	case nilType:
+		return t1 == t2
 	case TypeKind:
 		return t1 == t2
-	case *BasicType:
-		switch t2 := t2.(type) {
-		case *BasicType:
-			return *t1 == *t2
-		default:
-			return false
-		}
 	case *PointerType:
 		switch t2 := t2.(type) {
 		case *PointerType:
@@ -200,8 +214,6 @@ func IsUnspecified(typ Type) bool {
 func IsTypeResolvable(typ Type) bool {
 	switch typ := resolveType(typ).(type) {
 	case TypeKind:
-		return false
-	case *BasicType:
 		return true
 	case *PointerType:
 		return IsTypeResolvable(typ.Pointee())
@@ -365,18 +377,6 @@ type Type interface {
 	Size() Size
 }
 
-type BasicType struct {
-	name string
-	kind Kind
-	size Size
-}
-
-func (t BasicType) Kind() Kind           { return t.kind }
-func (t BasicType) Name() string         { return t.name }
-func (t BasicType) GlobalName() TypeName { return TypeName(t.name) }
-func (t BasicType) String() string       { return t.name }
-func (t BasicType) Size() Size           { return t.size }
-
 type ReferencedType struct {
 	s    *SymbolScope
 	name string
@@ -537,7 +537,10 @@ func (t *DerivedType) Package() *Package {
 }
 
 func (t *DerivedType) GlobalName() TypeName {
-	return TypeName(fmt.Sprintf("%s.%s", t.pkg.QualifiedName(), t.GlobalName()))
+	if t.pkg == nil {
+		return TypeName(fmt.Sprintf("%s", t.Name()))
+	}
+	return TypeName(fmt.Sprintf("%s.%s", t.pkg.QualifiedName(), t.Name()))
 }
 
 func (t *DerivedType) Kind() Kind {
@@ -639,7 +642,7 @@ func (t *PointerType) String() string {
 }
 
 func (t *PointerType) GlobalName() TypeName {
-	return TypeName(fmt.Sprintf("*%s", t.Pointee().String()))
+	return TypeName(fmt.Sprintf("*%s", string(t.Pointee().GlobalName())))
 }
 
 func (t *PointerType) Pointee() Type {
@@ -760,11 +763,29 @@ func (*MapType) Size() Size {
 }
 
 type StructType struct {
-	BasicType
-
 	fields []StructField
 
 	parser.Position
+}
+
+func (*StructType) Kind() Kind { return KindStruct }
+
+func (t *StructType) String() string {
+	var parts []string
+	for _, entry := range t.fields {
+		parts = append(parts, entry.String())
+	}
+
+	return fmt.Sprintf("struct{%s}", strings.Join(parts, "; "))
+}
+
+func (t *StructType) GlobalName() TypeName {
+	var parts []string
+	for _, entry := range t.fields {
+		parts = append(parts, entry.typeNameString())
+	}
+
+	return TypeName(fmt.Sprintf("struct{%s}", strings.Join(parts, "; ")))
 }
 
 func (t *StructType) Fields() []StructField {
@@ -819,6 +840,14 @@ type StructField struct {
 
 	// TODO: maybe tags
 	Tag string
+}
+
+func (f StructField) String() string {
+	return fmt.Sprintf("%s %s", f.Name, f.Type)
+}
+
+func (f StructField) typeNameString() string {
+	return fmt.Sprintf("%s %s", f.Name, string(f.Type.GlobalName()))
 }
 
 func (f StructField) IsExported() bool {

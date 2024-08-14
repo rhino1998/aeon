@@ -115,7 +115,7 @@ func (e *TupleExpression) Type() Type {
 }
 
 type ArrayExpression struct {
-	Length   *Literal[Int] // TODO: enforce known at compile time
+	Length   ConstantExpression // TODO: enforce known at compile time
 	ElemType Type
 	Elems    []Expression
 
@@ -123,8 +123,12 @@ type ArrayExpression struct {
 }
 
 func (e *ArrayExpression) Type() Type {
+	val, err := e.Length.Evaluate()
+	if err != nil {
+		panic("bug: unresolvable length in array definition")
+	}
 	return &ArrayType{
-		length: int(e.Length.value),
+		length: int(val.(Int)),
 		elem:   e.ElemType,
 	}
 }
