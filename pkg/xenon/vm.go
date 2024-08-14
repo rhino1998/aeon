@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	RuntimeFuncTypeExtern = 0
-	RuntimeFuncTypeFunc   = 1
+	RuntimeFuncTypeNil    = 0
+	RuntimeFuncTypeExtern = 1
+	RuntimeFuncTypeFunc   = 2
 )
 
 type RuntimeExternFuncEntry struct {
@@ -110,6 +111,12 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		memPages:  make([][PageSize]float64, memPages),
 		strPages:  make([][PageSize]String, strPages),
 		registers: make([]float64, prog.Registers()),
+	}
+
+	for i, str := range prog.Strings() {
+		page, pageAddr := r.splitAddr(compiler.Addr(i))
+		r.strPages[page][pageAddr] = str
+		r.strIndex++
 	}
 
 	for i, code := range prog.Bytecode() {
@@ -519,6 +526,8 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			r.setSP(r.sp().Offset(code.Args))
 
 			switch int(funcType) {
+			case RuntimeFuncTypeNil:
+				return fmt.Errorf("tried to call nil function reference")
 			case RuntimeFuncTypeExtern:
 				externName, err := r.loadIndirectWithOffset(code.Func, 3)()
 				if err != nil {
@@ -577,9 +586,9 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				r.setFP(r.sp() - 1)
 				r.setPC(Addr(faddr))
 				continue
+			default:
+				return fmt.Errorf("unhandled function type")
 			}
-
-			return fmt.Errorf("unhandled function type")
 		case compiler.Return:
 			fp := r.fp()
 

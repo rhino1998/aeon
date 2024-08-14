@@ -104,6 +104,8 @@ function @aeon_str_store($addr:number, $v:text):text
 
 function @aeon_str_init()
 	{{range $page := loop 0 .NumMemPages}}$aeon_str_page_{{$page}}.fill($PAGE_SIZE, ""){{"\n\t"}}{{end}}
+	{{range $i, $str := .Strings }}@aeon_str_store({{$i}}, "{{$str}}"){{"\n\t"}}{{end}}
+	$aeon_str_index = {{len .Strings}}
 
 function @aeon_str_alloc($v:text):number
 	$aeon_str_index++
@@ -193,16 +195,16 @@ function @aeon_load_addr($op:text):number
 	else
 		return @aeon_load_internal()
 
-function @aeon_mov_size($src:text, $dst:text, $size:number)
-	var $srcAddr = @aeon_load_addr($src)
+function @aeon_mov_size($dst:text, $src:text, $size:number)
 	var $dstAddr = @aeon_load_addr($dst)
+	var $srcAddr = @aeon_load_addr($src)
 
 	repeat $size ($offset)
 		@aeon_mem_store($dstAddr+$offset, @aeon_mem_load($srcAddr+$offset))
 
-function @aeon_mov_init($src:text, $dst:text, $size:number)
-	var $srcVal = @aeon_load($src)
+function @aeon_mov_init($dst:text, $src:text, $size:number)
 	var $dstAddr = @aeon_load_addr($dst)
+	var $srcVal = @aeon_load($src)
 
 	repeat $size ($offset)
 		@aeon_mem_store($dstAddr+$offset, $srcVal)
@@ -346,12 +348,11 @@ function @aeon_run($pc:number):number
 		if ($aeon_ops.0 == "mov")
 			var $size = $aeon_ops.3:number
 			if ($size == 1)
-
 				@aeon_store($aeon_ops.1, @aeon_load($aeon_ops.2))
 			elseif (last($aeon_ops.2) == "@")
-				@aeon_mov_size($aeon_ops.1, $aeon_ops.2)
+				@aeon_mov_size($aeon_ops.1, $aeon_ops.2, $size)
 			else
-				@aeon_mov_init($aeon_ops.1, $aeon_ops.2)
+				@aeon_mov_init($aeon_ops.1, $aeon_ops.2, $size)
 		elseif ($aeon_ops.0 == "bop")
 			@aeon_store($aeon_ops.1, @aeon_bop($aeon_ops.2, $aeon_ops.3, $aeon_ops.4))
 		elseif ($aeon_ops.0 == "uop")
@@ -363,11 +364,14 @@ function @aeon_run($pc:number):number
 			var $ftype = @aeon_load_field($aeon_ops.1, 0)
 			$aeon_reg.1 = $aeon_reg.1 + $aeon_ops.2:number
 			if ($ftype == 0)
+				print("panic: tried to call nil function")
+				@aeon_fatal()
+			elseif ($ftype == 1)
 				var $fname = @aeon_str_load(@aeon_load_field($aeon_ops.1, 3))
 			 	{{if .Debug}}print(text("extern {}", $fname)){{end}}
 				@aeon_call_extern($fname, $aeon_ops.2:number)
 				$aeon_reg.1 = $aeon_reg.1 - $aeon_ops.2:number
-			elseif ($ftype == 1)
+			elseif ($ftype == 2)
 				var $faddr = @aeon_load_field($aeon_ops.1, 3)
 				repeat {{.NumRegisters}} ($reg)
 					@aeon_mem_store($aeon_reg.1 + {{.NumRegisters}} - $reg - 1, $aeon_reg.$reg)

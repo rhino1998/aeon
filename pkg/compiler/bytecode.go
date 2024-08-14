@@ -53,57 +53,8 @@ func (s BytecodeSnippet) ResolveLabels() error {
 		}
 	}
 
-	var resolveOperands func(int, *Operand) (*Operand, error)
-	resolveOperands = func(index int, o *Operand) (*Operand, error) {
-		var err error
+	return s.walk(bytecodeOperandWalker(func(index int, o *Operand) (*Operand, error) {
 		switch o.Kind {
-		case OperandKindImmediate, OperandKindRegister:
-			return o, nil
-		case OperandKindVTableLookup:
-			v := o.Value.(VTableLookup)
-			v.Type, err = resolveOperands(index, v.Type)
-			if err != nil {
-				return nil, err
-			}
-			v.Method, err = resolveOperands(index, v.Method)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
-
-		case OperandKindBinary:
-			v := o.Value.(BinaryOperand)
-			v.A, err = resolveOperands(index, v.A)
-			if err != nil {
-				return nil, err
-			}
-			v.B, err = resolveOperands(index, v.B)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
-		case OperandKindIndirect:
-			v := o.Value.(Indirect)
-			v.Ptr, err = resolveOperands(index, v.Ptr)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
-		case OperandKindNot:
-			v := o.Value.(Not)
-			v.A, err = resolveOperands(index, v.A)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
 		case OperandKindLabel:
 			label := o.Value.(Label)
 
@@ -115,26 +66,9 @@ func (s BytecodeSnippet) ResolveLabels() error {
 			// TODO: maybe off by one
 			return ImmediateOperand(Int(labelIndex - index)), nil
 		default:
-			return nil, fmt.Errorf("unknonw operand kind %d", o.Kind)
+			return o, nil
 		}
-	}
-
-	for i := range s {
-		switch bc := ((s)[i]).(type) {
-		case Jmp:
-			target, err := resolveOperands(i, bc.Target)
-			if err != nil {
-				return fmt.Errorf("could not resolve label in %v: %w", bc, err)
-			}
-			bc.Target = target
-			s[i] = bc
-		default:
-		}
-	}
-
-	// TODO: actual functionality
-
-	return nil
+	}))
 }
 
 func (s BytecodeSnippet) ResolveTypes(types []Type) error {
@@ -143,57 +77,8 @@ func (s BytecodeSnippet) ResolveTypes(types []Type) error {
 		typeIndices[typ.GlobalName()] = i
 	}
 
-	var resolveOperands func(int, *Operand) (*Operand, error)
-	resolveOperands = func(index int, o *Operand) (*Operand, error) {
-		var err error
+	return s.walk(bytecodeOperandWalker(func(index int, o *Operand) (*Operand, error) {
 		switch o.Kind {
-		case OperandKindImmediate, OperandKindRegister, OperandKindLabel:
-			return o, nil
-		case OperandKindVTableLookup:
-			v := o.Value.(VTableLookup)
-			v.Type, err = resolveOperands(index, v.Type)
-			if err != nil {
-				return nil, err
-			}
-			v.Method, err = resolveOperands(index, v.Method)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
-
-		case OperandKindBinary:
-			v := o.Value.(BinaryOperand)
-			v.A, err = resolveOperands(index, v.A)
-			if err != nil {
-				return nil, err
-			}
-			v.B, err = resolveOperands(index, v.B)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
-		case OperandKindIndirect:
-			v := o.Value.(Indirect)
-			v.Ptr, err = resolveOperands(index, v.Ptr)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
-		case OperandKindNot:
-			v := o.Value.(Not)
-			v.A, err = resolveOperands(index, v.A)
-			if err != nil {
-				return nil, err
-			}
-			o.Value = v
-
-			return o, nil
 		case OperandKindType:
 			index, ok := typeIndices[o.Value.(TypeName)]
 			if !ok {
@@ -202,61 +87,190 @@ func (s BytecodeSnippet) ResolveTypes(types []Type) error {
 
 			return ImmediateOperand(Int(index)), nil
 		default:
-			return nil, fmt.Errorf("unknonw operand kind %d", o.Kind)
+			return o, nil
 		}
+	}))
+}
+
+func (s BytecodeSnippet) ResolveStrings(strings []String) error {
+	strIndices := make(map[String]int)
+	for i, typ := range strings {
+		strIndices[typ] = i
 	}
 
-	for i := range s {
-		switch bc := ((s)[i]).(type) {
-		case Mov:
-			dst, err := resolveOperands(i, bc.Dst)
-			if err != nil {
-				return fmt.Errorf("could not resolve type in %v: %w", bc, err)
+	return s.walk(bytecodeOperandWalker(func(index int, o *Operand) (*Operand, error) {
+		switch o.Kind {
+		case OperandKindString:
+			index, ok := strIndices[o.Value.(String)]
+			if !ok {
+				return nil, fmt.Errorf("unresolvable string %s", o.Value.(String))
 			}
-			bc.Dst = dst
 
-			src, err := resolveOperands(i, bc.Src)
-			if err != nil {
-				return fmt.Errorf("could not resolve type in %v: %w", bc, err)
-			}
-			bc.Src = src
-
-			s[i] = bc
+			return ImmediateOperand(Int(index)), nil
 		default:
+			return o, nil
+		}
+	}))
+}
+
+type bytecodeWalker struct {
+	Mov    func(int, Mov) (Bytecode, error)
+	Jmp    func(int, Jmp) (Bytecode, error)
+	BinOp  func(int, BinOp) (Bytecode, error)
+	UnOp   func(int, UnOp) (Bytecode, error)
+	Str    func(int, Str) (Bytecode, error)
+	Call   func(int, Call) (Bytecode, error)
+	Return func(int, Return) (Bytecode, error)
+}
+
+func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalker {
+	wi := func(index int) operandWalkFunc {
+		return func(o *Operand) (*Operand, error) {
+			return w(index, o)
 		}
 	}
 
-	// TODO: actual functionality
+	return bytecodeWalker{
+		Mov: func(index int, bc Mov) (Bytecode, error) {
+			var err error
+			bc.Dst, err = bc.Dst.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Src, err = bc.Src.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			return bc, nil
+		},
+		Jmp: func(index int, bc Jmp) (Bytecode, error) {
+			var err error
+			bc.Target, err = bc.Target.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Cond, err = bc.Cond.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			return bc, nil
+		},
+		BinOp: func(index int, bc BinOp) (Bytecode, error) {
+			var err error
+			bc.Dst, err = bc.Dst.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Left, err = bc.Left.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Right, err = bc.Right.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			return bc, nil
+		},
+		UnOp: func(index int, bc UnOp) (Bytecode, error) {
+			var err error
+			bc.Dst, err = bc.Dst.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Src, err = bc.Src.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			return bc, nil
+		},
+		Str: func(index int, bc Str) (Bytecode, error) {
+			var err error
+			bc.Dst, err = bc.Dst.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			return bc, nil
+		},
+		Call: func(index int, bc Call) (Bytecode, error) {
+			var err error
+			bc.Func, err = bc.Func.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			return bc, nil
+		},
+		Return: func(index int, bc Return) (Bytecode, error) {
+			return bc, nil
+		},
+	}
+}
+
+func (s BytecodeSnippet) walk(w bytecodeWalker) error {
+	for i, bc := range s {
+		var err error
+		switch bc := bc.(type) {
+		case Jmp:
+			if w.Jmp == nil {
+				continue
+			}
+			s[i], err = w.Jmp(i, bc)
+		case Mov:
+			if w.Mov == nil {
+				continue
+			}
+			s[i], err = w.Mov(i, bc)
+		case BinOp:
+			if w.BinOp == nil {
+				continue
+			}
+			s[i], err = w.BinOp(i, bc)
+		case UnOp:
+			if w.UnOp == nil {
+				continue
+			}
+			s[i], err = w.UnOp(i, bc)
+		case Str:
+			if w.Str == nil {
+				continue
+			}
+			s[i], err = w.Str(i, bc)
+		case Call:
+			if w.Str == nil {
+				continue
+			}
+			s[i], err = w.Call(i, bc)
+		case Return:
+			if w.Str == nil {
+				continue
+			}
+			s[i], err = w.Return(i, bc)
+		default:
+			return fmt.Errorf("unhandled bytecode type %T", bc)
+		}
+
+		if err != nil {
+			return err
+		}
+	}
 
 	return nil
 }
 
-func (s BytecodeSnippet) OptimizeOperands() {
-	for i, bc := range s {
-		switch bc := bc.(type) {
-		case Jmp:
-			bc.Cond = bc.Cond.Optimize()
-			bc.Target = bc.Target.Optimize()
-			s[i] = bc
-		case Mov:
-			bc.Src = bc.Src.Optimize()
-			bc.Dst = bc.Dst.Optimize()
-			s[i] = bc
-		case BinOp:
-			bc.Left = bc.Left.Optimize()
-			bc.Right = bc.Right.Optimize()
-			bc.Dst = bc.Dst.Optimize()
-			s[i] = bc
-		case UnOp:
-			bc.Src = bc.Src.Optimize()
-			bc.Dst = bc.Dst.Optimize()
-			s[i] = bc
-		case Str:
-			bc.Dst = bc.Dst.Optimize()
-			s[i] = bc
-		}
-	}
-
+func (s BytecodeSnippet) OptimizeOperands() error {
+	return s.walk(bytecodeOperandWalker(func(_ int, o *Operand) (*Operand, error) {
+		return o.Optimize(), nil
+	}))
 }
 
 func (s *BytecodeSnippet) LabelFirst(labels ...Label) {
@@ -361,8 +375,7 @@ func (Float) Kind() Kind { return KindFloat }
 type String string
 
 func (s String) Location(vs *ValueScope) *Location {
-	// TODO: this
-	panic("UNIMP")
+	return vs.getString(s)
 }
 
 func (String) Kind() Kind { return KindString }

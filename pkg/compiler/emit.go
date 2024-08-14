@@ -11,9 +11,9 @@ import (
 
 func (prog *Program) compileBytecode(ctx context.Context) error {
 	// TODO: sort by import orderings
-	registerOperands := make([]*Operand, prog.registers)
+	registerOperands := make([]*Operand, prog.Registers())
 
-	for reg := range Register(prog.registers) {
+	for reg := range Register(prog.Registers()) {
 		registerOperands[reg] = ImmediateOperand(Int(0))
 		prog.bytecode.Add(Mov{
 			Src:  registerOperands[reg],
@@ -40,6 +40,10 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 				prog.types[name] = typ
 			}
 		}
+
+		for _, str := range pkg.Strings() {
+			prog.strings[str] = struct{}{}
+		}
 	}
 
 	err := prog.bytecode.ResolveLabels()
@@ -48,6 +52,11 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 	}
 
 	err = prog.bytecode.ResolveTypes(prog.Types())
+	if err != nil {
+		return err
+	}
+
+	err = prog.bytecode.ResolveStrings(prog.Strings())
 	if err != nil {
 		return err
 	}
@@ -62,7 +71,7 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 }
 
 func (pkg *Package) compileBytecode(ctx context.Context) error {
-	pkg.values = BuiltinValues(pkg.prog.registers, pkg.scope)
+	pkg.values = BuiltinValues(pkg.prog.Registers(), pkg.scope)
 
 	// TODO: sort topologically
 	for _, constant := range pkg.Constants() {
@@ -115,14 +124,6 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 
 	scope = scope.sub(pkg.scope)
 
-	// TODO: string alloc
-
-	fnameLocal := scope.newLocal("__funcname", StringType)
-	f.bytecode.Str(
-		fnameLocal,
-		String(fmt.Sprintf("func %s.%s", f.Package().Name(), f.Name())),
-	)
-
 	numLocals := ImmediateOperand(Int(0))
 
 	f.bytecode.Add(BinOp{
@@ -131,6 +132,38 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		Left:  OperandRegisterSP,
 		Right: numLocals,
 	})
+
+	for _, externFunc := range pkg.ExternFunctions() {
+		ptr := scope.newGlobal(externFunc.Name(), externType)
+		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+			NewLiteral(Int(1)),
+			NewLiteral(String(externFunc.Name())),
+			NewLiteral(Int(0)),
+			NewLiteral(String(externFunc.Name())),
+		}, scope, ptr)
+		if err != nil {
+			return nil, err
+		}
+
+		f.bytecode.Add(hdrBC...)
+	}
+
+	for _, fun := range pkg.Functions() {
+		fName := fun.Name()
+		log.Println(fName)
+		ptr := scope.newGlobal(fName, funcType)
+		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+			NewLiteral(Int(2)),
+			NewLiteral(String(fun.pkg.qualifiedName)),
+			NewLiteral(Int(0)),
+			&CompilerFunctionReferenceExpression{fun},
+		}, scope, ptr)
+		if err != nil {
+			return nil, err
+		}
+
+		f.bytecode.Add(hdrBC...)
+	}
 
 	for _, global := range pkg.Globals() {
 		ptr := scope.newGlobal(global.Name(), global.Type())
@@ -163,37 +196,6 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		}
 	}
 
-	for _, externFunc := range pkg.ExternFunctions() {
-		ptr := scope.newGlobal(externFunc.Name(), externType)
-		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
-			NewLiteral(Int(0)),
-			NewLiteral(String(externFunc.Name())),
-			NewLiteral(Int(0)),
-			NewLiteral(String(externFunc.Name())),
-		}, scope, ptr)
-		if err != nil {
-			return nil, err
-		}
-
-		f.bytecode.Add(hdrBC...)
-	}
-
-	for _, fun := range pkg.Functions() {
-		fName := fun.Name()
-		ptr := scope.newGlobal(fName, funcType)
-		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
-			NewLiteral(Int(1)),
-			NewLiteral(String(fun.pkg.qualifiedName)),
-			NewLiteral(Int(0)),
-			&CompilerFunctionReferenceExpression{fun},
-		}, scope, ptr)
-		if err != nil {
-			return nil, err
-		}
-
-		f.bytecode.Add(hdrBC...)
-	}
-
 	for _, drv := range pkg.DerivedTypes() {
 		for _, met := range drv.MethodFunctions() {
 			ptr := scope.newGlobal(met.Name(), funcType)
@@ -208,7 +210,6 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 			}
 
 			f.bytecode.Add(hdrBC...)
-
 		}
 	}
 
@@ -224,19 +225,12 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error {
 	scope = scope.sub(f.symbols)
 
-	fnameLocal := scope.newLocal("__funcname", StringType)
-	f.bytecode.Str(
-		fnameLocal,
-		String(fmt.Sprintf("func %s", f.QualifiedName())),
-	)
-
 	numLocals := ImmediateOperand(Int(0))
 
-	f.bytecode.Add(BinOp{
-		Op:    BinaryOperation(KindInt, OperatorAddition, KindInt),
-		Dst:   OperandRegisterSP,
-		Left:  OperandRegisterSP,
-		Right: numLocals,
+	f.bytecode.Add(Mov{
+		Dst:  OperandRegisterSP,
+		Src:  OperandRegisterSP.Offset(numLocals),
+		Size: 1,
 	})
 
 	var offset Size = 0
@@ -256,13 +250,25 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 	scope.newParam("__return", -Size(f.pkg.prog.FrameSize()+offset), f.Return())
 	offset += f.Return().Size()
 
-	for _, stmt := range f.Body() {
+	body := f.Body()
+
+	for _, stmt := range body {
 		bcs, err := f.pkg.prog.compileBCStatement(ctx, stmt, scope)
 		if err != nil {
 			return err
 		}
 
 		f.bytecode.Add(bcs...)
+	}
+
+	var last Statement
+	if len(body) > 0 {
+		last = body[len(body)-1]
+	}
+
+	// implicit return at end of void functions
+	if _, ok := last.(*ReturnStatement); !ok && f.Return() == VoidType {
+		f.bytecode.Add(Return{Args: offset})
 	}
 
 	// Can resolve here for debugging
@@ -733,9 +739,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 		case KindFloat:
 			imm = Float(0)
 		case KindString:
-			// TODO: interning
-			bc.Str(dst, "")
-			return bc, dst, nil
+			return bc, scope.getString(""), nil
 		case KindBool:
 			imm = Bool(false)
 		default:
@@ -827,6 +831,8 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 		bc.Add(valBC...)
 
 		return bc, dst, nil
+	case *FunctionType:
+		return p.compileBCZeroValue(ctx, pos, funcType, scope, dst.AsType(funcType))
 	default:
 		return nil, nil, pos.WrapError(fmt.Errorf("unhandled zero value for type %s", typ))
 	}
@@ -839,9 +845,6 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		switch expr.Type().Kind() {
 		case KindNil:
 			return prog.compileBCZeroValue(ctx, expr.Position, dst.Type, scope, dst)
-		case KindString:
-			bc.Str(dst, expr.Value().(String))
-			return bc, dst, nil
 		default:
 			return nil, expr.Value().Location(scope), nil
 		}

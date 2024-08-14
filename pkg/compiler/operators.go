@@ -55,7 +55,7 @@ const (
 func validateBinaryExpression(left Type, operator Operator, right Type) (Type, error) {
 	kind := binaryOperatorKinds[BinaryOperatorKinds{operator, left.Kind(), right.Kind()}]
 	if kind == KindUnknown {
-		return nil, fmt.Errorf("invalid binary operator %q for kinds %q and %q", operator, left.Kind(), right.Kind())
+		return nil, fmt.Errorf("invalid binary operator %q for types %q and %q", operator, left, right)
 	}
 
 	if !TypesEqual(left, right) {

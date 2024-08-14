@@ -54,3 +54,7 @@ func (e *ErrorSet) Defer(err error) error {
 
 	return e
 }
+
+type ErrorWrapper interface {
+	WrapError(err error) error
+}

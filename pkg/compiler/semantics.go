@@ -8,20 +8,20 @@ import (
 )
 
 func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File) error {
-	pkg := prog.AddPackage(string(entry.Package.Name))
+	pkg := prog.AddPackage(string(entry.Package.Name.Str))
 
 	for _, decl := range entry.Declarations {
 		switch decl := decl.(type) {
 		case parser.FunctionDeclaration:
-			pkg.scope.put(SymbolStub(decl.Name))
+			pkg.scope.put(SymbolStub(decl.Name.Str))
 		case parser.TypeDeclaration:
-			pkg.scope.put(SymbolStub(decl.Name))
+			pkg.scope.put(SymbolStub(decl.Name.Str))
 		case parser.ExternFunctionDeclaration:
-			pkg.scope.put(SymbolStub(decl.Name))
+			pkg.scope.put(SymbolStub(decl.Name.Str))
 		case parser.VarDeclaration:
-			pkg.scope.put(SymbolStub(decl.Name))
+			pkg.scope.put(SymbolStub(decl.Name.Str))
 		case parser.ConstDeclaration:
-			pkg.scope.put(SymbolStub(decl.Name))
+			pkg.scope.put(SymbolStub(decl.Name.Str))
 		}
 	}
 
@@ -89,7 +89,7 @@ func (c *Compiler) compileDirective(p *Package, scope *SymbolScope, dir parser.D
 
 	switch sym := sym.(type) {
 	case *Function:
-		switch dir.Name {
+		switch dir.Name.Str {
 		case "init":
 			if len(dir.Args) != 0 {
 				return nil, dir.WrapError(fmt.Errorf("expected 0 arguments for directive %q", dir.Name))
@@ -122,13 +122,13 @@ func (c *Compiler) compileDirective(p *Package, scope *SymbolScope, dir parser.D
 
 func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolScope, decl parser.ExternFunctionDeclaration) (*ExternFunction, error) {
 	f := &ExternFunction{
-		name: string(decl.Name),
+		name: string(decl.Name.Str),
 	}
 
 	for _, param := range decl.Parameters {
 		var paramName string
 		if param.Name != nil {
-			paramName = string(*param.Name)
+			paramName = string(param.Name.Str)
 		}
 
 		typ, err := c.compileTypeReference(scope, param.Type)
@@ -172,7 +172,7 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 	}
 
 	t := &DerivedType{
-		name:       string(decl.Name),
+		name:       string(decl.Name.Str),
 		pkg:        p,
 		underlying: underlying,
 
@@ -189,7 +189,7 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 
 func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl parser.VarDeclaration) (*Variable, error) {
 	v := &Variable{
-		name:   string(decl.Name),
+		name:   string(decl.Name.Str),
 		global: true,
 
 		Position: decl.Position,
@@ -230,7 +230,7 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 
 func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl parser.ConstDeclaration) (*Constant, error) {
 	v := &Constant{
-		name: string(decl.Name),
+		name: string(decl.Name.Str),
 
 		Position: decl.Position,
 	}
@@ -268,14 +268,21 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 	return v, nil
 }
 
-func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Type, error) {
+func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ Type, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	switch typ := typ.(type) {
+	case nil:
+		return UnknownType, nil
 	case parser.Identifier:
-		return &ReferencedType{s: scope, name: string(typ)}, nil
+		return &ReferencedType{s: scope, name: string(typ.Str)}, nil
 	case parser.PointerType:
 		pointee, err := c.compileTypeReference(scope, typ.Pointee)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		return &PointerType{
@@ -286,7 +293,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 	case parser.SliceType:
 		elem, err := c.compileTypeReference(scope, typ.Element)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		return &SliceType{
@@ -297,12 +304,12 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 	case parser.MapType:
 		key, err := c.compileTypeReference(scope, typ.Key)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		val, err := c.compileTypeReference(scope, typ.Key)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		return &MapType{
@@ -316,7 +323,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 		for _, elem := range typ.Elements {
 			elemTyp, err := c.compileTypeReference(scope, elem)
 			if err != nil {
-				return nil, err
+				errs.Add(err)
 			}
 
 			elems = append(elems, elemTyp)
@@ -330,7 +337,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 	case parser.ArrayType:
 		elem, err := c.compileTypeReference(scope, typ.Element)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		return &ArrayType{
@@ -344,11 +351,11 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 		for _, field := range typ.Fields {
 			fieldType, err := c.compileTypeReference(scope, field.Type)
 			if err != nil {
-				return nil, err
+				errs.Add(err)
 			}
 
 			fields = append(fields, StructField{
-				Name: string(field.Name),
+				Name: string(field.Name.Str),
 				Type: fieldType,
 			})
 		}
@@ -358,45 +365,106 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (Ty
 
 			Position: typ.Position,
 		}, nil
+	case parser.FunctionType:
+		var lastParamType parser.Type
+		parameters := make([]Type, len(typ.Parameters))
+		for i := len(typ.Parameters) - 1; i >= 0; i-- {
+			param := typ.Parameters[i]
+			if param.Type == nil {
+				if lastParamType == nil {
+					errs.Add(param.WrapError(fmt.Errorf("missing type for parameter %q", param.Name.Str)))
+				}
+
+				param.Type = lastParamType
+			} else {
+				lastParamType = param.Type
+			}
+
+			typ, err := c.compileTypeReference(scope, param.Type)
+			if err != nil {
+				errs.Add(err)
+			}
+
+			parameters[i] = typ
+		}
+		var ret Type = VoidType
+		if typ.Return != nil {
+			ret, err = c.compileTypeReference(scope, typ.Return)
+			if err != nil {
+				errs.Add(err)
+			}
+		}
+
+		return &FunctionType{
+			Receiver:   VoidType,
+			Return:     ret,
+			Parameters: parameters,
+		}, nil
 	default:
-		return nil, fmt.Errorf("unhandled type reference %q", typ)
+		return nil, typ.WrapError(fmt.Errorf("unhandled type reference %q", typ))
 	}
 }
 
-func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.FunctionDeclaration) (*Function, error) {
-	f := newFunction(string(decl.Name), p)
+func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.FunctionDeclaration) (_ *Function, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	f := newFunction(string(decl.Name.Str), p)
 
 	f.receiver = &Variable{
 		typ: VoidType,
 	}
 
-	for _, param := range decl.Parameters {
+	var lastParamType parser.Type
+	f.parameters = make([]*Variable, len(decl.Parameters))
+	for i := len(decl.Parameters) - 1; i >= 0; i-- {
+		param := decl.Parameters[i]
 		var paramName string
 		if param.Name != nil {
-			paramName = string(*param.Name)
+			paramName = string(param.Name.Str)
+		}
+
+		if param.Type == nil {
+			if lastParamType == nil {
+				errs.Add(param.WrapError(fmt.Errorf("missing type for parameter %q", param.Name.Str)))
+			}
+
+			param.Type = lastParamType
+		} else {
+			lastParamType = param.Type
 		}
 
 		typ, err := c.compileTypeReference(scope, param.Type)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		variable := &Variable{
 			name: paramName,
 			typ:  typ,
+
+			Position: param.Position,
 		}
 
-		if param.Name != nil {
-			f.symbols.put(variable)
-		}
+		f.parameters[i] = variable
+	}
 
-		f.parameters = append(f.parameters, variable)
+	for _, v := range f.parameters {
+		if v.Name() == "" {
+			continue
+		}
+		err := f.symbols.put(v)
+		if err != nil {
+			errs.Add(v.WrapError(err))
+		}
 	}
 
 	if decl.Return != nil {
 		typ, err := c.compileTypeReference(scope, decl.Return)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		f.ret = typ
@@ -406,35 +474,39 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 
 	f.symbols.put(f)
 
-	var err error
 	f.body, err = c.compileStatements(f.symbols, decl.Body)
 	if err != nil {
-		return nil, err
+		errs.Add(err)
 	}
 
 	err = scope.put(f)
 	if err != nil {
-		return nil, err
+		errs.Add(err)
 	}
 
 	return f, nil
 }
 
-func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.MethodDeclaration) (*Function, error) {
-	f := newFunction(string(decl.Name), p)
+func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.MethodDeclaration) (_ *Function, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	f := newFunction(string(decl.Name.Str), p)
 
 	var recvName string
 	if decl.Receiver.Name != nil {
-		recvName = string(*decl.Receiver.Name)
+		recvName = string(decl.Receiver.Name.Str)
 	}
 
 	recvTyp, err := c.compileTypeReference(scope, decl.Receiver.Type)
 	if err != nil {
-		return nil, err
+		errs.Add(err)
 	}
 
 	if !IsValidMethodReceiverType(recvTyp) {
-		return nil, decl.WrapError(fmt.Errorf("cannot use %s as a method receiver", recvTyp))
+		errs.Add(decl.WrapError(fmt.Errorf("cannot use %s as a method receiver", recvTyp)))
 	}
 
 	var recvDerivedType *DerivedType
@@ -459,15 +531,28 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 		f.symbols.put(recvVar)
 	}
 
-	for _, param := range decl.Parameters {
+	var lastParamType parser.Type
+	f.parameters = make([]*Variable, len(decl.Parameters))
+	for i := len(decl.Parameters) - 1; i >= 0; i-- {
+		param := decl.Parameters[i]
 		var paramName string
 		if param.Name != nil {
-			paramName = string(*param.Name)
+			paramName = string(param.Name.Str)
+		}
+
+		if param.Type == nil {
+			if lastParamType == nil {
+				errs.Add(param.WrapError(fmt.Errorf("missing type for parameter %q", param.Name.Str)))
+			}
+
+			param.Type = lastParamType
+		} else {
+			lastParamType = param.Type
 		}
 
 		typ, err := c.compileTypeReference(scope, param.Type)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		variable := &Variable{
@@ -475,17 +560,23 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 			typ:  typ,
 		}
 
-		if param.Name != nil {
-			f.symbols.put(variable)
-		}
+		f.parameters[i] = variable
+	}
 
-		f.parameters = append(f.parameters, variable)
+	for _, v := range f.parameters {
+		if v.Name() == "" {
+			continue
+		}
+		err := f.symbols.put(v)
+		if err != nil {
+			errs.Add(v.WrapError(err))
+		}
 	}
 
 	if decl.Return != nil {
 		typ, err := c.compileTypeReference(scope, decl.Return)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		f.ret = typ
@@ -497,10 +588,23 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 
 	f.body, err = c.compileStatements(f.symbols, decl.Body)
 	if err != nil {
-		return nil, err
+		errs.Add(err)
 	}
 
-	recvDerivedType.AddMethod(string(decl.Name), f)
+	if f.Return() != VoidType {
+		var last Statement
+		var wrapper ErrorWrapper = decl
+		if len(f.body) > 0 {
+			last = f.body[len(f.body)-1]
+			wrapper = last
+		}
+
+		if _, ok := last.(*ReturnStatement); !ok {
+			errs.Add(wrapper.WrapError(fmt.Errorf("missing return statement at end of non-void function")))
+		}
+	}
+
+	recvDerivedType.AddMethod(string(decl.Name.Str), f)
 
 	return f, nil
 }
@@ -532,7 +636,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		}
 
 		v := &Variable{
-			name: string(stmt.Name),
+			name: string(stmt.Name.Str),
 			typ:  typ,
 		}
 
@@ -554,7 +658,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		}
 
 		v := &Variable{
-			name: string(stmt.Name),
+			name: string(stmt.Name.Str),
 			typ:  expr.Type(),
 		}
 
@@ -835,7 +939,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.IdentifierExpr:
 		return &SymbolReferenceExpression{
 			scope: scope,
-			name:  string(expr.Identifier),
+			name:  string(expr.Identifier.Str),
 
 			Position: expr.Position,
 		}, nil
@@ -871,7 +975,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 
 		return &DotExpression{
 			Receiver: receiver,
-			Key:      string(expr.Key),
+			Key:      string(expr.Key.Str),
 
 			Position: expr.Position,
 		}, nil

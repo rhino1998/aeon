@@ -674,7 +674,11 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		case *Variable:
 			return expr, nil
 		case Type:
-			return expr, nil
+			return &TypeExpression{
+				typ: sym,
+
+				Position: expr.Position,
+			}, nil
 		case *Function:
 			return expr, nil
 		case *ExternFunction:
@@ -979,6 +983,17 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 		return expr, nil
 	case *PointerType:
 		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), true, bound)
+	case *TypeType:
+		methodFunc, ok := TypeMethod(typ.Type, expr.Key)
+		if !ok {
+			return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ.Type, expr.Key))
+		}
+
+		return &MethodFunctionExpression{
+			Function: methodFunc,
+
+			Position: expr.Position,
+		}, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ, expr.Key))
 	}

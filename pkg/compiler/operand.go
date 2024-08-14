@@ -16,6 +16,8 @@ const (
 	// stripped out before end of compilation
 	OperandKindLabel
 	OperandKindType
+	OperandKindString
+	OperandKindSymbol
 )
 
 func (s OperandKind) String() string {
@@ -36,6 +38,8 @@ func (s OperandKind) String() string {
 		return "<compiler label>"
 	case OperandKindType:
 		return "<compiler type>"
+	case OperandKindString:
+		return "<compiler string>"
 	default:
 		return "?"
 	}
@@ -44,6 +48,13 @@ func (s OperandKind) String() string {
 func TypeOperand(name TypeName) *Operand {
 	return &Operand{
 		Kind:  OperandKindType,
+		Value: name,
+	}
+}
+
+func StringOperand(name String) *Operand {
+	return &Operand{
+		Kind:  OperandKindString,
 		Value: name,
 	}
 }
@@ -87,6 +98,68 @@ func (o BinaryOperand) String() string {
 type Operand struct {
 	Kind  OperandKind `xc:"k"`
 	Value any         `xc:"v"`
+}
+
+type operandWalkFunc func(*Operand) (*Operand, error)
+
+func (o *Operand) walk(w operandWalkFunc) (*Operand, error) {
+	var err error
+	switch o.Kind {
+	case OperandKindIndirect:
+		v := o.Value.(Indirect)
+		v.Ptr, err = v.Ptr.walk(w)
+		if err != nil {
+			return nil, err
+		}
+
+		o.Value = v
+
+		return w(o)
+	case OperandKindVTableLookup:
+		v := o.Value.(VTableLookup)
+		v.Type, err = v.Type.walk(w)
+		if err != nil {
+			return nil, err
+		}
+
+		v.Method, err = w(v.Method)
+		if err != nil {
+			return nil, err
+		}
+
+		o.Value = v
+
+		return w(o)
+	case OperandKindBinary:
+		v := o.Value.(BinaryOperand)
+		v.A, err = v.A.walk(w)
+		if err != nil {
+			return nil, err
+		}
+
+		v.B, err = v.B.walk(w)
+		if err != nil {
+			return nil, err
+		}
+
+		o.Value = v
+
+		return w(o)
+	case OperandKindNot:
+		v := o.Value.(Not)
+		v.A, err = v.A.walk(w)
+		if err != nil {
+			return nil, err
+		}
+
+		o.Value = v
+
+		return w(o)
+	case OperandKindImmediate, OperandKindLabel, OperandKindString, OperandKindRegister, OperandKindType:
+		return w(o)
+	default:
+		return nil, fmt.Errorf("unhandled operand type %q", o.Kind)
+	}
 }
 
 func NewVTableLookup(typ, method *Operand) *Operand {

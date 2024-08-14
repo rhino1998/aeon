@@ -213,3 +213,18 @@ type MethodExpression struct {
 func (e *MethodExpression) Type() Type {
 	return e.Function.Type().(*FunctionType)
 }
+
+type MethodFunctionExpression struct {
+	Function *Function
+
+	parser.Position
+}
+
+func (e *MethodFunctionExpression) Type() Type {
+	ftype := e.Function.Type().(*FunctionType)
+
+	ftype.Parameters = append([]Type{ftype.Receiver}, ftype.Parameters...)
+	ftype.Receiver = VoidType
+
+	return ftype
+}

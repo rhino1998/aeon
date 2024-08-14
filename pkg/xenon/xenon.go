@@ -41,6 +41,7 @@ type xenonContext struct {
 	UpdateFuncs  []int
 
 	ExternFuncs  []ExternFuncEntry
+	Strings      []string
 	NumMemPages  int
 	NumStrPages  int
 	NumRegisters int
@@ -78,7 +79,14 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	xeCtx.OPSep = "\x9B"
 	xeCtx.UOPSep = "\x9C"
 
+	xeCtx.OPSep = "|"
+	xeCtx.UOPSep = ":"
+
 	var err error
+
+	for _, str := range prog.Strings() {
+		xeCtx.Strings = append(xeCtx.Strings, string(str))
+	}
 
 	for _, f := range prog.VarInitFunctions() {
 		xeCtx.VarInitFuncs = append(xeCtx.VarInitFuncs, int(f.Addr()))

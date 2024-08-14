@@ -6,6 +6,7 @@ type Program struct {
 	externFuncs map[string]*ExternFunction
 	packages    map[string]*Package
 	types       map[TypeName]Type
+	strings     map[String]struct{}
 
 	registers int
 	bytecode  BytecodeSnippet
@@ -18,14 +19,16 @@ func newProgram() *Program {
 		externFuncs: make(map[string]*ExternFunction),
 		packages:    make(map[string]*Package),
 		types:       make(map[TypeName]Type),
-		registers:   16,
+		strings:     make(map[String]struct{}),
+		registers:   0,
 	}
 
 	return p
 }
 
 func (p *Program) Registers() int {
-	return p.registers
+	// always need at least pc, sp, fp
+	return p.registers + 3
 }
 
 func (p *Program) Bytecode() []Bytecode {
@@ -33,7 +36,7 @@ func (p *Program) Bytecode() []Bytecode {
 }
 
 func (p *Program) FrameSize() Size {
-	return Size(p.registers)
+	return Size(p.Registers())
 }
 
 func (p *Program) AddPackage(name string) *Package {
@@ -64,6 +67,10 @@ func (p *Program) ExternFuncs() []*ExternFunction {
 
 func (p *Program) Types() []Type {
 	return sortedMapByKey(p.types)
+}
+
+func (p *Program) Strings() []String {
+	return sortedMapKeysByKey(p.strings)
 }
 
 func (p *Program) GlobalSize() Size {
@@ -239,4 +246,8 @@ func (p *Package) InitFunctions() []*Function {
 
 func (p *Package) UpdateFunctions() []*Function {
 	return p.updateFuncs
+}
+
+func (p *Package) Strings() []String {
+	return p.values.Strings()
 }

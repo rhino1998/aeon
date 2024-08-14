@@ -61,7 +61,11 @@ func pos(c *current) Position {
 	return Position{Line: c.pos.line, Column: c.pos.col, File: c.state["filename"].(string)}
 }
 
-type Identifier string
+type Identifier struct {
+	Str string
+
+	Position
+}
 
 func (Identifier) typ() {}
 
@@ -93,6 +97,8 @@ type TypeDeclaration struct {
 
 type Type interface {
 	typ()
+
+	WrapError(error) error
 }
 
 type PointerType struct {
@@ -145,6 +151,15 @@ type FunctionDeclaration struct {
 	Return     Type
 
 	Body []Statement
+
+	Position
+}
+
+type FunctionType struct {
+	baseType
+
+	Parameters []Parameter
+	Return     Type
 
 	Position
 }

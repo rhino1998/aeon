@@ -1,7 +1,10 @@
 {
   package parser
 
-  import "log"
+  import (
+		"log"
+		"slices"
+	)
 
   func anyToSlice[T any](s any) []T {
     var ret []T
@@ -106,7 +109,7 @@ ConstDeclaration <- "const" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr
   }, nil
 }
 
-Type <- Identifier / PointerType / MapType / ArrayType / SliceType / TupleType / StructType
+Type <- Identifier / PointerType / MapType / ArrayType / SliceType / TupleType / StructType / FunctionType
 
 PointerType <- '*' pointee:Type {
   return PointerType{
@@ -174,7 +177,10 @@ StructFieldListComma <- nl rest:StructFieldList {
 
 
 TupleKey <- [0-9]+ {
-  return Identifier(c.text), nil
+  return Identifier{
+		Str: string(c.text),
+		Position: pos(c),
+	}, nil
 }
 
 MapType <- "map" _ '[' _ key:Type _ ']' _ value:Type {
@@ -335,10 +341,12 @@ ExternFuncDeclaration <- "extern" _ "func" _ name:Identifier '(' params:Paramete
     Name: name.(Identifier),
     Parameters: maybeSlice[Parameter](params),
     Return: maybe[Type](ret),
+
+		Position: pos(c),
   }, nil
 }
 
-FunctionDeclaration <- "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:StatementList? '}' {
+FunctionDeclaration <- "func" _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' __ body:StatementList? '}' {
   return FunctionDeclaration{
     Name: name.(Identifier),
     Parameters: maybeSlice[Parameter](params),
@@ -349,7 +357,16 @@ FunctionDeclaration <- "func" _ name:Identifier '(' params:ParameterList? ')' _ 
   }, nil
 }
 
-MethodDeclaration <- "func" _ '(' _ receiver:Parameter _ ')' _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' body:StatementList? '}' {
+FunctionType <- "func" _ '(' params: ParameterList? ')' _ ret:Type? {
+	return FunctionType{
+		Parameters: maybeSlice[Parameter](params),
+		Return: maybe[Type](ret),
+
+    Position: pos(c),
+	}, nil
+}
+
+MethodDeclaration <- "func" _ '(' _ receiver:Receiver _ ')' _ name:Identifier '(' params:ParameterList? ')' _ ret:Type? _ '{' __ body:StatementList? '}' {
   return MethodDeclaration{
     Name: name.(Identifier),
 		Receiver: receiver.(Parameter),
@@ -371,11 +388,21 @@ StatementList <- __ stmt:Statement __ rest:StatementList? __ {
   ), nil
 }
 
-Parameter <- ParameterNamed / ParameterUnnamed
+Receiver <- ParameterNamed / ParameterUnnamed
 
 ParameterUnnamed <- typ:Type {
   return Parameter{
     Type: typ.(Type),
+
+		Position: pos(c),
+  }, nil
+}
+
+ParameterUntyped <- name:Identifier {
+  return Parameter{
+    Name: maybePtr[Identifier](name),
+
+		Position: pos(c),
   }, nil
 }
 
@@ -383,19 +410,48 @@ ParameterNamed <- name:Identifier _ typ:Type {
   return Parameter{
     Name: maybePtr[Identifier](name),
     Type: typ.(Type),
+
+		Position: pos(c),
   }, nil
 }
 
-ParameterList <- _ param:Parameter _ rest:ParameterListComma? {
-  return append([]Parameter{param.(Parameter)}, maybeSlice[Parameter](rest)...), nil
+ParameterList <- & ')' {
+	// empty parameter list
+	return []Parameter{}, nil
+} / _ param:ParameterListNamedParameter _ rest:ParameterListComma? {
+	// named parameter list
+	restSlice := maybeSlice[Parameter](rest)
+	if slices.ContainsFunc(restSlice, func(p Parameter) bool {
+		return p.Name == nil
+	}) {
+		return nil, pos(c).WrapError(fmt.Errorf("mixed named and unnamed parameters"))
+	}
+  return append([]Parameter{param.(Parameter)}, restSlice...), nil
+} / _ param:ParameterListUnnamedParameter _ !Identifier _ rest:ParameterListComma? {
+	// unnamed parameter list
+	restSlice := maybeSlice[Parameter](rest)
+	if slices.ContainsFunc(restSlice, func(p Parameter) bool {
+		return p.Name != nil
+	}) {
+		return nil, pos(c).WrapError(fmt.Errorf("mixed named and unnamed parameters"))
+	}
+  return append([]Parameter{param.(Parameter)}, restSlice...), nil
 }
 
 ParameterListComma <- ',' rest:ParameterList {
   return rest, nil
 }
 
+ParameterListNamedParameter <- ParameterNamed / ParameterUntyped
+
+ParameterListUnnamedParameter <- ParameterUnnamed
+
 Identifier <- !Keyword [_a-zA-Z][_a-zA-Z0-9]* {
-  return Identifier(c.text), nil
+  return Identifier{
+		Str: string(c.text),
+
+		Position: pos(c),
+	}, nil
 }
 
 ParenthesizedExpr <- '(' _ expr:Expr _ ')' {
@@ -406,7 +462,7 @@ ParenthesizedExpr <- '(' _ expr:Expr _ ')' {
   }, nil
 }
 
-IntLiteral <- '-'? ( [0-9]+ / ("0x" [0-9a-f]+) / ("0o" [0-7]) / ("0b" [0-1])) {
+IntLiteral <- '-'? ( [0-9_]+ / ("0x" [0-9a-f_]+) / ("0o" [0-7_]) / ("0b" [0-1_])) {
   i, err := strconv.ParseInt(string(c.text), 0, 64)
   if err != nil {
     return 0, err
@@ -458,6 +514,7 @@ BoolLiteral <- ("true" / "false") {
 IdentifierExpr <- ident:Identifier {
   return IdentifierExpr{
     Identifier: ident.(Identifier),
+
     Position: pos(c),
   }, nil
 }

@@ -6,11 +6,11 @@ type A *B
 
 type B [3]int
 
-extern func itoa(int) string
+extern func itoa(a int) string
 
-extern func print(string)
+extern func print(a string)
 
-extern func printInt(int)
+extern func printInt(a int)
 
 extern func print3(a string, b string, c string)
 
@@ -18,16 +18,19 @@ extern func add(a int, b int) int
 
 var d any
 
-type D string
+type D int
+func (D) l() {}
 
-type C struct {
-	A string
-	B int
+var k [20]int
+
+var x func(a,b int) = h
+
+func h(a,b int) {
+	print(itoa(a+b))
 }
 
-func (c *C) C() D {
-	c.A = "9"
-	return D(c.A)
+func g(a,b int) {
+	print(itoa(a-b))
 }
 
 func whatever() {
@@ -54,4 +57,11 @@ func f(a int) int {
 func hello() {
 	print("HELLO")
 	return
+#init
+func f2() {
+	x(1, 2)
+	x = g
+	x(1, 2)
+
+	s := D.l
 }

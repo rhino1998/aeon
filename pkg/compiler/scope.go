@@ -383,6 +383,7 @@ type ValueScope struct {
 	function *Function
 	symbols  *SymbolScope
 	types    map[TypeName]Type
+	strings  map[String]struct{}
 
 	nextGlobal Size
 
@@ -404,6 +405,7 @@ func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
 		function:      symbols.function,
 		variables:     make(map[string]*Location),
 		types:         types,
+		strings:       make(map[String]struct{}),
 		nextGlobal:    1,
 		nextLocal:     1,
 		maxLocal:      new(Size),
@@ -420,6 +422,7 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 		function:  scope.Function(),
 		variables: maps.Clone(vs.variables),
 		types:     vs.types,
+		strings:   vs.strings,
 		maxLocal:  vs.maxLocal,
 		nextLocal: vs.nextLocal,
 
@@ -563,9 +566,13 @@ func (vs *ValueScope) Mov(src, dst *Location) Mov {
 }
 
 func (vs *ValueScope) Get(name string) (*Location, bool) {
+	if vs == nil {
+		return nil, false
+	}
+
 	op, ok := vs.variables[name]
 	if !ok {
-		return nil, false
+		return vs.parent.Get(name)
 	}
 
 	return op, true
@@ -597,4 +604,18 @@ func (vs *ValueScope) registerType(typ Type) TypeName {
 	vs.types[name] = typ
 
 	return name
+}
+
+func (vs *ValueScope) getString(s String) *Location {
+	vs.strings[s] = struct{}{}
+	return &Location{
+		Kind:    LocationKindConstant,
+		Name:    fmt.Sprintf("string %q", string(s)),
+		Type:    TypeKind(KindString),
+		Operand: StringOperand(s),
+	}
+}
+
+func (vs *ValueScope) Strings() []String {
+	return sortedMapKeysByKey(vs.strings)
 }

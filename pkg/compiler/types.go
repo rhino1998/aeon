@@ -154,6 +154,8 @@ func typesEqual(t1, t2 Type) bool {
 	switch t1 := t1.(type) {
 	case nilType:
 		return t1 == t2
+	case voidType:
+		return t1 == t2
 	case TypeKind:
 		return t1 == t2
 	case *PointerType:
@@ -193,6 +195,29 @@ func typesEqual(t1, t2 Type) bool {
 		default:
 			return false
 		}
+	case *FunctionType:
+		switch t2 := t2.(type) {
+		case *FunctionType:
+			if !TypesEqual(t1.Receiver, t2.Receiver) {
+				return false
+			}
+
+			if !slices.EqualFunc(t1.Parameters, t2.Parameters, TypesEqual) {
+				return false
+			}
+
+			if !TypesEqual(t1.Receiver, t2.Receiver) {
+				return false
+			}
+
+			if !TypesEqual(t1.Return, t2.Return) {
+				return false
+			}
+
+			return true
+		default:
+			return false
+		}
 	default:
 		return false
 	}
@@ -214,6 +239,10 @@ func IsUnspecified(typ Type) bool {
 func IsTypeResolvable(typ Type) bool {
 	switch typ := resolveType(typ).(type) {
 	case TypeKind:
+		return true
+	case voidType:
+		return true
+	case nilType:
 		return true
 	case *PointerType:
 		return IsTypeResolvable(typ.Pointee())
@@ -238,6 +267,10 @@ func IsTypeResolvable(typ Type) bool {
 			if !IsTypeResolvable(param) {
 				return false
 			}
+		}
+
+		if !IsTypeResolvable(typ.Receiver) {
+			return false
 		}
 
 		if !IsTypeResolvable(typ.Return) {
@@ -516,6 +549,42 @@ func (m MethodSet) Subset(o MethodSet) bool {
 	}
 
 	return true
+}
+
+func TypeMethods(typ Type) MethodSet {
+	switch typ := resolveType(typ).(type) {
+	case *DerivedType:
+		return typ.Methods(false)
+	case *PointerType:
+		switch typ := resolveType(typ.pointee).(type) {
+		case *DerivedType:
+			return typ.Methods(false)
+		}
+	}
+
+	return nil
+}
+
+func TypeMethod(typ Type, name string) (*Function, bool) {
+	switch typ := resolveType(typ).(type) {
+	case *DerivedType:
+		if typ.Methods(false).Has(name) {
+			return typ.Method(name), true
+		}
+
+		return nil, false
+	case *PointerType:
+		switch typ := resolveType(typ.pointee).(type) {
+		case *DerivedType:
+			if typ.Methods(false).Has(name) {
+				return typ.Method(name), true
+			}
+
+			return nil, false
+		}
+	}
+
+	return nil, false
 }
 
 type DerivedType struct {
@@ -975,6 +1044,27 @@ func (t *InterfaceType) ImplementedBy(i Type) bool {
 	default:
 		return len(t.Methods()) == 0
 	}
+}
+
+type TypeType struct {
+	Type Type
+}
+
+func (*TypeType) Kind() Kind       { return KindType }
+func (*TypeType) Size() Size       { return 1 }
+func (t *TypeType) String() string { return fmt.Sprintf("Type(%s)", t.Type) }
+func (t *TypeType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("Type(%s)", string(t.Type.GlobalName())))
+}
+
+type TypeExpression struct {
+	typ Type
+
+	parser.Position
+}
+
+func (t *TypeExpression) Type() Type {
+	return &TypeType{Type: t.typ}
 }
 
 type TypeConversionType struct {

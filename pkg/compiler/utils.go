@@ -28,3 +28,10 @@ func sortedMapByKey[S ~string, T any](m map[S]T) []T {
 
 	return ret
 }
+
+func sortedMapKeysByKey[S ~string, T any](m map[S]T) []S {
+	keys := maps.Keys(m)
+	slices.SortStableFunc(keys, cmp.Compare)
+
+	return keys
+}
