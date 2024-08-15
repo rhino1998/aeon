@@ -54,7 +54,7 @@ func (e *SymbolReferenceExpression) Type() Type {
 
 	switch v := v.(type) {
 	case Type:
-		return &TypeConversionType{
+		return &TypeType{
 			Type: v,
 		}
 	case TypedSymbol:

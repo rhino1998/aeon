@@ -929,6 +929,18 @@ type FunctionType struct {
 	Return     Type
 }
 
+func (t *FunctionType) ToFunction() *FunctionType {
+	if t.Receiver == VoidType {
+		return t
+	}
+
+	return &FunctionType{
+		Receiver:   VoidType,
+		Parameters: append([]Type{t.Receiver}, t.Parameters...),
+		Return:     VoidType,
+	}
+}
+
 func (t *FunctionType) MethodEqual(o *FunctionType) bool {
 	if len(t.Parameters) != len(o.Parameters) {
 		return false
@@ -1069,13 +1081,6 @@ func (t *TypeExpression) Type() Type {
 
 type TypeConversionType struct {
 	Type Type
-}
-
-func (*TypeConversionType) Kind() Kind       { return KindTypeConversion }
-func (*TypeConversionType) Size() Size       { return 0 }
-func (t *TypeConversionType) String() string { return fmt.Sprintf("%s()", t.Type) }
-func (t *TypeConversionType) GlobalName() TypeName {
-	return TypeName(fmt.Sprintf("%s()", string(t.Type.GlobalName())))
 }
 
 type InterfaceTypeCoercionExpression struct {

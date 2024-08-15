@@ -52,6 +52,13 @@ func resolveDotExpressionType(e *DotExpression, typ Type) Type {
 		return ftype
 	case *PointerType:
 		return resolveDotExpressionType(e, typ.Pointee())
+	case *TypeType:
+		method, ok := TypeMethod(typ.Type, e.Key)
+		if !ok {
+			return UnknownType
+		}
+
+		return method.Type().(*FunctionType).ToFunction()
 	default:
 		return UnknownType
 	}

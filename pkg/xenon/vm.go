@@ -114,6 +114,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	}
 
 	for i, str := range prog.Strings() {
+		log.Printf("%02d: %s", i, str)
 		page, pageAddr := r.splitAddr(compiler.Addr(i))
 		r.strPages[page][pageAddr] = str
 		r.strIndex++
@@ -543,7 +544,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 				entry, ok := r.externFuncs[externNameStr]
 				if !ok {
-					return fmt.Errorf("undefined extern func %q", string(externNameStr))
+					return fmt.Errorf("undefined extern func %q %d", string(externNameStr), externName)
 				}
 
 				args, err := r.loadArgs(r.sp(), entry.ArgSize)

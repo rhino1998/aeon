@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 )
 
@@ -40,6 +41,15 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 		err := c.resolveFunctionTypes(f)
 		if err != nil {
 			errs.Add(err)
+		}
+	}
+
+	for _, typ := range pkg.DerivedTypes() {
+		for _, m := range typ.MethodFunctions() {
+			err := c.resolveFunctionTypes(m)
+			if err != nil {
+				errs.Add(err)
+			}
 		}
 	}
 
@@ -756,6 +766,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		switch ftype := BaseType(expr.Function.Type()).(type) {
 		case *FunctionType:
+			log.Println(expr.Function.(interface{ Name() string }).Name())
 			if len(ftype.Parameters) != len(expr.Args) {
 				errs.Add(expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(ftype.Parameters), len(expr.Args))))
 			}
@@ -772,7 +783,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 				expr.Args[i] = arg
 			}
-		case *TypeConversionType:
+		case *TypeType:
 			if len(expr.Args) != 1 {
 				errs.Add(expr.WrapError(fmt.Errorf("type conversion expects 1 parameter, got %d", len(expr.Args))))
 			}
@@ -984,16 +995,12 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 	case *PointerType:
 		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), true, bound)
 	case *TypeType:
-		methodFunc, ok := TypeMethod(typ.Type, expr.Key)
+		_, ok := TypeMethod(typ.Type, expr.Key)
 		if !ok {
 			return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ.Type, expr.Key))
 		}
 
-		return &MethodFunctionExpression{
-			Function: methodFunc,
-
-			Position: expr.Position,
-		}, nil
+		return expr, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ, expr.Key))
 	}

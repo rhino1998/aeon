@@ -200,7 +200,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		for _, met := range drv.MethodFunctions() {
 			ptr := scope.newGlobal(met.Name(), funcType)
 			hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
-				NewLiteral(Int(1)),
+				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
 				NewLiteral(Int(0)),
 				&CompilerFunctionReferenceExpression{met},
@@ -997,7 +997,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			}
 
 			return bc, dst, nil
-		case *TypeConversionType:
+		case *TypeType:
 			if ftype.Type.Kind() == expr.Args[0].Type().Kind() {
 				argsBC, argsLoc, err := prog.compileBCExpression(ctx, expr.Args[0], scope, dst)
 				if err != nil {
@@ -1115,6 +1115,8 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		}
 
 		return bc, dst, nil
+	case *TypeExpression:
+		return bc, scope.typeName(expr.typ), nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
@@ -1176,6 +1178,18 @@ func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpres
 		}
 
 		return nil, fieldLoc, nil
+	case *TypeType:
+		method, ok := TypeMethod(typ.Type, expr.Key)
+		if !ok {
+			return nil, nil, expr.WrapError(fmt.Errorf("could not resolve method %s on type %s", expr.Key, typ))
+		}
+
+		loc, ok := scope.Get(method.Name())
+		if !ok {
+			return nil, nil, expr.WrapError(fmt.Errorf("could not resolve method %s on type %s", expr.Key, typ))
+		}
+
+		return nil, loc, nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
 	}

@@ -117,7 +117,7 @@ func (e *CallExpression) Type() Type {
 	switch ftype := e.Function.Type().(type) {
 	case *FunctionType:
 		return ftype.Return
-	case *TypeConversionType:
+	case *TypeType:
 		return ftype.Type
 	default:
 		return UnknownType
@@ -221,10 +221,5 @@ type MethodFunctionExpression struct {
 }
 
 func (e *MethodFunctionExpression) Type() Type {
-	ftype := e.Function.Type().(*FunctionType)
-
-	ftype.Parameters = append([]Type{ftype.Receiver}, ftype.Parameters...)
-	ftype.Receiver = VoidType
-
-	return ftype
+	return e.Function.Type().(*FunctionType).ToFunction()
 }

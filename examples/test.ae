@@ -19,18 +19,9 @@ extern func add(a int, b int) int
 var d any
 
 type D int
-func (D) l() {}
 
-var k [20]int
-
-var x func(a,b int) = h
-
-func h(a,b int) {
-	print(itoa(a+b))
-}
-
-func g(a,b int) {
-	print(itoa(a-b))
+func (d D) l() {
+	print(itoa(int(d)))
 }
 
 func whatever() {
@@ -59,9 +50,6 @@ func hello() {
 	return
 #init
 func f2() {
-	x(1, 2)
-	x = g
-	x(1, 2)
-
 	s := D.l
+	s(5)
 }
