@@ -269,19 +269,6 @@ func (o *Operand) Optimize() *Operand {
 
 		if v.Left.Kind == OperandKindImmediate && v.Right.Kind == OperandKindImmediate && v.Op == "+" {
 			return ImmediateOperand(v.Left.Value.(Int) + v.Right.Value.(Int))
-		} else if v.Left.Kind == OperandKindBinary && v.Op == "+" {
-			rot := &Operand{
-				Kind: OperandKindBinary,
-				Value: BinaryOperand{
-					Left:  v.Left.Value.(BinaryOperand).Left,
-					Op:    "+",
-					Right: v.Left.Value.(BinaryOperand).Right.Offset(v.Right),
-				},
-			}
-
-			rot = rot.Optimize()
-
-			return rot
 		}
 
 		return o

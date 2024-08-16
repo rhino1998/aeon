@@ -46,10 +46,9 @@ func h(d D) {
 
 #init
 func f2() {
-  var y iface = D(7)
-  y = E(7)
+  x := [3]iface{E(7), E(7), D(7)}
 
-  y.l()
-  y = D(7)
-  y.l()
+  for i := 0; i < 3; i++ {
+    x[i].l()
+  }
 }

@@ -852,6 +852,8 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		var elemBound Type
 		if ok {
 			elemBound = arrayBound.Elem()
+		} else {
+			elemBound = expr.ElemType
 		}
 
 		for i, elem := range expr.Elems {
@@ -860,8 +862,15 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				errs.Add(err)
 			}
 
-			if !TypesEqual(elem.Type(), expr.ElemType) {
+			if !IsAssignableTo(elem.Type(), elemBound) {
 				errs.Add(elem.WrapError(fmt.Errorf("cannot use element of type %s at index %d in array literal as %s", elem.Type(), i, elemBound)))
+			}
+
+			if elemBound.Kind() == KindInterface && elem.Type().Kind() != KindInterface {
+				elem = &InterfaceTypeCoercionExpression{
+					Interface:  BaseType(elemBound).(*InterfaceType),
+					Expression: elem,
+				}
 			}
 
 			expr.Elems[i] = elem
