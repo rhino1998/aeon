@@ -197,8 +197,8 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 			return err
 		}
 
-		fmt.Fprintf(w, "%s", bytecodeSep)
-		err = marshalOperand(w, bc.Right)
+		fmt.Fprintf(w, "%s", x.OPSep)
+		err = x.marshalOperand(w, bc.Right)
 		if err != nil {
 			return err
 		}
@@ -249,7 +249,6 @@ const bytecodeSep = "|"
 
 const bytecodeOpStackSep = "/"
 
-func marshalOperand(w io.Writer, op *compiler.Operand) error {
 func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 	switch op.Kind {
 	case compiler.OperandKindImmediate:
