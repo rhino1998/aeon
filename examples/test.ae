@@ -29,6 +29,14 @@ type C struct {
 type D int
 
 func (d D) l() {
+  print("D")
+	print(itoa(int(d)))
+}
+
+type E int
+
+func (d E) l() {
+  print("E")
 	print(itoa(int(d)))
 }
 
@@ -38,8 +46,10 @@ func h(d D) {
 
 #init
 func f2() {
-  var y iface
-  y = D(7)
+  var y iface = D(7)
+  y = E(7)
 
+  y.l()
+  y = D(7)
   y.l()
 }

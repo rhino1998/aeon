@@ -145,6 +145,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			}
 
 			stmt.Type = typ
+			stmt.Variable.SetType(stmt.Type)
 		}
 
 		if stmt.Expression != nil {
@@ -161,8 +162,19 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot use type conversion as a value")))
 			}
 
-			stmt.Expression = expr
-			stmt.Variable.SetType(expr.Type())
+			if !IsAssignableTo(expr.Type(), stmt.Type) {
+				errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable of type %v", expr.Type(), stmt.Type)))
+			}
+
+			if stmt.Type.Kind() == KindInterface && expr.Type().Kind() != KindInterface {
+				stmt.Expression = &InterfaceTypeCoercionExpression{
+					Interface:  BaseType(stmt.Type).(*InterfaceType),
+					Expression: expr,
+				}
+			} else {
+				stmt.Expression = expr
+			}
+
 		}
 
 		return nil
