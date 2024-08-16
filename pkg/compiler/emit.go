@@ -1170,8 +1170,9 @@ func (prog *Program) compileBCCallReceiverExpression(ctx context.Context, expr E
 
 			// TODO: handle wide receivers
 			bc.Mov(recvDst, valLoc)
+			bc.Mov(scope.SP(), scope.SP().AddConst(1))
 
-			return nil, scope.vtableLookup(typLoc, method), nil
+			return bc, scope.vtableLookup(typLoc, method), nil
 		} else {
 			if recvLoc != recvDst {
 				bc.Mov(recvDst, recvLoc)
