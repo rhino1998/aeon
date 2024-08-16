@@ -65,13 +65,11 @@ func (c *Compiler) Compile(ctx context.Context) (_ *Program, err error) {
 	err = c.resolveProgramTypes(prog)
 	if err != nil {
 		errs.Add(err)
-		return nil, errs
 	}
 
 	err = prog.compileBytecode(ctx)
 	if err != nil {
 		errs.Add(err)
-		return nil, errs
 	}
 
 	return prog, nil

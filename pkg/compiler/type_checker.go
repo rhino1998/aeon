@@ -5,11 +5,15 @@ import (
 	"strconv"
 )
 
-func (c *Compiler) resolveProgramTypes(prog *Program) error {
+func (c *Compiler) resolveProgramTypes(prog *Program) (err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
 	for _, pkg := range prog.Packages() {
 		err := c.resolvePackageTypes(pkg)
 		if err != nil {
-			return err
+			errs.Add(err)
 		}
 	}
 

@@ -98,6 +98,7 @@ func IsAssignableTo(v, to Type) bool {
 			return true
 		}
 	}
+
 	if to, ok := BaseType(to).(*InterfaceType); ok {
 		return to.ImplementedBy(v)
 	}

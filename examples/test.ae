@@ -22,6 +22,12 @@ type iface interface {
   l()
 }
 
+type F (int, int)
+
+func (f F) l() {
+  print("HI")
+}
+
 type C struct {
   F func(D)
 }
@@ -46,9 +52,9 @@ func h(d D) {
 
 #init
 func f2() {
-  x := [3]iface{E(7), E(7), D(7)}
+  x := [4]iface{E(7), E(7), D(7), F((1,2))}
 
-  for i := 0; i < 3; i++ {
+  for i := 0; i < 4; i++ {
     x[i].l()
   }
 }

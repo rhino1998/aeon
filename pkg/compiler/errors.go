@@ -27,6 +27,9 @@ func newErrorSet() *ErrorSet {
 }
 
 func (e *ErrorSet) Add(err error) {
+	if err == nil {
+		return
+	}
 	var subErrs *ErrorSet
 	if errors.As(err, &subErrs) {
 		e.Errs = append(e.Errs, subErrs.Unwrap()...)

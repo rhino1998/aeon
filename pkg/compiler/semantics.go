@@ -1,13 +1,17 @@
 package compiler
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
-func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File) error {
+func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File) (err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	pkg := prog.AddPackage(string(entry.Package.Name.Str))
 
 	for _, decl := range entry.Declarations {
@@ -31,12 +35,7 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 		}
 		_, err := c.compileDeclaration(pkg, pkg.scope, decl)
 		if err != nil {
-			var posError parser.PositionError
-			if !errors.As(err, &posError) {
-				return FileError{File: filename, Err: err}
-			}
-
-			return err
+			errs.Add(err)
 		}
 	}
 
@@ -48,12 +47,7 @@ func (c *Compiler) compileFile(prog *Program, filename string, entry parser.File
 
 		_, err := c.compileDeclaration(pkg, pkg.scope, decl)
 		if err != nil {
-			var posError parser.PositionError
-			if !errors.As(err, &posError) {
-				return FileError{File: filename, Err: err}
-			}
-
-			return err
+			errs.Add(err)
 		}
 	}
 
@@ -81,10 +75,15 @@ func (c *Compiler) compileDeclaration(p *Package, scope *SymbolScope, decl parse
 	}
 }
 
-func (c *Compiler) compileDirective(p *Package, scope *SymbolScope, dir parser.Directive) (Symbol, error) {
+func (c *Compiler) compileDirective(p *Package, scope *SymbolScope, dir parser.Directive) (_ Symbol, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	sym, err := c.compileDeclaration(p, scope, dir.Declaration)
 	if err != nil {
-		return nil, err
+		errs.Add(err)
 	}
 
 	switch sym := sym.(type) {
@@ -92,13 +91,13 @@ func (c *Compiler) compileDirective(p *Package, scope *SymbolScope, dir parser.D
 		switch dir.Name.Str {
 		case "init":
 			if len(dir.Args) != 0 {
-				return nil, dir.WrapError(fmt.Errorf("expected 0 arguments for directive %q", dir.Name))
+				errs.Add(dir.WrapError(fmt.Errorf("expected 0 arguments for directive %q", dir.Name)))
 			}
 
 			p.initFuncs = append(p.initFuncs, sym)
 		case "update":
 			if len(dir.Args) != 0 {
-				return nil, dir.WrapError(fmt.Errorf("expected 0 arguments for directive %q", dir.Name))
+				errs.Add(dir.WrapError(fmt.Errorf("expected 0 arguments for directive %q", dir.Name)))
 			}
 
 			p.updateFuncs = append(p.updateFuncs, sym)
@@ -228,7 +227,12 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 	return v, nil
 }
 
-func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl parser.ConstDeclaration) (*Constant, error) {
+func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl parser.ConstDeclaration) (_ *Constant, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	v := &Constant{
 		name: string(decl.Name.Str),
 
@@ -257,12 +261,12 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 	}
 
 	if v.typ == nil {
-		return nil, decl.WrapError(fmt.Errorf("const declaration must have a type or an expression"))
+		errs.Add(decl.WrapError(fmt.Errorf("const declaration must have a type or an expression")))
 	}
 
-	err := scope.put(v)
+	err = scope.put(v)
 	if err != nil {
-		return nil, decl.WrapError(err)
+		errs.Add(decl.WrapError(err))
 	}
 
 	return v, nil
@@ -641,8 +645,11 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 	return f, nil
 }
 
-func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (Statement, *SymbolScope, error) {
-	var err error
+func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (_ Statement, _ *SymbolScope, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
 
 	switch stmt := stmt.(type) {
 	case *parser.VarStatement:
@@ -650,8 +657,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Expr != nil {
 			expr, err = c.compileExpression(scope, *stmt.Expr)
 			if err != nil {
-				return nil, nil, err
-
+				errs.Add(err)
 			}
 		}
 
@@ -659,12 +665,12 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Type != nil {
 			typ, err = c.compileTypeReference(scope, *stmt.Type)
 			if err != nil {
-				return nil, nil, err
+				errs.Add(err)
 			}
 		} else if stmt.Expr != nil {
 			typ = expr.Type()
 		} else {
-			return nil, nil, fmt.Errorf("invalid variable declaration")
+			errs.Add(stmt.WrapError(fmt.Errorf("variable declaration must have at least a type or expression")))
 		}
 
 		v := &Variable{
@@ -686,7 +692,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 	case parser.DeclarationStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		v := &Variable{
@@ -707,12 +713,12 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 	case parser.AssignmentOperatorStatement:
 		left, err := c.compileExpression(scope, stmt.Left)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		right, err := c.compileExpression(scope, stmt.Right)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		return &AssignmentOperatorStatement{
@@ -725,12 +731,12 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 	case parser.AssignmentStatement:
 		left, err := c.compileExpression(scope, stmt.Left)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		right, err := c.compileExpression(scope, stmt.Right)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		return &AssignmentStatement{
@@ -742,7 +748,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 	case parser.ExprStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		return &ExpressionStatement{
@@ -755,13 +761,13 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Expr != nil {
 			expr, err = c.compileExpression(scope, stmt.Expr)
 			if err != nil {
-				return nil, nil, err
+				errs.Add(err)
 			}
 		}
 
 		function := scope.Function()
 		if function == nil {
-			return nil, nil, stmt.WrapError(fmt.Errorf("return statement outside function"))
+			errs.Add(stmt.WrapError(fmt.Errorf("return statement outside function")))
 		}
 
 		return &ReturnStatement{
@@ -774,7 +780,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 	case parser.PostfixStatement:
 		expr, err := c.compileExpression(scope, stmt.Expr)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		return &PostfixStatement{
@@ -786,20 +792,20 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 	case parser.IfStatement:
 		condition, err := c.compileExpression(scope, stmt.Condition)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		bodyScope := newScope(scope, "if")
 		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		var rest Statement
 		if stmt.Else != nil {
 			rest, _, err = c.compileStatement(scope, stmt.Else)
 			if err != nil {
-				return nil, nil, err
+				errs.Add(err)
 			}
 		}
 
@@ -814,20 +820,20 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 	case parser.ElseIfStatement:
 		condition, err := c.compileExpression(scope, stmt.Condition)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		bodyScope := newScope(scope, "elseif")
 		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		var rest Statement
 		if stmt.Else != nil {
 			rest, _, err = c.compileStatement(scope, stmt.Else)
 			if err != nil {
-				return nil, nil, err
+				errs.Add(err)
 			}
 		}
 
@@ -843,7 +849,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		bodyScope := newScope(scope, "else")
 		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		return &IfStatement{
@@ -860,7 +866,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Init != nil {
 			init, bodyScope, err = c.compileStatement(bodyScope, stmt.Init)
 			if err != nil {
-				return nil, nil, err
+				errs.Add(err)
 			}
 		}
 
@@ -868,7 +874,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Condition != nil {
 			cond, err = c.compileExpression(bodyScope, stmt.Condition)
 			if err != nil {
-				return nil, nil, err
+				errs.Add(err)
 			}
 		}
 
@@ -876,13 +882,13 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		if stmt.Step != nil {
 			step, _, err = c.compileStatement(bodyScope, stmt.Step)
 			if err != nil {
-				return nil, nil, err
+				errs.Add(err)
 			}
 		}
 
 		body, err := c.compileStatements(bodyScope, stmt.Body)
 		if err != nil {
-			return nil, nil, err
+			errs.Add(err)
 		}
 
 		return &ForStatement{
@@ -900,12 +906,17 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 	}
 }
 
-func (c *Compiler) compileStatements(scope *SymbolScope, stmts []parser.Statement) ([]Statement, error) {
+func (c *Compiler) compileStatements(scope *SymbolScope, stmts []parser.Statement) (_ []Statement, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	var ret []Statement
 	for _, stmt := range stmts {
 		retStmt, nextScope, err := c.compileStatement(scope, stmt)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		ret = append(ret, retStmt)
@@ -916,7 +927,12 @@ func (c *Compiler) compileStatements(scope *SymbolScope, stmts []parser.Statemen
 	return ret, nil
 }
 
-func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expression, error) {
+func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Expression, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	switch expr := expr.(type) {
 	case parser.FloatLiteral:
 		return &Literal{
@@ -953,12 +969,12 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.BinaryExpr:
 		left, err := c.compileExpression(scope, expr.Left)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile lhs of expression: %w", err)
+			errs.Add(err)
 		}
 
 		right, err := c.compileExpression(scope, expr.Right)
 		if err != nil {
-			return nil, fmt.Errorf("failed to compile lhs of expression: %w", err)
+			errs.Add(err)
 		}
 
 		return &BinaryExpression{
@@ -978,14 +994,14 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.CallExpr:
 		funcExpr, err := c.compileExpression(scope, expr.Expr)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		var exprs []Expression
 		for _, arg := range expr.Args {
 			argExpr, err := c.compileExpression(scope, arg)
 			if err != nil {
-				return nil, err
+				errs.Add(err)
 			}
 
 			exprs = append(exprs, argExpr)
@@ -1002,7 +1018,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.DotExpr:
 		receiver, err := c.compileExpression(scope, expr.Expr)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		return &DotExpression{
@@ -1014,12 +1030,12 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.IndexExpr:
 		receiver, err := c.compileExpression(scope, expr.Expr)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		index, err := c.compileExpression(scope, expr.Index)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		return &IndexExpression{
@@ -1031,7 +1047,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.UnaryExpr:
 		exp, err := c.compileExpression(scope, expr.Expr)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		return &UnaryExpression{
@@ -1043,7 +1059,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.ParenthesizedExpr:
 		exp, err := c.compileExpression(scope, expr.Expr)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		return &ParenthesizedExpression{
@@ -1056,7 +1072,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 		for _, elem := range expr.Elems {
 			elemExpr, err := c.compileExpression(scope, elem)
 			if err != nil {
-				return nil, err
+				errs.Add(err)
 			}
 
 			elems = append(elems, elemExpr)
@@ -1070,24 +1086,29 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (Expr
 	case parser.ArrayExpr:
 		lengthExpr, err := c.compileExpression(scope, expr.Length)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		lengthLiteral, ok := lengthExpr.(*Literal)
 		if !ok {
-			return nil, expr.WrapError(fmt.Errorf("array size must be an integer literal"))
+			errs.Add(expr.WrapError(fmt.Errorf("array size must be an integer literal")))
 		}
 
 		typeRef, err := c.compileTypeReference(scope, expr.Type)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
+		}
+
+		lengthInt := int(lengthLiteral.Value().(Int))
+		if len(expr.Elems) < lengthInt {
+			errs.Add(expr.WrapError(fmt.Errorf("expected %d elements in array literal, got %d", len(expr.Elems), lengthInt)))
 		}
 
 		var elems []Expression
 		for _, elem := range expr.Elems {
 			elemExpr, err := c.compileExpression(scope, elem)
 			if err != nil {
-				return nil, err
+				errs.Add(err)
 			}
 
 			elems = append(elems, elemExpr)

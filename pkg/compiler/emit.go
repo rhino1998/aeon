@@ -1105,8 +1105,6 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			return nil, nil, expr.WrapError(err)
 		}
 
-		log.Println("RIGHT", expr.Expression.Type())
-
 		bc.Mov(typElem, scope.typeName(expr.Expression.Type()))
 
 		valElem, err := ifaceDst.IndexTuple(1)
