@@ -378,10 +378,10 @@ type BoolLiteral struct {
 	Position
 }
 
-type ParenthesesExpr struct {
-	baseExpr
+type ParenthesizedType struct {
+	baseType
 
-	Expr Expr
+	Type Type
 
 	Position
 }

@@ -164,10 +164,15 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 	return f, nil
 }
 
-func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl parser.TypeDeclaration) (*DerivedType, error) {
+func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl parser.TypeDeclaration) (_ *DerivedType, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	underlying, err := c.compileTypeReference(scope, decl.Type)
 	if err != nil {
-		return nil, err
+		errs.Add(err)
 	}
 
 	t := &DerivedType{
@@ -180,7 +185,7 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 
 	err = scope.put(t)
 	if err != nil {
-		return nil, decl.WrapError(err)
+		errs.Add(err)
 	}
 
 	return t, nil
@@ -436,8 +441,19 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 		return &InterfaceType{
 			methods: methods,
 		}, nil
+	case parser.ParenthesizedType:
+		inner, err := c.compileTypeReference(scope, typ.Type)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		return &ParenthesizedType{
+			Type: inner,
+
+			Position: typ.Position,
+		}, nil
 	default:
-		return nil, typ.WrapError(fmt.Errorf("unhandled type reference %q", typ))
+		return UnknownType, typ.WrapError(fmt.Errorf("unhandled type reference %q", typ))
 	}
 }
 

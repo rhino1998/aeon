@@ -142,6 +142,8 @@ func resolveType(typ Type) Type {
 		}
 
 		return res
+	case *ParenthesizedType:
+		return resolveType(typ.Type)
 	default:
 		return typ
 	}
@@ -1117,4 +1119,10 @@ func (e *InterfaceTypeCoercionExpression) Type() Type {
 
 func (e *InterfaceTypeCoercionExpression) WrapError(err error) error {
 	return e.Expression.WrapError(err)
+}
+
+type ParenthesizedType struct {
+	Type
+
+	parser.Position
 }

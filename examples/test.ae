@@ -22,7 +22,7 @@ type iface interface {
   l()
 }
 
-type F (int, int)
+type F (int,)
 
 func (f F) l() {
   print("HI")
@@ -50,9 +50,19 @@ func h(d D) {
 	d.l()
 }
 
+func f3(a,b,c int) {
+}
+
 #init
 func f2() {
-  x := [4]iface{E(7), E(7), D(7), F((1,2))}
+  f3(1,2,3)
+  x := [4]iface{
+    E(7),
+    E(7),
+    D(7),
+    F((1,)),
+  }
+
 
   for i := 0; i < 4; i++ {
     x[i].l()

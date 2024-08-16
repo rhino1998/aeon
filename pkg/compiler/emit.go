@@ -1062,12 +1062,12 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		for i, elem := range expr.Elems {
 			dst, err := dst.IndexTuple(i)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, expr.WrapError(err)
 			}
 
 			elemBC, elemLoc, err := prog.compileBCExpression(ctx, elem, scope, dst)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, expr.WrapError(err)
 			}
 
 			bc.Add(elemBC...)
@@ -1111,6 +1111,8 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		if err != nil {
 			return nil, nil, expr.WrapError(err)
 		}
+
+		valElem = valElem.AsType(expr.Expression.Type())
 
 		if expr.Expression.Type().Size() > 1 {
 			return nil, nil, expr.WrapError(fmt.Errorf("currently interfaces with values of size > 1 not implemented"))
