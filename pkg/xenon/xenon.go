@@ -26,6 +26,7 @@ type ArgWrapper struct {
 
 type ExternFuncEntry struct {
 	ArgTypes  []ArgWrapper
+	Size      int
 	HasReturn bool
 	Name      string
 }
@@ -107,6 +108,8 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	for _, extern := range prog.ExternFuncs() {
 		ftype := extern.Type().(*compiler.FunctionType)
 		argTypes := make([]ArgWrapper, 0)
+		var size Size
+		size += ftype.Return.Size()
 		for _, param := range ftype.Parameters {
 			var wrapper ArgWrapper
 			if param.Kind() == compiler.KindString {
@@ -114,11 +117,14 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 				wrapper.Suffix = ")"
 			}
 
+			size += param.Size()
+
 			argTypes = append(argTypes, wrapper)
 		}
 		xeCtx.ExternFuncs = append(xeCtx.ExternFuncs, ExternFuncEntry{
 			ArgTypes:  argTypes,
 			HasReturn: ftype.Return.Kind() != compiler.KindVoid,
+			Size:      int(size),
 			Name:      extern.Name(),
 		})
 	}
@@ -302,6 +308,21 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 		}
 
 		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Value.(compiler.BinaryOperand).Op)
+
+		return nil
+	case compiler.OperandKindVTableLookup:
+		err := x.marshalOperand(w, op.Value.(compiler.VTableLookup).Type)
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(w, "%s", x.UOPSep)
+		err = x.marshalOperand(w, op.Value.(compiler.VTableLookup).Method)
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Kind.String())
 
 		return nil
 	default:

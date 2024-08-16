@@ -237,7 +237,17 @@ function @aeon_ne_string($a:number, $b:number):number
 function @itoa($n:number):number
 	return @aeon_str_alloc($n:text)
 
-function @aeon_call_extern($fname:text, $size:number)
+function @aeon_call_size($fname:text):number
+	var $sp = $aeon_reg.1
+	{{ range $entry := .ExternFuncs }}
+	if ($fname == "{{$entry.Name}}")
+		return {{$entry.Size}}
+	{{ end }}
+
+	print(text("invalid extern func {}", $fname))
+	@aeon_fatal()
+
+function @aeon_call_extern($fname:text, $size:number):number
 	var $sp = $aeon_reg.1
 	{{ range $entry := .ExternFuncs }}
 	if ($fname == "{{$entry.Name}}")
@@ -362,15 +372,15 @@ function @aeon_run($pc:number):number
 				$aeon_reg.0 = @aeon_load($aeon_ops.2)
 		elseif ($aeon_ops.0 == "cal")
 			var $ftype = @aeon_load_field($aeon_ops.1, 0)
-			$aeon_reg.1 = $aeon_reg.1 + $aeon_ops.2:number
 			if ($ftype == 0)
 				print("panic: tried to call nil function")
 				@aeon_fatal()
 			elseif ($ftype == 1)
 				var $fname = @aeon_str_load(@aeon_load_field($aeon_ops.1, 3))
 			 	{{if .Debug}}print(text("extern {}", $fname)){{end}}
-				@aeon_call_extern($fname, $aeon_ops.2:number)
-				$aeon_reg.1 = $aeon_reg.1 - $aeon_ops.2:number
+				var $fsize = @aeon_call_size($fname)
+				var $frt = @aeon_call_extern($fname)
+				$aeon_reg.1 = $aeon_reg.1 - $fsize
 			elseif ($ftype == 2)
 				var $faddr = @aeon_load_field($aeon_ops.1, 3)
 				repeat {{.NumRegisters}} ($reg)
@@ -380,7 +390,7 @@ function @aeon_run($pc:number):number
 				$aeon_reg.2 = $aeon_reg.1 - 1
 				$aeon_reg.0 = $faddr
 			else
-				print("unrecognized call function type")
+				print(text("unrecognized call function type: {}", $ftype))
 				@aeon_fatal()
 		elseif ($aeon_ops.0 == "ret")
 			var $fp = $aeon_reg.2
