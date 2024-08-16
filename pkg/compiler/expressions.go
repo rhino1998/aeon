@@ -59,6 +59,13 @@ func resolveDotExpressionType(e *DotExpression, typ Type) Type {
 		}
 
 		return method.Type().(*FunctionType).ToFunction()
+	case *InterfaceType:
+		method, ok := typ.Methods().Get(e.Key)
+		if !ok {
+			return UnknownType
+		}
+
+		return method.BoundFunctionType()
 	default:
 		return UnknownType
 	}

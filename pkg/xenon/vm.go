@@ -98,6 +98,8 @@ type Runtime struct {
 	memPages [][PageSize]float64
 	strIndex Addr
 	strPages [][PageSize]String
+
+	vtables map[int]map[string]float64
 }
 
 func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, strPages int, debug bool) (*Runtime, error) {
@@ -111,6 +113,8 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		memPages:  make([][PageSize]float64, memPages),
 		strPages:  make([][PageSize]String, strPages),
 		registers: make([]float64, prog.Registers()),
+
+		vtables: make(map[int]map[string]float64),
 	}
 
 	for i, str := range prog.Strings() {
@@ -123,6 +127,33 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	for i, code := range prog.Bytecode() {
 		page, pageAddr := r.splitAddr(compiler.Addr(i))
 		r.codePages[page][pageAddr] = code
+	}
+
+	for typeID, typ := range prog.Types() {
+		r.vtables[typeID] = make(map[string]float64)
+		log.Printf("type %v: %d", typ, typeID)
+		switch typ := typ.(type) {
+		case *compiler.DerivedType:
+			for _, method := range typ.Methods(false) {
+				fun := typ.Method(method.Name)
+				if fun == nil {
+					return nil, fmt.Errorf("failed to resolve method %s on type %s", method.Name, typ)
+				}
+				r.vtables[typeID][method.Name] = float64(fun.InfoAddr())
+			}
+		case *compiler.PointerType:
+			switch typ := typ.Pointee().(type) {
+			case *compiler.DerivedType:
+				for _, method := range typ.Methods(true) {
+					fun := typ.Method(method.Name)
+					if fun == nil {
+						return nil, fmt.Errorf("failed to resolve method %s on type %s", method.Name, typ)
+					}
+					r.vtables[typeID][method.Name] = float64(fun.InfoAddr())
+				}
+			default:
+			}
+		}
 	}
 
 	return r, nil
@@ -298,12 +329,12 @@ func (r *Runtime) loadIndirect(indirect compiler.Indirect) loadFunc {
 
 func (r *Runtime) loadBinary(binop compiler.BinaryOperand) loadFunc {
 	return loadFunc(func() (float64, error) {
-		a, err := r.load(binop.A)()
+		a, err := r.load(binop.Left)()
 		if err != nil {
 			return 0, err
 		}
 
-		b, err := r.load(binop.B)()
+		b, err := r.load(binop.Right)()
 		if err != nil {
 			return 0, err
 		}
@@ -345,18 +376,24 @@ func (r *Runtime) loadBinary(binop compiler.BinaryOperand) loadFunc {
 	})
 }
 
-func (r *Runtime) loadNot(not compiler.Not) loadFunc {
+func (r *Runtime) loadUnary(not compiler.UnaryOperand) loadFunc {
 	return loadFunc(func() (float64, error) {
 		a, err := r.load(not.A)()
 		if err != nil {
 			return 0, err
 		}
 
-		if a == 0 {
-			return 1, nil
+		switch not.Op {
+		case compiler.OperatorNot:
+			if a == 0 {
+				return 1, nil
+			}
+
+			return 0, nil
+		default:
+			return 0, fmt.Errorf("unhandled unary operator %v", not.Op)
 		}
 
-		return 0, nil
 	})
 }
 
@@ -377,6 +414,35 @@ func (r *Runtime) loadRegister(reg compiler.Register) loadFunc {
 	})
 }
 
+func (r *Runtime) loadVTable(lookup compiler.VTableLookup) loadFunc {
+	return loadFunc(func() (float64, error) {
+		typeID, err := r.load(lookup.Type)()
+		if err != nil {
+			return 0, fmt.Errorf("failed to get type id: %w", err)
+		}
+
+		nameAddr, err := r.load(lookup.Method)()
+		if err != nil {
+			return 0, fmt.Errorf("failed to get method name addr: %w", err)
+		}
+
+		name, err := r.loadStr(Addr(nameAddr))
+		if err != nil {
+			return 0, fmt.Errorf("failed to get method name: %w", err)
+		}
+
+		funAddr, ok := r.vtables[int(typeID)][string(name)]
+		if !ok {
+			return 0, fmt.Errorf("no such vtable entry for %d %s", int(typeID), name)
+		}
+
+		log.Printf("resolved vtable entry %d %s to %v", int(typeID), name, Addr(funAddr))
+
+		// TODO:
+		return funAddr, nil
+	})
+}
+
 func (r *Runtime) load(operand *compiler.Operand) loadFunc {
 	switch operand.Kind {
 	case compiler.OperandKindImmediate:
@@ -387,8 +453,10 @@ func (r *Runtime) load(operand *compiler.Operand) loadFunc {
 		return r.loadRegister(operand.Value.(compiler.Register))
 	case compiler.OperandKindBinary:
 		return r.loadBinary(operand.Value.(compiler.BinaryOperand))
-	case compiler.OperandKindNot:
-		return r.loadNot(operand.Value.(compiler.Not))
+	case compiler.OperandKindUnary:
+		return r.loadUnary(operand.Value.(compiler.UnaryOperand))
+	case compiler.OperandKindVTableLookup:
+		return r.loadVTable(operand.Value.(compiler.VTableLookup))
 	default:
 		return func() (float64, error) {
 			return 0, fmt.Errorf("bad %s operand in runtime", operand.Kind)
@@ -519,18 +587,21 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				}
 			}
 		case compiler.Call:
-			funcType, err := r.loadIndirectWithOffset(code.Func, 0)()
+			funcInfoAddr, err := r.load(code.Func)()
 			if err != nil {
-				return fmt.Errorf("could not resolve function addr")
+				return fmt.Errorf("could not resolve function info: %w", err)
 			}
 
-			r.setSP(r.sp().Offset(code.Args))
+			funcType, err := r.loadAddr(Addr(funcInfoAddr))
+			if err != nil {
+				return fmt.Errorf("could not resolve function addr: %w", err)
+			}
 
 			switch int(funcType) {
 			case RuntimeFuncTypeNil:
 				return fmt.Errorf("tried to call nil function reference")
 			case RuntimeFuncTypeExtern:
-				externName, err := r.loadIndirectWithOffset(code.Func, 3)()
+				externName, err := r.loadAddr(Addr(funcInfoAddr) + 3)
 				if err != nil {
 					return fmt.Errorf("could not resolve extern function name")
 				}
@@ -553,7 +624,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				}
 				ret := entry.Func(r, args)
 				for i := range entry.ReturnSize {
-					r.storeAddr(r.sp().Offset(-code.Args).Offset(-i), ret)
+					r.storeAddr(r.sp().Offset(-(entry.ArgSize + entry.ReturnSize)).Offset(-i), ret)
 				}
 
 				if r.debug {
@@ -565,11 +636,11 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 					log.Printf("extern call %s(%s) = %v", string(externNameStr), strings.Join(argStrs, ", "), ret)
 				}
 
-				r.setSP(r.sp() - compiler.Addr(code.Args))
+				r.setSP(r.sp() - compiler.Addr(entry.ArgSize+entry.ReturnSize))
 
 				continue
 			case RuntimeFuncTypeFunc:
-				faddr, err := r.loadIndirectWithOffset(code.Func, 3)()
+				faddr, err := r.loadAddr(Addr(funcInfoAddr) + 3)
 				if err != nil {
 					return fmt.Errorf("could not resolve function addr")
 				}
@@ -928,7 +999,7 @@ func (r *Runtime) printStack() {
 			panic(err)
 		}
 
-		if addr == r.sp() {
+		if addr == r.sp()+2 {
 			return
 		}
 

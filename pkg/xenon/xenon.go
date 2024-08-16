@@ -239,7 +239,6 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Args))
 	}
 
 	return nil
@@ -281,23 +280,23 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Kind.String())
 
 		return nil
-	case compiler.OperandKindNot:
-		err := x.marshalOperand(w, op.Value.(compiler.Not).A)
+	case compiler.OperandKindUnary:
+		err := x.marshalOperand(w, op.Value.(compiler.UnaryOperand).A)
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Kind.String())
+		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Value.(compiler.UnaryOperand).Op)
 
 		return nil
 	case compiler.OperandKindBinary:
-		err := x.marshalOperand(w, op.Value.(compiler.BinaryOperand).A)
+		err := x.marshalOperand(w, op.Value.(compiler.BinaryOperand).Left)
 		if err != nil {
 			return err
 		}
 
 		fmt.Fprintf(w, "%s", x.UOPSep)
-		err = x.marshalOperand(w, op.Value.(compiler.BinaryOperand).B)
+		err = x.marshalOperand(w, op.Value.(compiler.BinaryOperand).Right)
 		if err != nil {
 			return err
 		}

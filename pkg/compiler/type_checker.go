@@ -437,7 +437,7 @@ func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ
 	case *PointerType:
 		return c.resolveLHSDotExpressionReceiverTypes(expr, typ.Pointee())
 	default:
-		return expr, expr.WrapError(fmt.Errorf("cannot dot index assign receiver type: %T", expr.Receiver.Type()))
+		return expr, expr.WrapError(fmt.Errorf("cannot dot index assign receiver type: %s", expr.Receiver.Type()))
 	}
 }
 
@@ -675,11 +675,10 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		}
 	case *SymbolReferenceExpression:
 		sym := expr.Dereference()
-		if sym == nil {
-			errs.Add(expr.WrapError(fmt.Errorf("undefined name %s", expr.Name())))
-		}
 
 		switch sym := sym.(type) {
+		case nil:
+			return expr, expr.WrapError(fmt.Errorf("undefined name %s", expr.Name()))
 		case *Variable:
 			return expr, nil
 		case Type:
@@ -878,8 +877,8 @@ func (c *Compiler) resolveCallExpressionReceiverTypes(expr Expression, bound Typ
 		// optimization to not allocate a closure for most method calls
 		if boundMethod, ok := dotExpr.(*BoundMethodExpression); ok {
 			return &MethodExpression{
-				Function: boundMethod.Function,
 				Receiver: boundMethod.Receiver,
+				Method:   boundMethod.Method,
 
 				Position: expr.Position,
 			}, nil
@@ -913,8 +912,8 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 		methods := typ.Methods(ptr)
 		// TODO: auto address of
 		if methods.Has(expr.Key) {
-			methodFunc := typ.Method(expr.Key)
-			targetReceiverType := methodFunc.Receiver().Type()
+			method, _ := typ.Methods(ptr).Get(expr.Key)
+			targetReceiverType := method.Receiver
 			receiver := expr.Receiver
 
 			for {
@@ -935,13 +934,13 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 
 			return &BoundMethodExpression{
 				Receiver: receiver,
-				Function: methodFunc,
+				Method:   method,
 
 				Position: expr.Position,
 			}, nil
 		} else if !ptr && typ.Methods(true).Has(expr.Key) {
-			methodFunc := typ.Method(expr.Key)
-			targetReceiverType := methodFunc.Receiver().Type()
+			method, _ := typ.Methods(true).Get(expr.Key)
+			targetReceiverType := method.Receiver
 			receiver := expr.Receiver
 			receiver = &UnaryExpression{
 				Expression: receiver,
@@ -953,8 +952,8 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 			}
 
 			return &BoundMethodExpression{
-				Receiver: receiver,
-				Function: methodFunc,
+				Receiver: expr,
+				Method:   method,
 
 				Position: expr.Position,
 			}, nil
@@ -999,6 +998,18 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 		}
 
 		return expr, nil
+	case *InterfaceType:
+		method, ok := typ.Methods().Get(expr.Key)
+		if !ok {
+			return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ, expr.Key))
+		}
+
+		return &BoundMethodExpression{
+			Receiver: expr.Receiver,
+			Method:   method,
+
+			Position: expr.Position,
+		}, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ, expr.Key))
 	}

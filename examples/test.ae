@@ -18,6 +18,14 @@ extern func add(a int, b int) int
 
 var d any
 
+type iface interface {
+  l()
+}
+
+type C struct {
+  F func(D)
+}
+
 type D int
 
 func (d D) l() {
@@ -30,9 +38,8 @@ func h(d D) {
 
 #init
 func f2() {
-	s := D.l
-	s(5)
+  var y iface
+  y = D(7)
 
-	s = h
-	s(6)
+  y.l()
 }

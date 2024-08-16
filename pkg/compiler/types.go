@@ -442,10 +442,18 @@ func (t ReferencedType) Size() Size {
 }
 
 type Method struct {
-	GlobalName string
+	Name       string
 	Receiver   Type
 	Parameters []Type
 	Return     Type
+}
+
+func (e Method) BoundType() *FunctionType {
+	return &FunctionType{
+		Receiver:   VoidType,
+		Parameters: e.Parameters,
+		Return:     e.Return,
+	}
 }
 
 func (e Method) String() string {
@@ -460,7 +468,7 @@ func (e Method) String() string {
 
 	}
 
-	return fmt.Sprintf("%s(%s) %s", e.GlobalName, strings.Join(params, ", "), retStr)
+	return fmt.Sprintf("%s(%s)%s", e.Name, strings.Join(params, ", "), retStr)
 }
 
 func (e Method) typeNameString() string {
@@ -474,11 +482,11 @@ func (e Method) typeNameString() string {
 		retStr = fmt.Sprintf(" %s", string(e.Return.GlobalName()))
 	}
 
-	return fmt.Sprintf("%s(%s)%s", e.GlobalName, strings.Join(params, ", "), retStr)
+	return fmt.Sprintf("%s(%s)%s", e.Name, strings.Join(params, ", "), retStr)
 }
 
 func (e Method) Equal(o Method) bool {
-	if e.GlobalName != o.GlobalName {
+	if e.Name != o.Name {
 		return false
 	}
 
@@ -493,9 +501,9 @@ func (e Method) Equal(o Method) bool {
 	return true
 }
 
-func (e Method) BoundFunction() *FunctionType {
+func (e Method) BoundFunctionType() *FunctionType {
 	return &FunctionType{
-		Receiver:   e.Receiver,
+		Receiver:   VoidType,
 		Parameters: e.Parameters,
 		Return:     e.Return,
 	}
@@ -511,9 +519,10 @@ func (e Method) UnboundFunction() *FunctionType {
 
 type MethodSet []Method
 
-func (m *MethodSet) Add(name string, params []Type, ret Type) error {
+func (m *MethodSet) Add(name string, recv Type, params []Type, ret Type) error {
 	entry := Method{
-		GlobalName: name,
+		Name:       name,
+		Receiver:   recv,
 		Parameters: params,
 		Return:     ret,
 	}
@@ -525,7 +534,7 @@ func (m *MethodSet) Add(name string, params []Type, ret Type) error {
 	*m = append(*m, entry)
 
 	slices.SortStableFunc(*m, func(a, b Method) int {
-		return cmp.Compare(a.GlobalName, b.GlobalName)
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	return nil
@@ -533,8 +542,19 @@ func (m *MethodSet) Add(name string, params []Type, ret Type) error {
 
 func (m MethodSet) Has(name string) bool {
 	return slices.ContainsFunc(m, func(method Method) bool {
-		return method.GlobalName == name
+		return method.Name == name
 	})
+}
+
+func (m MethodSet) Get(name string) (Method, bool) {
+	index := slices.IndexFunc(m, func(method Method) bool {
+		return method.Name == name
+	})
+	if index == -1 {
+		return Method{}, false
+	}
+
+	return m[index], true
 }
 
 func (m MethodSet) Equal(o MethodSet) bool {
@@ -641,9 +661,9 @@ func (t *DerivedType) AddMethod(name string, f *Function) error {
 	}
 
 	if _, ok := f.receiver.Type().(*PointerType); ok {
-		t.ptrMethods.Add(name, paramTypes, f.Return())
+		t.ptrMethods.Add(name, f.receiver.Type(), paramTypes, f.Return())
 	} else {
-		t.methods.Add(name, paramTypes, f.Return())
+		t.methods.Add(name, f.receiver.Type(), paramTypes, f.Return())
 	}
 
 	return nil
@@ -658,7 +678,7 @@ func (t *DerivedType) Methods(ptr bool) MethodSet {
 	}
 
 	slices.SortStableFunc(ret, func(a, b Method) int {
-		return cmp.Compare(a.GlobalName, b.GlobalName)
+		return cmp.Compare(a.Name, b.Name)
 	})
 
 	return ret

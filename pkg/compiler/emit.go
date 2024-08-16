@@ -163,6 +163,8 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		}
 
 		f.bytecode.Add(hdrBC...)
+
+		fun.SetInfoAddr(Addr(ptr.AddressOf().Value.(Int)))
 	}
 
 	for _, global := range pkg.Globals() {
@@ -210,6 +212,8 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 			}
 
 			f.bytecode.Add(hdrBC...)
+
+			met.SetInfoAddr(Addr(ptr.AddressOf().Value.(Int)))
 		}
 	}
 
@@ -232,23 +236,31 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 		Src:  OperandRegisterSP.Offset(numLocals),
 		Size: 1,
 	})
+	var argReturnSize Size
+	argReturnSize += f.Return().Size()
+	argReturnSize += f.Receiver().Type().Size()
+	for _, param := range f.Parameters() {
+		argReturnSize += param.Type().Size()
+	}
 
-	var offset Size = 0
+	baseOffset := -(f.pkg.prog.FrameSize() + argReturnSize)
+
+	var offset Size = 1
+	scope.newParam("__return", baseOffset+offset, f.Return())
+	offset += f.Return().Size()
+
 	if f.Receiver().Name() != "" {
-		scope.newParam(f.Receiver().Name(), -Size(f.pkg.prog.FrameSize()+offset), f.Receiver().Type())
+		scope.newParam(f.Receiver().Name(), baseOffset+offset, f.Receiver().Type())
 	}
 	offset += f.Receiver().Type().Size()
 
 	for _, param := range f.Parameters() {
 		if param.Name() != "" {
-			scope.newParam(param.Name(), -Size(f.pkg.prog.FrameSize()+offset), param.Type())
+			scope.newParam(param.Name(), baseOffset+offset, param.Type())
 		}
 
 		offset += param.Type().Size()
 	}
-
-	scope.newParam("__return", -Size(f.pkg.prog.FrameSize()+offset), f.Return())
-	offset += f.Return().Size()
 
 	body := f.Body()
 
@@ -268,7 +280,7 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 
 	// implicit return at end of void functions
 	if _, ok := last.(*ReturnStatement); !ok && f.Return() == VoidType {
-		f.bytecode.Add(Return{Args: offset})
+		f.bytecode.Add(Return{Args: argReturnSize})
 	}
 
 	// Can resolve here for debugging
@@ -413,7 +425,7 @@ func (prog *Program) compileBCLHSDotExpression(ctx context.Context, expr *DotExp
 
 		return prog.compileBCLHSDotExpression(ctx, expr, typ.Pointee(), scope, receiverLocValue)
 	default:
-		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", resolveType(expr.Receiver.Type())))
 	}
 }
 
@@ -433,7 +445,7 @@ func (prog *Program) compileBCLHSIndexExpression(ctx context.Context, expr *Inde
 		// TODO:
 		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
 	default:
-		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot index receiver type %s", expr.Receiver.Type()))
 	}
 }
 
@@ -867,19 +879,19 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			defer scope.deallocTemp(lhsTmp)
 		}
 
-		lhsBC, lhsOp, err := prog.compileBCExpression(ctx, expr.Left, scope, lhsTmp)
+		lhsBC, lhsLoc, err := prog.compileBCExpression(ctx, expr.Left, scope, lhsTmp)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		bc.Add(lhsBC...)
 
-		rhsReg := scope.allocTemp(expr.Right.Type())
-		rhsBC, rhsOp, err := prog.compileBCExpression(ctx, expr.Right, scope, rhsReg)
+		rhsTmp := scope.allocTemp(expr.Right.Type())
+		rhsBC, rhsLoc, err := prog.compileBCExpression(ctx, expr.Right, scope, rhsTmp)
 		if err != nil {
 			return nil, nil, err
 		}
-		defer scope.deallocTemp(rhsReg)
+		defer scope.deallocTemp(rhsTmp)
 
 		bc.Add(rhsBC...)
 
@@ -890,15 +902,15 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 				Operand: &Operand{
 					Kind: OperandKindBinary,
 					Value: BinaryOperand{
-						A:  lhsOp.Operand,
-						Op: expr.Operator,
-						B:  rhsOp.Operand,
+						Left:  lhsLoc.Operand,
+						Op:    expr.Operator,
+						Right: rhsLoc.Operand,
 					},
 				},
 			}, nil
 		}
 
-		bc.BinOp(dst, lhsOp, expr.Operator, rhsOp)
+		bc.BinOp(dst, lhsLoc, expr.Operator, rhsLoc)
 
 		return bc, dst, nil
 	case *UnaryExpression:
@@ -953,16 +965,17 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 		switch ftype := BaseType(expr.Function.Type()).(type) {
 		case *FunctionType:
-			var offset Size
-
 			callTmp := callScope.allocTemp(expr.Function.Type())
 			defer callScope.deallocTemp(callTmp)
 
-			retVar := callScope.newArg("__return", offset, ftype.Return)
-			offset += ftype.Return.Size()
+			retVar := callScope.newArg("__return", 0, ftype.Return)
 
-			recvVar := callScope.newArg("__recv", offset, ftype.Receiver)
-			offset += ftype.Receiver.Size()
+			recvVar := callScope.newArg("__recv", 0, ftype.Receiver)
+
+			log.Println(ftype.Return)
+			if ftype.Return.Size() > 0 {
+				bc.Mov(scope.SP(), scope.SP().AddConst(ftype.Return.Size()))
+			}
 
 			callBC, callLoc, err := prog.compileBCCallReceiverExpression(ctx, expr.Function, callScope, recvVar, callTmp)
 			if err != nil {
@@ -972,8 +985,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			bc.Add(callBC...)
 
 			for i, arg := range expr.Args {
-				argVar := callScope.newArg(fmt.Sprintf("%d", i), offset, ftype.Parameters[i])
-				offset += arg.Type().Size()
+				argVar := callScope.newArg(fmt.Sprintf("%d", i), 0, ftype.Parameters[i])
 
 				argBC, argLoc, err := prog.compileBCExpression(ctx, arg, callScope, argVar)
 				if err != nil {
@@ -985,10 +997,11 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 				if argVar != argLoc {
 					bc.Mov(argVar, argLoc)
 				}
+
+				bc.Mov(scope.SP(), scope.SP().AddConst(arg.Type().Size()))
 			}
 
 			bc.Add(Call{
-				Args: offset,
 				Func: callLoc.Operand.AddressOf(),
 			})
 
@@ -1092,6 +1105,8 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			return nil, nil, expr.WrapError(err)
 		}
 
+		log.Println("RIGHT", expr.Expression.Type())
+
 		bc.Mov(typElem, scope.typeName(expr.Expression.Type()))
 
 		valElem, err := ifaceDst.IndexTuple(1)
@@ -1133,16 +1148,51 @@ func (prog *Program) compileBCCallReceiverExpression(ctx context.Context, expr E
 
 		bc.Add(recvBC...)
 
-		if recvLoc != recvDst {
-			bc.Mov(recvDst, recvLoc)
-		}
+		methodName := expr.Method.Name
 
-		callLoc, ok := scope.Get(expr.Function.Name())
-		if !ok {
-			return nil, nil, expr.WrapError(fmt.Errorf("could not resolve location for method %q", expr.Function.Name()))
-		}
+		if expr.Receiver.Type().Kind() == KindInterface {
+			iface := BaseType(expr.Receiver.Type()).(*InterfaceType)
 
-		return bc, callLoc, nil
+			method, ok := iface.Methods().Get(methodName)
+			if !ok {
+				return nil, nil, expr.WrapError(fmt.Errorf("could not resolve method %s on type %s", methodName, expr.Receiver.Type()))
+			}
+
+			typLoc, err := recvLoc.AsType(interfaceTuple).IndexTuple(0)
+			if err != nil {
+				return nil, nil, expr.WrapError(err)
+			}
+
+			valLoc, err := recvLoc.AsType(interfaceTuple).IndexTuple(1)
+			if err != nil {
+				return nil, nil, expr.WrapError(err)
+			}
+
+			// TODO: handle wide receivers
+			bc.Mov(recvDst, valLoc)
+
+			return nil, scope.vtableLookup(typLoc, method), nil
+		} else {
+			if recvLoc != recvDst {
+				bc.Mov(recvDst, recvLoc)
+			}
+
+			if expr.Receiver.Type().Size() > 0 {
+				bc.Mov(scope.SP(), scope.SP().AddConst(expr.Receiver.Type().Size()))
+			}
+
+			methodFunc, ok := TypeMethod(expr.Receiver.Type(), methodName)
+			if !ok {
+				return nil, nil, expr.WrapError(fmt.Errorf("could not resolve method %s on type %s", methodName, expr.Receiver.Type()))
+			}
+
+			callLoc, ok := scope.Get(methodFunc.Name())
+			if !ok {
+				return nil, nil, expr.WrapError(fmt.Errorf("could not resolve location for method %q", methodFunc.Name()))
+			}
+
+			return bc, callLoc, nil
+		}
 	case *ParenthesizedExpression:
 		return prog.compileBCCallReceiverExpression(ctx, expr.Expression, scope, recvDst, callDst)
 	default:
@@ -1191,7 +1241,7 @@ func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpres
 
 		return nil, loc, nil
 	default:
-		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", resolveType(expr.Receiver.Type())))
 	}
 }
 
@@ -1211,7 +1261,7 @@ func (prog *Program) compileBCIndexExpression(ctx context.Context, expr *IndexEx
 		// TODO:
 		return nil, nil, expr.WrapError(fmt.Errorf("slice type not yet implemented"))
 	default:
-		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %T", expr.Receiver.Type()))
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot index receiver type %s", expr.Receiver.Type()))
 	}
 }
 

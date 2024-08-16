@@ -489,4 +489,22 @@ type StructType struct {
 type StructField struct {
 	Name Identifier
 	Type Type
+
+	Position
+}
+
+type InterfaceType struct {
+	baseType
+
+	Methods []InterfaceMethod
+
+	Position
+}
+
+type InterfaceMethod struct {
+	Name       Identifier
+	Parameters []Parameter
+	Return     Type
+
+	Position
 }

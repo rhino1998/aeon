@@ -56,7 +56,7 @@ File <- pkg:Package __ decls:(Declaration)* EOF {
   }, nil
 }
 
-Keyword <- "map" / "func" / "if" / "else" / "for" / "package" / "var" / "extern" / "const" / "struct" / "break" / "continue"
+Keyword <- ("map" / "func" / "if" / "else" / "for" / "package" / "var" / "extern" / "const" / "struct" / "interface" / "break" / "continue") ![a-zA-Z_0-9]
 
 Package <- "package" _ name:Identifier {
   return Package{
@@ -109,7 +109,7 @@ ConstDeclaration <- "const" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr
   }, nil
 }
 
-Type <- Identifier / PointerType / MapType / ArrayType / SliceType / TupleType / StructType / FunctionType
+Type <- Identifier / PointerType / MapType / ArrayType / SliceType / TupleType / StructType / FunctionType / InterfaceType
 
 PointerType <- '*' pointee:Type {
   return PointerType{
@@ -164,14 +164,42 @@ StructField <- name:Identifier _ typ:Type {
 	return StructField{
 		Name: name.(Identifier),
 		Type: typ.(Type),
+
+		Position: pos(c),
 	}, nil
 }
 
-StructFieldList <- __ field:StructField _ rest:StructFieldListComma? {
+StructFieldList <- __ field:StructField _ rest:StructFieldListNewline? {
 	return append([]StructField{field.(StructField)}, maybeSlice[StructField](rest)...), nil
 }
 
-StructFieldListComma <- nl rest:StructFieldList {
+StructFieldListNewline <- nl rest:StructFieldList {
+	return rest, nil
+}
+
+InterfaceType <- "interface" _ '{' elems:InterfaceMethodList? __ '}' {
+	return InterfaceType{
+		Methods: maybeSlice[InterfaceMethod](elems),
+
+		Position: pos(c),
+	}, nil
+}
+
+InterfaceMethod <- name:Identifier _ '(' params:ParameterList? __ ')' _ ret:Type? {
+	return InterfaceMethod{
+		Name: name.(Identifier),
+    Parameters: maybeSlice[Parameter](params),
+		Return: maybe[Type](ret),
+
+		Position: pos(c),
+	}, nil
+}
+
+InterfaceMethodList <- __ field:InterfaceMethod _ rest:InterfaceMethodListNewline? {
+	return append([]InterfaceMethod{field.(InterfaceMethod)}, maybeSlice[InterfaceMethod](rest)...), nil
+}
+
+InterfaceMethodListNewline <- nl rest:InterfaceMethodList {
 	return rest, nil
 }
 
@@ -207,6 +235,8 @@ VarStatement <- "var" _ name:Identifier _ typ:Type? _ exp:VarStatementExpr? {
 
     Position: pos(c),
   }, nil
+} / "var" _ Expr _ Type? _ ('=' _ Expr)?  {
+  return nil, pos(c).WrapError(fmt.Errorf("cannot use expression as identifier in variable declaration"))
 }
 
 VarStatementExpr <- '=' _ exp:Expr _ {
@@ -225,6 +255,8 @@ VarDeclaration <- "var" _ name:Identifier _ typ:Type? _ exp:VarDeclarationExpr? 
 
     Position: pos(c),
   }, nil
+} / "var" _ Expr _ Type? _ ('=' _ Expr)?  {
+  return nil, pos(c).WrapError(fmt.Errorf("cannot use expression as identifier in variable declaration"))
 }
 
 VarDeclarationExpr <- '=' _ exp:Expr _ {
@@ -238,6 +270,8 @@ DeclarationStatement <- ident:Identifier _ ":=" _ exp:Expr {
 
     Position: pos(c),
   }, nil
+} / Expr _ ":=" _ Expr {
+  return nil, pos(c).WrapError(fmt.Errorf("cannot use expression as lhs of declaration"))
 }
 
 AssignmentStatement <- left:Expr _ '=' _ right:Expr {
@@ -418,6 +452,9 @@ ParameterNamed <- name:Identifier _ typ:Type {
 ParameterList <- & ')' {
 	// empty parameter list
 	return []Parameter{}, nil
+} / _ param:ParameterUnnamed _ &')' {
+  // single param is assumed to be type
+  return []Parameter{param.(Parameter)}, nil
 } / _ param:ParameterListNamedParameter _ rest:ParameterListComma? {
 	// named parameter list
 	restSlice := maybeSlice[Parameter](rest)

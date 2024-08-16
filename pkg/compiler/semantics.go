@@ -400,6 +400,38 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 			Return:     ret,
 			Parameters: parameters,
 		}, nil
+	case parser.InterfaceType:
+		var methods MethodSet
+		for _, field := range typ.Methods {
+			var params []Type
+			for _, param := range field.Parameters {
+				paramType, err := c.compileTypeReference(scope, param.Type)
+				if err != nil {
+					if err != nil {
+						errs.Add(err)
+					}
+				}
+
+				params = append(params, paramType)
+			}
+
+			var retType Type = VoidType
+			if field.Return != nil {
+				retType, err = c.compileTypeReference(scope, field.Return)
+				if err != nil {
+					errs.Add(err)
+				}
+			}
+
+			err = methods.Add(string(field.Name.Str), VoidType, params, retType)
+			if err != nil {
+				errs.Add(err)
+			}
+		}
+
+		return &InterfaceType{
+			methods: methods,
+		}, nil
 	default:
 		return nil, typ.WrapError(fmt.Errorf("unhandled type reference %q", typ))
 	}

@@ -19,8 +19,9 @@ type Function struct {
 
 	bytecode BytecodeSnippet
 
-	addr   Addr
-	addrOp Operand
+	addr     Addr
+	addrOp   Operand
+	infoAddr Addr
 }
 
 func newFunction(name string, pkg *Package) *Function {
@@ -96,6 +97,14 @@ func (f *Function) Addr() Addr {
 func (f *Function) SetAddr(addr Addr) {
 	f.addr = addr
 	f.addrOp.Value = Int(f.addr)
+}
+
+func (f *Function) SetInfoAddr(addr Addr) {
+	f.infoAddr = addr
+}
+
+func (f *Function) InfoAddr() Addr {
+	return f.infoAddr
 }
 
 func (f *Function) AddrOp() *Operand {
@@ -190,28 +199,29 @@ func (*CompilerFunctionReferenceExpression) WrapError(err error) error {
 type BoundMethodExpression struct {
 	Receiver Expression
 
-	Function *Function
+	Method Method
 
 	parser.Position
 }
 
 func (e *BoundMethodExpression) Type() Type {
-	ftype := e.Function.Type().(*FunctionType)
-	ftype.Receiver = VoidType
-
-	return ftype
+	return e.Method.BoundFunctionType()
 }
 
 type MethodExpression struct {
 	Receiver Expression
 
-	Function *Function
+	Method Method
 
 	parser.Position
 }
 
 func (e *MethodExpression) Type() Type {
-	return e.Function.Type().(*FunctionType)
+	return &FunctionType{
+		Receiver:   resolveType(e.Receiver.Type()),
+		Parameters: e.Method.Parameters,
+		Return:     e.Method.Return,
+	}
 }
 
 type MethodFunctionExpression struct {

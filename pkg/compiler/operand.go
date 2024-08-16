@@ -10,7 +10,7 @@ const (
 	OperandKindRegister
 	OperandKindIndirect
 	OperandKindBinary
-	OperandKindNot
+	OperandKindUnary
 	OperandKindVTableLookup
 
 	// stripped out before end of compilation
@@ -30,8 +30,8 @@ func (s OperandKind) String() string {
 		return "@"
 	case OperandKindBinary:
 		return "B"
-	case OperandKindNot:
-		return "!"
+	case OperandKindUnary:
+		return "U"
 	case OperandKindVTableLookup:
 		return "V"
 	case OperandKindLabel:
@@ -79,20 +79,21 @@ func (i Indirect) String() string {
 	return fmt.Sprintf("[%s]", i.Ptr)
 }
 
-type Not struct {
-	A *Operand `xc:"a"`
+type UnaryOperand struct {
+	Op Operator `xc:"o"`
+	A  *Operand `xc:"a"`
 }
 
-func (n Not) String() string { return fmt.Sprintf("!%s", n.A) }
+func (n UnaryOperand) String() string { return fmt.Sprintf("%s%s", n.Op, n.A) }
 
 type BinaryOperand struct {
-	A  *Operand `xc:"a"`
-	Op Operator `xc:"o"`
-	B  *Operand `xc:"b"`
+	Left  *Operand `xc:"a"`
+	Op    Operator `xc:"o"`
+	Right *Operand `xc:"b"`
 }
 
 func (o BinaryOperand) String() string {
-	return fmt.Sprintf("(%s %s %s)", o.A, o.Op, o.B)
+	return fmt.Sprintf("(%s %s %s)", o.Left, o.Op, o.Right)
 }
 
 type Operand struct {
@@ -132,12 +133,12 @@ func (o *Operand) walk(w operandWalkFunc) (*Operand, error) {
 		return w(o)
 	case OperandKindBinary:
 		v := o.Value.(BinaryOperand)
-		v.A, err = v.A.walk(w)
+		v.Left, err = v.Left.walk(w)
 		if err != nil {
 			return nil, err
 		}
 
-		v.B, err = v.B.walk(w)
+		v.Right, err = v.Right.walk(w)
 		if err != nil {
 			return nil, err
 		}
@@ -145,8 +146,8 @@ func (o *Operand) walk(w operandWalkFunc) (*Operand, error) {
 		o.Value = v
 
 		return w(o)
-	case OperandKindNot:
-		v := o.Value.(Not)
+	case OperandKindUnary:
+		v := o.Value.(UnaryOperand)
 		v.A, err = v.A.walk(w)
 		if err != nil {
 			return nil, err
@@ -202,9 +203,9 @@ func (o *Operand) Offset(offset *Operand) *Operand {
 	return &Operand{
 		Kind: OperandKindBinary,
 		Value: BinaryOperand{
-			A:  o,
-			Op: "+",
-			B:  offset,
+			Left:  o,
+			Op:    "+",
+			Right: offset,
 		},
 	}
 }
@@ -213,9 +214,9 @@ func (o *Operand) Stride(offset *Operand) *Operand {
 	return &Operand{
 		Kind: OperandKindBinary,
 		Value: BinaryOperand{
-			A:  o,
-			Op: "*",
-			B:  offset,
+			Left:  o,
+			Op:    "*",
+			Right: offset,
 		},
 	}
 }
@@ -235,9 +236,10 @@ func (o *Operand) Dereference() *Operand {
 
 func (o *Operand) Not() *Operand {
 	return &Operand{
-		Kind: OperandKindNot,
-		Value: Not{
-			A: o,
+		Kind: OperandKindUnary,
+		Value: UnaryOperand{
+			Op: OperatorNot,
+			A:  o,
 		},
 	}
 }
@@ -260,20 +262,20 @@ func (o *Operand) Optimize() *Operand {
 		o.Value = v
 		return o
 	case BinaryOperand:
-		v.A = v.A.Optimize()
-		v.B = v.B.Optimize()
+		v.Left = v.Left.Optimize()
+		v.Right = v.Right.Optimize()
 
 		o.Value = v
 
-		if v.A.Kind == OperandKindImmediate && v.B.Kind == OperandKindImmediate && v.Op == "+" {
-			return ImmediateOperand(v.A.Value.(Int) + v.B.Value.(Int))
-		} else if v.A.Kind == OperandKindBinary && v.Op == "+" {
+		if v.Left.Kind == OperandKindImmediate && v.Right.Kind == OperandKindImmediate && v.Op == "+" {
+			return ImmediateOperand(v.Left.Value.(Int) + v.Right.Value.(Int))
+		} else if v.Left.Kind == OperandKindBinary && v.Op == "+" {
 			rot := &Operand{
 				Kind: OperandKindBinary,
 				Value: BinaryOperand{
-					A:  v.A.Value.(BinaryOperand).A,
-					Op: "+",
-					B:  v.A.Value.(BinaryOperand).B.Offset(v.B),
+					Left:  v.Left.Value.(BinaryOperand).Left,
+					Op:    "+",
+					Right: v.Left.Value.(BinaryOperand).Right.Offset(v.Right),
 				},
 			}
 
@@ -283,7 +285,7 @@ func (o *Operand) Optimize() *Operand {
 		}
 
 		return o
-	case Not:
+	case UnaryOperand:
 		v.A = v.A.Optimize()
 
 		o.Value = v

@@ -553,12 +553,11 @@ func (r Return) String() string {
 }
 
 type Call struct {
-	Args Size     `xc:"a"`
 	Func *Operand `xc:"f"`
 }
 
 func (c Call) String() string {
-	return fmt.Sprintf("CAL(%s) %s", c.Args, c.Func)
+	return fmt.Sprintf("CAL %s", c.Func)
 }
 
 func (c Call) Name() string {

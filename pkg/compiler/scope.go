@@ -270,6 +270,15 @@ type Location struct {
 	*Operand
 }
 
+func (l *Location) AddConst(size Size) *Location {
+	return &Location{
+		Kind:    l.Kind,
+		Name:    l.Name,
+		Type:    l.Type,
+		Operand: l.Operand.ConstOffset(size),
+	}
+}
+
 func (l *Location) AsType(typ Type) *Location {
 	return &Location{
 		Kind:    l.Kind,
@@ -544,7 +553,7 @@ func (vs *ValueScope) allocTemp(typ Type) *Location {
 func (vs *ValueScope) deallocTemp(l *Location) {
 	switch l.Kind {
 	case LocationKindLocal:
-		offset := Size(l.Value.(Indirect).Ptr.Value.(BinaryOperand).B.Value.(Int))
+		offset := Size(l.Value.(Indirect).Ptr.Value.(BinaryOperand).Right.Value.(Int))
 		if offset == vs.nextLocal-l.Type.Size() {
 			vs.nextLocal -= l.Type.Size()
 		}
@@ -618,4 +627,22 @@ func (vs *ValueScope) getString(s String) *Location {
 
 func (vs *ValueScope) Strings() []String {
 	return sortedMapKeysByKey(vs.strings)
+}
+
+func (vs *ValueScope) SP() *Location {
+	return &Location{
+		Kind:    LocationKindRegister,
+		Name:    "sp",
+		Type:    TypeKind(KindInt),
+		Operand: OperandRegisterSP,
+	}
+}
+
+func (vs *ValueScope) vtableLookup(typ *Location, method Method) *Location {
+	return &Location{
+		Kind:    LocationKindGlobal,
+		Name:    fmt.Sprintf("vtable %s", method.Name),
+		Type:    method.BoundFunctionType(),
+		Operand: NewVTableLookup(typ.Operand, vs.getString(String(method.Name)).Operand).Dereference(),
+	}
 }
