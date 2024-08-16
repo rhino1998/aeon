@@ -24,32 +24,15 @@ func (d D) l() {
 	print(itoa(int(d)))
 }
 
-func whatever() {
-  y := D("hello")
-  d = &y
-  d = nil
-	for i := 0; i < 16; i++ {
-		print(itoa(f(i)))
-	}
-  return
+func h(d D) {
+	d.l()
 }
 
-func f(a int) int {
-	if a <= 0 {
-		return 0
-	} else if a == 1 {
-		return 1
-	}
-
-	return f(a-1) + f(a-2)
-}
-
-#update
-func hello() {
-	print("HELLO")
-	return
 #init
 func f2() {
 	s := D.l
 	s(5)
+
+	s = h
+	s(6)
 }

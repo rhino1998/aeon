@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 )
 
@@ -766,7 +765,6 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		switch ftype := BaseType(expr.Function.Type()).(type) {
 		case *FunctionType:
-			log.Println(expr.Function.(interface{ Name() string }).Name())
 			if len(ftype.Parameters) != len(expr.Args) {
 				errs.Add(expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(ftype.Parameters), len(expr.Args))))
 			}
