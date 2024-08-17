@@ -33,6 +33,8 @@ type ExternFuncEntry struct {
 
 type ExternFuncs []ExternFuncEntry
 
+type VTable map[int]map[string]int
+
 type xenonContext struct {
 	PageSize     int
 	NumCodePages int
@@ -49,6 +51,8 @@ type xenonContext struct {
 	GlobalSize   int
 	MaxLoadDepth int
 	Debug        bool
+
+	VTable VTable
 
 	OPSep  string
 	UOPSep string
@@ -76,6 +80,7 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	xeCtx.NumRegisters = prog.Registers()
 	xeCtx.MaxLoadDepth = 5
 	xeCtx.GlobalSize = int(prog.GlobalSize())
+	xeCtx.VTable = make(VTable)
 	xeCtx.Debug = debug
 	xeCtx.OPSep = "\x9B"
 	xeCtx.UOPSep = "\x9C"
@@ -99,6 +104,25 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 
 	for _, f := range prog.UpdateFunctions() {
 		xeCtx.UpdateFuncs = append(xeCtx.UpdateFuncs, int(f.Addr()))
+	}
+
+	for i, typ := range prog.Types() {
+		xeCtx.VTable[i] = make(map[string]int)
+		switch typ := typ.(type) {
+		case *compiler.DerivedType:
+			for _, method := range typ.Methods(true) {
+				methodFunc := typ.Method(method.Name)
+				xeCtx.VTable[i][method.Name] = int(methodFunc.InfoAddr())
+			}
+		case *compiler.PointerType:
+			switch typ := typ.Pointee().(type) {
+			case *compiler.DerivedType:
+				for _, method := range typ.Methods(true) {
+					methodFunc := typ.Method(method.Name)
+					xeCtx.VTable[i][method.Name] = int(methodFunc.InfoAddr())
+				}
+			}
+		}
 	}
 
 	xeCtx.Code = make(map[PageAddr]string)
