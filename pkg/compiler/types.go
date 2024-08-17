@@ -1127,3 +1127,7 @@ type ParenthesizedType struct {
 
 	parser.Position
 }
+
+func (t *ParenthesizedType) String() string {
+	return t.Type.String()
+}

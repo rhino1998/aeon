@@ -54,16 +54,16 @@ func (d E) l() {
 	print(itoa(int(d)))
 }
 
-func h(d D) {
-	d.l()
-}
+type J int
 
-func f3(a,b,c int) {
+func (j *J) l() {
+	print("J")
+	print(itoa(int(*j)))
 }
 
 #init
 func f2() {
-  f3(1,2,3)
+	var d int = 6
   x := [...]iface{
     E(7),
     E(4),
@@ -71,7 +71,7 @@ func f2() {
     F((8,)),
     F((1,)),
     F((1,)),
-    F((1,)),
+    (*J)(&d),
     G([...]int{9}),
   }
 

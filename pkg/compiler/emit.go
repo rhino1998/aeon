@@ -122,7 +122,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	f := newFunction(VarInitFuncName, pkg)
 	f.receiver = &Variable{typ: VoidType}
 
-	scope = scope.sub(pkg.scope)
+	scope = scope.fun(pkg.scope)
 
 	numLocals := ImmediateOperand(Int(0))
 
@@ -227,7 +227,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 }
 
 func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error {
-	scope = scope.sub(f.symbols)
+	scope = scope.fun(f.symbols)
 
 	numLocals := ImmediateOperand(Int(0))
 
@@ -942,7 +942,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			srcLocValue, err := srcOp.Dereference()
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, expr.WrapError(err)
 			}
 
 			return bc, srcLocValue, nil
@@ -1144,9 +1144,12 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			switch arg := BaseType(expr.Args[0].Type()).(type) {
 			case *ArrayType:
 				return nil, scope.newImmediate(Int(arg.Length())), nil
+			case *SliceType:
+				return nil, nil, expr.WrapError(fmt.Errorf("slice len not yet implemented"))
+			case *MapType:
+				return nil, nil, expr.WrapError(fmt.Errorf("map len not yet implemented"))
 			default:
 				return nil, nil, expr.WrapError(fmt.Errorf("cannot get length of %s", expr.Args[0].Type()))
-
 			}
 		default:
 			return nil, nil, expr.WrapError(fmt.Errorf("invalid builtin %q", expr.Name))

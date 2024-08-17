@@ -34,6 +34,7 @@ type Position struct {
 	File   string
 	Line   int
 	Column int
+	Text   string
 }
 
 type PositionError struct {
@@ -47,7 +48,10 @@ func (e PositionError) Unwrap() error {
 
 func (e PositionError) Error() string {
 	return fmt.Sprintf("%s:%d:%d: %v", e.File, e.Line, e.Column, e.Err)
+}
 
+func (e Position) String() string {
+	return e.Text
 }
 
 func (p Position) WrapError(err error) error {
@@ -58,7 +62,7 @@ func (p Position) WrapError(err error) error {
 }
 
 func pos(c *current) Position {
-	return Position{Line: c.pos.line, Column: c.pos.col, File: c.state["filename"].(string)}
+	return Position{Line: c.pos.line, Column: c.pos.col, File: c.state["filename"].(string), Text: string(c.text)}
 }
 
 type Identifier struct {
@@ -505,6 +509,14 @@ type InterfaceMethod struct {
 	Name       Identifier
 	Parameters []Parameter
 	Return     Type
+
+	Position
+}
+
+type TypeExpr struct {
+	baseExpr
+
+	Type Type
 
 	Position
 }

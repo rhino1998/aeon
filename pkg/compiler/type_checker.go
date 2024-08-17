@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 )
 
@@ -764,14 +765,30 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			errs.Add(err)
 		}
 
-		expr.Expression = subExpr
+		switch subType := subExpr.Type().(type) {
+		case *TypeType:
+			if expr.Operator != OperatorDereference {
+				errs.Add(expr.WrapError(fmt.Errorf("invalid operator %s on type expression", expr.Operator)))
+			}
 
-		_, err = validateUnaryExpression(expr.Expression.Type(), expr.Operator)
-		if err != nil {
-			errs.Add(expr.WrapError(err))
+			return &TypeExpression{
+				typ: NewPointerType(subType.Type),
+
+				Position: expr.Position,
+			}, nil
+		default:
+			expr.Expression = subExpr
+			log.Println(expr.Expression)
+
+			log.Println("DEREF", expr.Expression.Type())
+
+			_, err = validateUnaryExpression(expr.Expression.Type(), expr.Operator)
+			if err != nil {
+				errs.Add(expr.WrapError(err))
+			}
+
+			return expr, nil
 		}
-
-		return expr, nil
 	case *CallExpression:
 		fExpr, err := c.resolveCallExpressionReceiverTypes(expr.Function, nil)
 		if err != nil {
@@ -834,11 +851,11 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 						Position: expr.Position,
 					}, nil
 				case *SliceType:
-					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s (unimp)", expr.Args[0]))
+					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s (unimp)", expr.Args[0].Type()))
 				case *MapType:
-					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s (unimp)", expr.Args[0]))
+					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s (unimp)", expr.Args[0].Type()))
 				default:
-					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s", expr.Args[0]))
+					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s", expr.Args[0].Type()))
 				}
 			default:
 				return expr, expr.WrapError(fmt.Errorf("unimplemented builtin %v", ftype.Name()))

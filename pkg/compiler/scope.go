@@ -298,7 +298,10 @@ func (l *Location) AddressOf() *Location {
 }
 
 func (l *Location) Dereference() (*Location, error) {
-	typ := BaseType(l.Type).(*PointerType)
+	typ, ok := BaseType(l.Type).(*PointerType)
+	if !ok {
+		return nil, fmt.Errorf("cannot dereference non-pointer type %s", l.Type)
+	}
 
 	return &Location{
 		Kind: l.Kind,
@@ -437,6 +440,23 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 		strings:   vs.strings,
 		maxLocal:  vs.maxLocal,
 		nextLocal: vs.nextLocal,
+
+		usedRegisters: maps.Clone(vs.usedRegisters),
+		numRegisters:  vs.numRegisters,
+	}
+}
+
+func (vs *ValueScope) fun(scope *SymbolScope) *ValueScope {
+	return &ValueScope{
+		parent:  vs,
+		symbols: scope,
+
+		function:  scope.Function(),
+		variables: maps.Clone(vs.variables),
+		types:     vs.types,
+		strings:   vs.strings,
+		nextLocal: 1,
+		maxLocal:  new(Size),
 
 		usedRegisters: maps.Clone(vs.usedRegisters),
 		numRegisters:  vs.numRegisters,

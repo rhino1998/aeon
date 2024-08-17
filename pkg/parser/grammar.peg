@@ -567,6 +567,7 @@ IdentifierExpr <- ident:Identifier {
 MaybeCallExpr <- CallExpr / IdentifierExpr
 
 CallExpr <- exp:TermExpr '(' __ args:CallArgumentList? ce_ ')' {
+	log.Printf("%s", c.text)
   call := CallExpr{
     Expr: exp.(Expr),
 
@@ -607,6 +608,8 @@ IndexExpr <- expr:Expr _ '[' _ index:Expr _ ']' {
 }
 
 Expr <- MaybeOrExpr
+
+ParenExpr <- Expr / Type
 
 TermExpr <- UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / MaybeCallExpr / TupleExpr / ArrayExpr
 
