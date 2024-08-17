@@ -50,6 +50,8 @@ const (
 
 	OperatorAddress     Operator = "&"
 	OperatorDereference Operator = "*"
+
+	OperatorBoundsCheck Operator = "#"
 )
 
 func validateBinaryExpression(left Type, operator Operator, right Type) (Type, error) {

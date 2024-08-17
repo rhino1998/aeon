@@ -183,6 +183,15 @@ function @aeon_load_internal():number
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append(@aeon_vtable($arg1, @aeon_str_load($arg2)))
+		elseif ($k == "#")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			if ($arg1 >= $arg2)
+				print(text("index out of bounds: {} {}", $arg1, $arg2))
+				@aeon_fatal()
+			$aeon_op_arg_stack.append($arg1)
 		else
 			print(text("bad uop in load {}", $uop))
 			@aeon_fatal()

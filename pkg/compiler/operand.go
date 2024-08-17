@@ -248,6 +248,17 @@ func (o *Operand) String() string {
 	return fmt.Sprintf("%s", o.Value)
 }
 
+func (o *Operand) Bound(bound *Operand) *Operand {
+	return &Operand{
+		Kind: OperandKindBinary,
+		Value: BinaryOperand{
+			Left:  o,
+			Op:    OperatorBoundsCheck,
+			Right: bound,
+		},
+	}
+}
+
 func ImmediateOperand(imm Immediate) *Operand {
 	return &Operand{
 		Value: imm,

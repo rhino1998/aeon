@@ -370,6 +370,12 @@ func (r *Runtime) loadBinary(binop compiler.BinaryOperand) loadFunc {
 			} else {
 				return 0, nil
 			}
+		case "#":
+			if int(a) >= int(b) {
+				return 0, fmt.Errorf("index out of bounds: %d >= %d", int(a), int(b))
+			}
+
+			return a, nil
 		default:
 			return 0, fmt.Errorf("unhandled binary operand %v", binop.Op)
 		}

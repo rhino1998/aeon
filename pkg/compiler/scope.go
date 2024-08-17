@@ -343,10 +343,13 @@ func (l *Location) IndexArray(index *Location) (*Location, error) {
 	typ := BaseType(l.Type).(*ArrayType)
 
 	return &Location{
-		Kind:    l.Kind,
-		Name:    fmt.Sprintf("%s.%d", l.Name, index),
-		Type:    typ.Elem(),
-		Operand: l.Operand.AddressOf().Offset(index.Operand.Stride(ImmediateOperand(Int(typ.Elem().Size())))).Dereference(),
+		Kind: l.Kind,
+		Name: fmt.Sprintf("%s.%d", l.Name, index),
+		Type: typ.Elem(),
+		Operand: l.Operand.AddressOf().Offset(
+			index.Operand.
+				Bound(ImmediateOperand(Int(typ.Length()))).
+				Stride(ImmediateOperand(Int(typ.Elem().Size())))).Dereference(),
 	}, nil
 }
 
