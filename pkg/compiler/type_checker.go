@@ -91,13 +91,13 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 		if kindType, ok := typ.(TypeKind); ok {
 			switch kindType.Kind() {
 			case KindInt:
-				typ = IntType
+				typ = TypeInt
 			case KindFloat:
-				typ = FloatType
+				typ = TypeFloat
 			case KindString:
-				typ = StringType
+				typ = TypeString
 			case KindBool:
-				typ = BoolType
+				typ = TypeBool
 			}
 		}
 
@@ -134,13 +134,13 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			if kindType, ok := typ.(TypeKind); ok {
 				switch kindType.Kind() {
 				case KindInt:
-					typ = IntType
+					typ = TypeInt
 				case KindFloat:
-					typ = FloatType
+					typ = TypeFloat
 				case KindString:
-					typ = StringType
+					typ = TypeString
 				case KindBool:
-					typ = BoolType
+					typ = TypeBool
 				}
 			}
 
@@ -517,7 +517,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			if bound == nil && IsUnspecified(expr.Type()) {
 				return &Literal{
 					value: expr.value,
-					typ:   IntType,
+					typ:   TypeInt,
 
 					Position: expr.Position,
 				}, nil
@@ -526,7 +526,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			switch bound.Kind() {
 			case KindFloat:
 				if IsUnspecified(bound) {
-					bound = FloatType
+					bound = TypeFloat
 				}
 
 				expr.typ = bound
@@ -538,7 +538,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				}, nil
 			case KindInt:
 				if IsUnspecified(bound) {
-					bound = IntType
+					bound = TypeInt
 				}
 
 				return &Literal{
@@ -555,7 +555,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 				return &Literal{
 					value: expr.value,
-					typ:   IntType,
+					typ:   TypeInt,
 
 					Position: expr.Position,
 				}, nil
@@ -566,7 +566,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			if bound == nil && IsUnspecified(expr.Type()) {
 				return &Literal{
 					value: expr.value,
-					typ:   FloatType,
+					typ:   TypeFloat,
 
 					Position: expr.Position,
 				}, nil
@@ -575,7 +575,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			switch bound.Kind() {
 			case KindFloat:
 				if IsUnspecified(bound) {
-					bound = FloatType
+					bound = TypeFloat
 				}
 
 				expr.typ = bound
@@ -587,7 +587,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				}, nil
 			case KindInt:
 				if IsUnspecified(bound) {
-					bound = IntType
+					bound = TypeInt
 				}
 
 				return &Literal{
@@ -604,7 +604,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 				return &Literal{
 					value: expr.value,
-					typ:   FloatType,
+					typ:   TypeFloat,
 
 					Position: expr.Position,
 				}, nil
@@ -615,7 +615,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			if bound == nil && IsUnspecified(expr.Type()) {
 				return &Literal{
 					value: expr.value,
-					typ:   StringType,
+					typ:   TypeString,
 
 					Position: expr.Position,
 				}, nil
@@ -624,7 +624,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			switch bound.Kind() {
 			case KindString:
 				if IsUnspecified(bound) {
-					bound = StringType
+					bound = TypeString
 				}
 
 				expr.typ = bound
@@ -642,7 +642,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 				return &Literal{
 					value: expr.value,
-					typ:   StringType,
+					typ:   TypeString,
 
 					Position: expr.Position,
 				}, nil
@@ -653,7 +653,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			if bound == nil && IsUnspecified(expr.Type()) {
 				return &Literal{
 					value: expr.value,
-					typ:   StringType,
+					typ:   TypeString,
 
 					Position: expr.Position,
 				}, nil
@@ -662,7 +662,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			switch bound.Kind() {
 			case KindBool:
 				if IsUnspecified(bound) {
-					bound = BoolType
+					bound = TypeBool
 				}
 				expr.typ = bound
 				return &Literal{
@@ -679,7 +679,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 				return &Literal{
 					value: expr.value,
-					typ:   BoolType,
+					typ:   TypeBool,
 
 					Position: expr.Position,
 				}, nil
@@ -714,6 +714,8 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			return NewLiteral(val), nil
+		case *BuiltinSymbol:
+			return expr, nil
 		default:
 			return expr, expr.WrapError(fmt.Errorf("unhandled symbol type %T", sym))
 		}
@@ -796,6 +798,8 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 				expr.Args[i] = arg
 			}
+
+			return expr, nil
 		case *TypeType:
 			if len(expr.Args) != 1 {
 				errs.Add(expr.WrapError(fmt.Errorf("type conversion expects 1 parameter, got %d", len(expr.Args))))
@@ -813,11 +817,35 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			return expr, nil
-		default:
-			errs.Add(expr.WrapError(fmt.Errorf("cannot call non-function type %v", fExpr.Type())))
-		}
+		case *BuiltinType:
+			switch ftype.Name() {
+			case "len":
+				if len(expr.Args) != 1 {
+					errs.Add(expr.WrapError(fmt.Errorf("len accepts exactly 1 argument")))
+					return expr, nil
+				}
 
-		return expr, nil
+				switch BaseType(expr.Args[0].Type()).(type) {
+				case *ArrayType:
+					return &BuiltinExpression{
+						Name: ftype.Name(),
+						Args: expr.Args,
+
+						Position: expr.Position,
+					}, nil
+				case *SliceType:
+					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s (unimp)", expr.Args[0]))
+				case *MapType:
+					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s (unimp)", expr.Args[0]))
+				default:
+					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s", expr.Args[0]))
+				}
+			default:
+				return expr, expr.WrapError(fmt.Errorf("unimplemented builtin %v", ftype.Name()))
+			}
+		default:
+			return expr, expr.WrapError(fmt.Errorf("cannot call non-function type %v", fExpr.Type()))
+		}
 	case *DotExpression:
 		receiver, err := c.resolveExpressionTypes(expr.Receiver, nil)
 		if err != nil {

@@ -1,34 +1,40 @@
 package compiler
 
+import (
+	"fmt"
+
+	"github.com/rhino1998/aeon/pkg/parser"
+)
+
 var (
-	IntType = &DerivedType{
+	TypeInt = &DerivedType{
 		name:       "int",
 		underlying: TypeKind(KindInt),
 	}
 
-	BoolType = &DerivedType{
+	TypeBool = &DerivedType{
 		name:       "bool",
 		underlying: TypeKind(KindBool),
 	}
 
-	FloatType = &DerivedType{
+	TypeFloat = &DerivedType{
 		name:       "float",
 		underlying: TypeKind(KindFloat),
 	}
 
-	StringType = &DerivedType{
+	TypeString = &DerivedType{
 		name:       "string",
 		underlying: TypeKind(KindString),
 	}
 
-	AnyType = &DerivedType{
+	TypeAny = &DerivedType{
 		name:       "any",
 		underlying: &InterfaceType{},
 	}
 )
 
 var (
-	NilConstant = &Constant{
+	Nil = &Constant{
 		name:               "nil",
 		typ:                NilType,
 		ConstantExpression: NewLiteral(NilValue),
@@ -38,12 +44,13 @@ var (
 func BuiltinsSymbols() *SymbolScope {
 	s := newScope(nil, "builtins")
 
-	s.put(IntType)
-	s.put(BoolType)
-	s.put(StringType)
-	s.put(FloatType)
-	s.put(AnyType)
-	s.put(NilConstant)
+	s.put(TypeInt)
+	s.put(TypeBool)
+	s.put(TypeString)
+	s.put(TypeFloat)
+	s.put(TypeAny)
+	s.put(Nil)
+	s.put(BuiltinLen)
 
 	return s
 }
@@ -58,4 +65,59 @@ func BuiltinValues(regs int, symbols *SymbolScope) *ValueScope {
 
 const (
 	VarInitFuncName = "__varinit"
+)
+
+type BuiltinSymbol struct {
+	name string
+	parser.Position
+}
+
+func (e *BuiltinSymbol) Name() string {
+	return e.name
+}
+
+func (e *BuiltinSymbol) Type() Type {
+	return &BuiltinType{name: e.name}
+}
+
+type BuiltinType struct {
+	name string
+}
+
+func (*BuiltinType) Kind() Kind { return KindBuiltin }
+
+func (t *BuiltinType) String() string {
+	return fmt.Sprintf("<builtin %s>", t.name)
+}
+
+func (t *BuiltinType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("<builtin %s>", t.name))
+}
+
+func (t *BuiltinType) Size() Size {
+	return 0
+}
+
+func (t *BuiltinType) Name() string {
+	return t.name
+}
+
+type BuiltinExpression struct {
+	Name string
+	Args []Expression
+
+	parser.Position
+}
+
+func (e *BuiltinExpression) Type() Type {
+	switch e.Name {
+	case "len":
+		return TypeInt
+	default:
+		return UnknownType
+	}
+}
+
+var (
+	BuiltinLen = &BuiltinSymbol{name: "len"}
 )

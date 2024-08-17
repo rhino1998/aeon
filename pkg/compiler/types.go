@@ -81,7 +81,7 @@ func IsValidMethodReceiverType(t Type) bool {
 }
 
 func IsAssignableTo(v, to Type) bool {
-	if v.Kind() == KindTypeConversion {
+	if v.Kind() == KindType || v.Kind() == KindBuiltin {
 		return false
 	}
 
@@ -360,6 +360,7 @@ const (
 	KindInterface
 	KindTypeConversion
 	KindType
+	KindBuiltin
 )
 
 func (k Kind) IsPrimitive() bool {
@@ -758,8 +759,8 @@ func (t *SliceType) Elem() Type { return t.elem }
 func (*SliceType) Size() Size   { return 3 }
 
 var sliceHeader = NewTupleType(
-	IntType,
-	IntType,
+	TypeInt,
+	TypeInt,
 	NewPointerType(VoidType),
 )
 

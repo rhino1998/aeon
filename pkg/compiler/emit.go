@@ -870,6 +870,8 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		return nil, sym, nil
 	case *ParenthesizedExpression:
 		return prog.compileBCExpression(ctx, expr.Expression, scope, dst)
+	case *BuiltinSymbol:
+		return nil, nil, expr.WrapError(fmt.Errorf("builtin %q used as value", expr.Name()))
 	case *BinaryExpression:
 		var lhsTmp *Location
 		if expr.Left.Type().Size() == dst.Type.Size() {
@@ -1132,6 +1134,23 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		return bc, dst, nil
 	case *TypeExpression:
 		return bc, scope.typeName(expr.typ), nil
+	case *BuiltinExpression:
+		switch expr.Name {
+		case "len":
+			if len(expr.Args) != 1 {
+				return nil, nil, expr.WrapError(fmt.Errorf("builtin %q expects exactly 1 argument, got %d", expr.Name, len(expr.Args)))
+			}
+
+			switch arg := BaseType(expr.Args[0].Type()).(type) {
+			case *ArrayType:
+				return nil, scope.newImmediate(Int(arg.Length())), nil
+			default:
+				return nil, nil, expr.WrapError(fmt.Errorf("cannot get length of %s", expr.Args[0].Type()))
+
+			}
+		default:
+			return nil, nil, expr.WrapError(fmt.Errorf("invalid builtin %q", expr.Name))
+		}
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}

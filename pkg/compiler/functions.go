@@ -171,15 +171,15 @@ const (
 )
 
 var externType = NewTupleType(
-	IntType,
-	StringType,
+	TypeInt,
+	TypeString,
 	NewPointerType(VoidType),
-	StringType,
+	TypeString,
 )
 
 var funcType = NewTupleType(
-	IntType,
-	StringType,
+	TypeInt,
+	TypeString,
 	NewPointerType(VoidType),
 	NewPointerType(VoidType),
 )

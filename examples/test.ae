@@ -75,7 +75,7 @@ func f2() {
     G([...]int{9}),
   }
 
-  for i := 0; i < 10; i++ {
+  for i := 0; i < len(x); i++ {
     x[i].l()
   }
 }

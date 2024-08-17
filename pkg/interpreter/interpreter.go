@@ -407,11 +407,11 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 	case compiler.OperatorEqual:
 		b := s.valuesEqual(lhs, rhs)
 
-		return NewConstant(compiler.BoolType, b), nil
+		return NewConstant(compiler.TypeBool, b), nil
 	case compiler.OperatorNotEqual:
 		b := !s.valuesEqual(lhs, rhs)
 
-		return NewConstant(compiler.BoolType, b), nil
+		return NewConstant(compiler.TypeBool, b), nil
 	case compiler.OperatorLessThan:
 		switch lhs.Type().Kind() {
 		case compiler.KindFloat:
@@ -427,7 +427,7 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 
 			b := lhsVal < rhsVal
 
-			return NewConstant(compiler.BoolType, b), nil
+			return NewConstant(compiler.TypeBool, b), nil
 		case compiler.KindInt:
 			lhsVal, err := s.intOrFail(lhs)
 			if err != nil {
@@ -441,7 +441,7 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 
 			b := lhsVal < rhsVal
 
-			return NewConstant(compiler.BoolType, b), nil
+			return NewConstant(compiler.TypeBool, b), nil
 		case compiler.KindString:
 			lhsVal, err := s.stringOrFail(lhs)
 			if err != nil {
@@ -455,7 +455,7 @@ func (s *State) binaryOperate(lhs, rhs Value, op compiler.Operator) (Value, erro
 
 			b := lhsVal < rhsVal
 
-			return NewConstant(compiler.BoolType, b), nil
+			return NewConstant(compiler.TypeBool, b), nil
 		default:
 			return nil, fmt.Errorf("unsupported binary operation: %s < %s", lhs.Type(), rhs.Type())
 		}

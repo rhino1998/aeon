@@ -32,3 +32,7 @@ func (l Literal) Evaluate() (LiteralValue, error) {
 func (l Literal) Type() Type {
 	return l.typ
 }
+
+func (l Literal) SetType(typ Type) {
+	l.typ = typ
+}
