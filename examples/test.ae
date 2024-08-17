@@ -25,7 +25,8 @@ type iface interface {
 type F (int,)
 
 func (f F) l() {
-  print("HI")
+  print("F")
+  print(itoa(int(f.0)))
 }
 
 type C struct {
@@ -62,7 +63,6 @@ func f2() {
     D(7),
     F((1,)),
   }
-
 
   for i := 0; i < 4; i++ {
     x[i].l()
