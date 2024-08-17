@@ -665,7 +665,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				r.setPC(Addr(faddr))
 				continue
 			default:
-				return fmt.Errorf("unhandled function type")
+				return fmt.Errorf("unhandled function type %d", int(funcType))
 			}
 		case compiler.Return:
 			fp := r.fp()

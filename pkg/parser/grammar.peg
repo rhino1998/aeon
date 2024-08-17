@@ -611,7 +611,7 @@ Expr <- MaybeOrExpr
 
 ParenExpr <- Expr / Type
 
-TermExpr <- UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / MaybeCallExpr / TupleExpr / ArrayExpr
+TermExpr <- CallExpr / UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / TupleExpr / ArrayExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / IdentifierExpr
 
 MaybeExpExpr <- ExpExpr / TermExpr
 

@@ -298,7 +298,7 @@ func (l *Location) AddressOf() *Location {
 }
 
 func (l *Location) Dereference() (*Location, error) {
-	typ, ok := BaseType(l.Type).(*PointerType)
+	typ, ok := resolveType(l.Type).(*PointerType)
 	if !ok {
 		return nil, fmt.Errorf("cannot dereference non-pointer type %s", l.Type)
 	}
@@ -313,7 +313,7 @@ func (l *Location) Dereference() (*Location, error) {
 }
 
 func (l *Location) IndexTuple(index int) (*Location, error) {
-	typ := BaseType(l.Type).(*TupleType)
+	typ := resolveType(l.Type).(*TupleType)
 
 	if index >= len(typ.Elems()) {
 		return nil, fmt.Errorf("compile-time tuple index %d out of bounds", index)
@@ -328,7 +328,7 @@ func (l *Location) IndexTuple(index int) (*Location, error) {
 }
 
 func (l *Location) IndexArrayConst(index int) (*Location, error) {
-	typ := BaseType(l.Type).(*ArrayType)
+	typ := resolveType(l.Type).(*ArrayType)
 
 	if index >= typ.Length() {
 		return nil, fmt.Errorf("compile-time array index %d out of bounds", index)
@@ -343,7 +343,7 @@ func (l *Location) IndexArrayConst(index int) (*Location, error) {
 }
 
 func (l *Location) IndexArray(index *Location) (*Location, error) {
-	typ := BaseType(l.Type).(*ArrayType)
+	typ := resolveType(l.Type).(*ArrayType)
 
 	return &Location{
 		Kind: l.Kind,
@@ -357,7 +357,7 @@ func (l *Location) IndexArray(index *Location) (*Location, error) {
 }
 
 func (l *Location) IndexSlice(index *Location) (*Location, error) {
-	typ := BaseType(l.Type).(*SliceType)
+	typ := resolveType(l.Type).(*SliceType)
 
 	if index.Type.Kind() != KindInt {
 		return nil, fmt.Errorf("invalid type for slice index %s", index.Type)
@@ -372,7 +372,7 @@ func (l *Location) IndexSlice(index *Location) (*Location, error) {
 }
 
 func (l *Location) IndexFieldConst(name string) (*Location, error) {
-	typ := BaseType(l.Type).(*StructType)
+	typ := resolveType(l.Type).(*StructType)
 
 	field, ok := typ.GetField(name)
 	if !ok {
@@ -625,7 +625,7 @@ func (vs *ValueScope) Types() []Type {
 }
 
 func (vs *ValueScope) registerType(typ Type) TypeName {
-	typ = resolveType(typ)
+	typ = dereferenceType(typ)
 	name := typ.GlobalName()
 	if other, ok := vs.types[name]; ok {
 		if !TypesEqual(typ, other) {
@@ -666,6 +666,6 @@ func (vs *ValueScope) vtableLookup(typ *Location, method Method) *Location {
 		Kind:    LocationKindGlobal,
 		Name:    fmt.Sprintf("vtable %s", method.Name),
 		Type:    method.BoundFunctionType(),
-		Operand: NewVTableLookup(typ.Operand, vs.getString(String(method.Name)).Operand).Dereference(),
+		Operand: NewVTableLookup(typ.Operand, vs.getString(String(method.Name)).Operand),
 	}
 }

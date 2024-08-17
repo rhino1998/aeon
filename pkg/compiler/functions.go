@@ -218,7 +218,7 @@ type MethodExpression struct {
 
 func (e *MethodExpression) Type() Type {
 	return &FunctionType{
-		Receiver:   resolveType(e.Receiver.Type()),
+		Receiver:   dereferenceType(e.Receiver.Type()),
 		Parameters: e.Method.Parameters,
 		Return:     e.Method.Return,
 	}

@@ -24,7 +24,7 @@ func (e *DotExpression) Type() Type {
 }
 
 func resolveDotExpressionType(e *DotExpression, typ Type) Type {
-	switch typ := BaseType(typ).(type) {
+	switch typ := resolveType(typ).(type) {
 	case *StructType:
 		field, ok := typ.GetField(e.Key)
 		if !ok {
@@ -79,7 +79,7 @@ type IndexExpression struct {
 }
 
 func (e *IndexExpression) Type() Type {
-	return resolveIndexExpressionType(e, BaseType(e.Receiver.Type()))
+	return resolveIndexExpressionType(e, resolveType(e.Receiver.Type()))
 }
 
 func resolveIndexExpressionType(_ *IndexExpression, typ Type) Type {

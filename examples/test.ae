@@ -61,18 +61,27 @@ func (j *J) l() {
 	print(itoa(int(*j)))
 }
 
+type H func()
+
+func (h H) l() {
+	h()
+}
+
+func h() {
+	print("H")
+	print("6")
+}
+
 #init
 func f2() {
-	var d int = 6
+	var d int = 4
   x := [...]iface{
-    E(7),
-    E(4),
-    D(6),
-    F((8,)),
-    F((1,)),
-    F((1,)),
+    E(1),
+    D(2),
+    F((3,)),
     (*J)(&d),
-    G([...]int{9}),
+    G([...]int{5}),
+		H(h),
   }
 
   for i := 0; i < len(x); i++ {

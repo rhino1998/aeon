@@ -122,7 +122,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	f := newFunction(VarInitFuncName, pkg)
 	f.receiver = &Variable{typ: VoidType}
 
-	scope = scope.fun(pkg.scope)
+	// TODO: special varinit tmp var semantics
 
 	numLocals := ImmediateOperand(Int(0))
 
@@ -134,37 +134,40 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	})
 
 	for _, externFunc := range pkg.ExternFunctions() {
-		ptr := scope.newGlobal(externFunc.Name(), externType)
+		hdr := scope.newGlobal("@"+externFunc.Name(), externType)
 		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
 			NewLiteral(Int(1)),
 			NewLiteral(String(externFunc.Name())),
 			NewLiteral(Int(0)),
 			NewLiteral(String(externFunc.Name())),
-		}, scope, ptr)
+		}, scope, hdr)
 		if err != nil {
 			return nil, err
 		}
 
 		f.bytecode.Add(hdrBC...)
+
+		scope.newConstant(externFunc.Name(), externFunc.Type(), hdr.Operand.AddressOf())
 	}
 
 	for _, fun := range pkg.Functions() {
 		fName := fun.Name()
-		log.Println(fName)
-		ptr := scope.newGlobal(fName, funcType)
+		hdr := scope.newGlobal("@"+fName, funcType)
 		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
 			NewLiteral(Int(2)),
 			NewLiteral(String(fun.pkg.qualifiedName)),
 			NewLiteral(Int(0)),
 			&CompilerFunctionReferenceExpression{fun},
-		}, scope, ptr)
+		}, scope, hdr)
 		if err != nil {
 			return nil, err
 		}
 
 		f.bytecode.Add(hdrBC...)
 
-		fun.SetInfoAddr(Addr(ptr.AddressOf().Value.(Int)))
+		scope.newConstant(fName, fun.Type(), hdr.Operand.AddressOf())
+
+		fun.SetInfoAddr(Addr(hdr.AddressOf().Value.(Int)))
 	}
 
 	for _, global := range pkg.Globals() {
@@ -200,22 +203,26 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 
 	for _, drv := range pkg.DerivedTypes() {
 		for _, met := range drv.MethodFunctions() {
-			ptr := scope.newGlobal(met.Name(), funcType)
+			hdr := scope.newGlobal("@"+met.Name(), funcType)
 			hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
 				NewLiteral(Int(0)),
 				&CompilerFunctionReferenceExpression{met},
-			}, scope, ptr)
+			}, scope, hdr)
 			if err != nil {
 				return nil, err
 			}
 
 			f.bytecode.Add(hdrBC...)
 
-			met.SetInfoAddr(Addr(ptr.AddressOf().Value.(Int)))
+			scope.newConstant(met.Name(), met.Type(), hdr.Operand.AddressOf())
+
+			met.SetInfoAddr(Addr(hdr.AddressOf().Value.(Int)))
 		}
 	}
+
+	log.Println(scope.variables)
 
 	f.bytecode.Add(Return{})
 
@@ -393,7 +400,7 @@ func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *V
 }
 
 func (prog *Program) compileBCLHSDotExpression(ctx context.Context, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
-	switch typ := BaseType(typ).(type) {
+	switch typ := resolveType(typ).(type) {
 	case *TupleType:
 		index, err := strconv.Atoi(expr.Key)
 		if err != nil {
@@ -425,12 +432,12 @@ func (prog *Program) compileBCLHSDotExpression(ctx context.Context, expr *DotExp
 
 		return prog.compileBCLHSDotExpression(ctx, expr, typ.Pointee(), scope, receiverLocValue)
 	default:
-		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", resolveType(expr.Receiver.Type())))
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", dereferenceType(expr.Receiver.Type())))
 	}
 }
 
 func (prog *Program) compileBCLHSIndexExpression(ctx context.Context, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
-	switch BaseType(typ).(type) {
+	switch resolveType(typ).(type) {
 	case *ArrayType:
 		elemLoc, err := receiverLoc.IndexArray(indexLoc)
 		if err != nil {
@@ -742,7 +749,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, typ Type, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
 	var bc BytecodeSnippet
 
-	switch typ := BaseType(typ).(type) {
+	switch typ := resolveType(typ).(type) {
 	case TypeKind:
 		var imm Immediate
 		switch typ.Kind() {
@@ -844,7 +851,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 
 		return bc, dst, nil
 	case *FunctionType:
-		return p.compileBCZeroValue(ctx, pos, funcType, scope, dst.AsType(funcType))
+		return bc, scope.newImmediate(Int(0)).AsType(typ), nil
 	default:
 		return nil, nil, pos.WrapError(fmt.Errorf("unhandled zero value for type %s", typ))
 	}
@@ -965,7 +972,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *CallExpression:
 		callScope := scope.sub(scope.symbols)
 
-		switch ftype := BaseType(expr.Function.Type()).(type) {
+		switch ftype := resolveType(expr.Function.Type()).(type) {
 		case *FunctionType:
 			callTmp := callScope.allocTemp(expr.Function.Type())
 			defer callScope.deallocTemp(callTmp)
@@ -1004,7 +1011,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			}
 
 			bc.Add(Call{
-				Func: callLoc.Operand.AddressOf(),
+				Func: callLoc.Operand,
 			})
 
 			if retVar.Type.Size() > 0 {
@@ -1141,7 +1148,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 				return nil, nil, expr.WrapError(fmt.Errorf("builtin %q expects exactly 1 argument, got %d", expr.Name, len(expr.Args)))
 			}
 
-			switch arg := BaseType(expr.Args[0].Type()).(type) {
+			switch arg := resolveType(expr.Args[0].Type()).(type) {
 			case *ArrayType:
 				return nil, scope.newImmediate(Int(arg.Length())), nil
 			case *SliceType:
@@ -1173,7 +1180,7 @@ func (prog *Program) compileBCCallReceiverExpression(ctx context.Context, expr E
 		methodName := expr.Method.Name
 
 		if expr.Receiver.Type().Kind() == KindInterface {
-			iface := BaseType(expr.Receiver.Type()).(*InterfaceType)
+			iface := resolveType(expr.Receiver.Type()).(*InterfaceType)
 
 			method, ok := iface.Methods().Get(methodName)
 			if !ok {
@@ -1224,7 +1231,7 @@ func (prog *Program) compileBCCallReceiverExpression(ctx context.Context, expr E
 }
 
 func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
-	switch typ := BaseType(typ).(type) {
+	switch typ := resolveType(typ).(type) {
 	case *TupleType:
 		index, err := strconv.Atoi(expr.Key)
 		if err != nil {
@@ -1264,12 +1271,12 @@ func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpres
 
 		return nil, loc, nil
 	default:
-		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", resolveType(expr.Receiver.Type())))
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", dereferenceType(expr.Receiver.Type())))
 	}
 }
 
 func (prog *Program) compileBCIndexExpression(ctx context.Context, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
-	switch BaseType(typ).(type) {
+	switch resolveType(typ).(type) {
 	case *ArrayType:
 		elemLoc, err := receiverLoc.IndexArray(indexLoc)
 		if err != nil {
