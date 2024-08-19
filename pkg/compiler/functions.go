@@ -206,7 +206,7 @@ type ReturnStatement struct {
 type ExternFunction struct {
 	name string
 
-	parameters []*Variable
+	parameters []Type
 	ret        Type
 }
 
@@ -217,7 +217,7 @@ func (f *ExternFunction) Name() string {
 func (f *ExternFunction) Type() Type {
 	var paramTypes []Type
 	for _, param := range f.parameters {
-		paramTypes = append(paramTypes, param.Type())
+		paramTypes = append(paramTypes, param)
 	}
 
 	return &FunctionType{

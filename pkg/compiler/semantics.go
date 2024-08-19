@@ -125,22 +125,12 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 	}
 
 	for _, param := range decl.Parameters {
-		var paramName string
-		if param.Name != nil {
-			paramName = string(param.Name.Str)
-		}
-
 		typ, err := c.compileTypeReference(scope, param.Type)
 		if err != nil {
 			return nil, err
 		}
 
-		variable := &Variable{
-			name: paramName,
-			typ:  typ,
-		}
-
-		f.parameters = append(f.parameters, variable)
+		f.parameters = append(f.parameters, typ)
 	}
 
 	if decl.Return != nil {
@@ -153,8 +143,6 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 	} else {
 		f.ret = TypeVoid
 	}
-
-	p.prog.externFuncs[f.Name()] = f
 
 	err := scope.put(f)
 	if err != nil {

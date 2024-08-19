@@ -82,6 +82,9 @@ func f2() {
   var e int = 5
   var c C
 	var h H = 8
+
+	assert(1==1)
+
   c.X = 3
   x := [...]iface{
     A(1),

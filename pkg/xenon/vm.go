@@ -24,6 +24,22 @@ type RuntimeExternFuncEntry struct {
 
 func DefaultExternFuncs() RuntimeExternFuncs {
 	return RuntimeExternFuncs{
+		"__builtin_assert": {
+			ArgSize:    2,
+			ReturnSize: 0,
+			Func: func(r *Runtime, s []float64) float64 {
+				str, err := r.loadStr(Addr(s[1]))
+				if err != nil {
+					panic(err)
+				}
+
+				if s[0] == 0 {
+					panic(string(str))
+				}
+
+				return 0
+			},
+		},
 		"print": {
 			ArgSize:    1,
 			ReturnSize: 0,
@@ -32,7 +48,7 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				if err != nil {
 					panic(err)
 				}
-				fmt.Println(str)
+				fmt.Println(string(str))
 				return 0
 			},
 		},

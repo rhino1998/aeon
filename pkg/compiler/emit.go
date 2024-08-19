@@ -142,6 +142,24 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		Right: numLocals,
 	})
 
+	// TODO: make these truly global
+	for _, externFunc := range pkg.prog.root.ExternFunctions() {
+		hdr := scope.newGlobal("@"+externFunc.Name(), externType)
+		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+			NewLiteral(Int(1)),
+			NewLiteral(String(externFunc.Name())),
+			NewLiteral(Int(0)),
+			NewLiteral(String(externFunc.Name())),
+		}, scope, hdr)
+		if err != nil {
+			return nil, err
+		}
+
+		f.bytecode.Add(hdrBC...)
+
+		scope.newConstant(externFunc.Name(), externFunc.Type(), hdr.Operand.AddressOf())
+	}
+
 	for _, externFunc := range pkg.ExternFunctions() {
 		hdr := scope.newGlobal("@"+externFunc.Name(), externType)
 		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
@@ -231,7 +249,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		}
 
 		for _, met := range drv.PtrMethodFunctions() {
-			hdr := scope.newGlobal("@*"+met.Name(), funcType)
+			hdr := scope.newGlobal("@"+met.Name(), funcType)
 			hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
@@ -1171,25 +1189,12 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *TypeExpression:
 		return bc, scope.typeName(expr.typ), nil
 	case *BuiltinExpression:
-		switch expr.Name {
-		case "len":
-			if len(expr.Args) != 1 {
-				return nil, nil, expr.WrapError(fmt.Errorf("builtin %q expects exactly 1 argument, got %d", expr.Name, len(expr.Args)))
-			}
-
-			switch arg := resolveType(expr.Args[0].Type()).(type) {
-			case *ArrayType:
-				return nil, scope.newImmediate(Int(arg.Length())), nil
-			case *SliceType:
-				return nil, nil, expr.WrapError(fmt.Errorf("slice len not yet implemented"))
-			case *MapType:
-				return nil, nil, expr.WrapError(fmt.Errorf("map len not yet implemented"))
-			default:
-				return nil, nil, expr.WrapError(fmt.Errorf("cannot get length of %s", expr.Args[0].Type()))
-			}
-		default:
-			return nil, nil, expr.WrapError(fmt.Errorf("invalid builtin %q", expr.Name))
+		impl, err := expr.Builtin.impl(expr.Args)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
 		}
+
+		return impl.compile(ctx, prog, expr.Position, expr.Args, scope, dst)
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}

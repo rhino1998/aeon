@@ -54,6 +54,10 @@ func (e Position) String() string {
 	return e.Text
 }
 
+func (e Position) RawText() string {
+	return e.Text
+}
+
 func (p Position) WrapError(err error) error {
 	return PositionError{
 		Err:      err,

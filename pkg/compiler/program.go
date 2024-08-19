@@ -9,10 +9,9 @@ import (
 type Program struct {
 	root *SymbolScope
 
-	externFuncs map[string]*ExternFunction
-	packages    map[string]*Package
-	types       map[TypeName]Type
-	strings     map[String]struct{}
+	packages map[string]*Package
+	types    map[TypeName]Type
+	strings  map[String]struct{}
 
 	registers int
 	bytecode  BytecodeSnippet
@@ -22,11 +21,10 @@ func newProgram() *Program {
 	p := &Program{
 		root: BuiltinsSymbols(),
 
-		externFuncs: make(map[string]*ExternFunction),
-		packages:    make(map[string]*Package),
-		types:       make(map[TypeName]Type),
-		strings:     make(map[String]struct{}),
-		registers:   0,
+		packages:  make(map[string]*Package),
+		types:     make(map[TypeName]Type),
+		strings:   make(map[String]struct{}),
+		registers: 0,
 	}
 
 	return p
@@ -68,7 +66,19 @@ func (p *Program) Package(name string) (*Package, bool) {
 }
 
 func (p *Program) ExternFuncs() []*ExternFunction {
-	return sortedMapByKey(p.externFuncs)
+	var externs []*ExternFunction
+
+	externs = append(externs, p.root.ExternFunctions()...)
+
+	for _, pkg := range p.packages {
+		externs = append(externs, pkg.ExternFunctions()...)
+	}
+
+	slices.SortStableFunc(externs, func(a, b *ExternFunction) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return externs
 }
 
 func (p *Program) Types() []Type {

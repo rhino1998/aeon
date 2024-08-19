@@ -836,31 +836,17 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 			return expr, nil
 		case *BuiltinType:
-			switch ftype.Name() {
-			case "len":
-				if len(expr.Args) != 1 {
-					errs.Add(expr.WrapError(fmt.Errorf("len accepts exactly 1 argument")))
-					return expr, nil
-				}
-
-				switch resolveType(expr.Args[0].Type()).(type) {
-				case *ArrayType:
-					return &BuiltinExpression{
-						Name: ftype.Name(),
-						Args: expr.Args,
-
-						Position: expr.Position,
-					}, nil
-				case *SliceType:
-					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s (unimp)", expr.Args[0].Type()))
-				case *MapType:
-					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s (unimp)", expr.Args[0].Type()))
-				default:
-					return expr, expr.WrapError(fmt.Errorf("cannot get length of %s", expr.Args[0].Type()))
-				}
-			default:
-				return expr, expr.WrapError(fmt.Errorf("unimplemented builtin %v", ftype.Name()))
+			_, err := ftype.symbol.impl(expr.Args)
+			if err != nil {
+				errs.Add(expr.WrapError(err))
 			}
+
+			return &BuiltinExpression{
+				Builtin: ftype.symbol,
+				Args:    expr.Args,
+
+				Position: expr.Position,
+			}, nil
 		default:
 			return expr, expr.WrapError(fmt.Errorf("cannot call non-function type %v", fExpr.Type()))
 		}
