@@ -77,7 +77,7 @@ func (s *State) executeFunction(scope *Scope, f *compiler.Function, args ...Valu
 		err := s.executeStatement(scope, stmt, &ret)
 		if err != nil {
 			if errors.Is(err, ErrReturn) {
-				if ret != nil && f.Return() == compiler.VoidType {
+				if ret != nil && f.Return() == compiler.TypeVoid {
 					return nil, fmt.Errorf("unexpected return value in function %s", f.Name())
 				}
 

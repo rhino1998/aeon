@@ -166,7 +166,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 				errs.Add(err)
 			}
 
-			if expr.Type() == VoidType {
+			if expr.Type() == TypeVoid {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot declare variable of type void")))
 			}
 
@@ -196,7 +196,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			errs.Add(err)
 		}
 
-		if expr.Type() == VoidType {
+		if expr.Type() == TypeVoid {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot declare variable of type void")))
 		}
 
@@ -332,7 +332,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		return nil
 	case *ReturnStatement:
-		if stmt.Expression == nil && stmt.Function.Return() != VoidType {
+		if stmt.Expression == nil && stmt.Function.Return() != TypeVoid {
 			errs.Add(stmt.WrapError(fmt.Errorf("expected return value of type %s", stmt.Function.Return())))
 		}
 
