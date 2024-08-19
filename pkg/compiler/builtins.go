@@ -7,30 +7,11 @@ import (
 )
 
 var (
-	TypeInt = &DerivedType{
-		name:       "int",
-		underlying: TypeKind(KindInt),
-	}
-
-	TypeBool = &DerivedType{
-		name:       "bool",
-		underlying: TypeKind(KindBool),
-	}
-
-	TypeFloat = &DerivedType{
-		name:       "float",
-		underlying: TypeKind(KindFloat),
-	}
-
-	TypeString = &DerivedType{
-		name:       "string",
-		underlying: TypeKind(KindString),
-	}
-
-	TypeAny = &DerivedType{
-		name:       "any",
-		underlying: &InterfaceType{},
-	}
+	TypeInt    = NewDerivedType("int", nil, TypeKind(KindInt))
+	TypeString = NewDerivedType("string", nil, TypeKind(KindString))
+	TypeBool   = NewDerivedType("bool", nil, TypeKind(KindBool))
+	TypeFloat  = NewDerivedType("float", nil, TypeKind(KindFloat))
+	TypeAny    = NewDerivedType("any", nil, &InterfaceType{})
 )
 
 var (

@@ -180,7 +180,8 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 		pkg:        p,
 		underlying: underlying,
 
-		methodFuncs: make(map[string]*Function),
+		methodFuncs:    make(map[string]*Function),
+		ptrMethodFuncs: make(map[string]*Function),
 	}
 
 	err = scope.put(t)
@@ -569,7 +570,18 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 		switch recvTyp := dereferenceType(recvTyp.Pointee()).(type) {
 		case *DerivedType:
 			recvDerivedType = recvTyp
+		default:
+			errs.Add(decl.WrapError(fmt.Errorf("cannot use %s as a method receiver", recvTyp)))
+			return nil, errs
 		}
+	default:
+		errs.Add(decl.WrapError(fmt.Errorf("cannot use %s as a method receiver", recvTyp)))
+		return nil, errs
+	}
+
+	if recvDerivedType.Package() != p {
+		errs.Add(decl.WrapError(fmt.Errorf("cannot declare method on receiver type %s which is not defined in this package", recvTyp)))
+		return nil, errs
 	}
 
 	recvVar := &Variable{
@@ -784,6 +796,10 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		function := scope.Function()
 		if function == nil {
 			errs.Add(stmt.WrapError(fmt.Errorf("return statement outside function")))
+		}
+
+		if expr != nil && function.Return() == VoidType {
+			errs.Add(stmt.WrapError(fmt.Errorf("unexpected return value on void function")))
 		}
 
 		return &ReturnStatement{

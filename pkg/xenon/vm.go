@@ -135,7 +135,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		switch typ := typ.(type) {
 		case *compiler.DerivedType:
 			for _, method := range typ.Methods(false) {
-				fun := typ.Method(method.Name)
+				fun := typ.Method(method.Name, false)
 				if fun == nil {
 					return nil, fmt.Errorf("failed to resolve method %s on type %s", method.Name, typ)
 				}
@@ -145,13 +145,12 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 			switch typ := typ.Pointee().(type) {
 			case *compiler.DerivedType:
 				for _, method := range typ.Methods(true) {
-					fun := typ.Method(method.Name)
+					fun := typ.Method(method.Name, true)
 					if fun == nil {
 						return nil, fmt.Errorf("failed to resolve method %s on type %s", method.Name, typ)
 					}
 					r.vtables[typeID][method.Name] = float64(fun.InfoAddr())
 				}
-			default:
 			}
 		}
 	}

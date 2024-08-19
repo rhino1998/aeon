@@ -110,15 +110,15 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 		xeCtx.VTable[i] = make(map[string]int)
 		switch typ := typ.(type) {
 		case *compiler.DerivedType:
-			for _, method := range typ.Methods(true) {
-				methodFunc := typ.Method(method.Name)
+			for _, method := range typ.Methods(false) {
+				methodFunc := typ.Method(method.Name, false)
 				xeCtx.VTable[i][method.Name] = int(methodFunc.InfoAddr())
 			}
 		case *compiler.PointerType:
 			switch typ := typ.Pointee().(type) {
 			case *compiler.DerivedType:
 				for _, method := range typ.Methods(true) {
-					methodFunc := typ.Method(method.Name)
+					methodFunc := typ.Method(method.Name, true)
 					xeCtx.VTable[i][method.Name] = int(methodFunc.InfoAddr())
 				}
 			}

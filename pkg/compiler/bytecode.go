@@ -10,7 +10,7 @@ type Bytecode interface {
 }
 
 type Relocatable interface {
-	SetAddr(Addr)
+	OffsetAddr(Addr)
 	Bytecode() BytecodeSnippet
 }
 
@@ -294,7 +294,7 @@ func (s *BytecodeSnippet) LabelIndex(i int, labels ...Label) {
 }
 
 func (s *BytecodeSnippet) Mount(rel Relocatable) {
-	rel.SetAddr(Addr(len(*s)))
+	rel.OffsetAddr(Addr(len(*s)))
 	s.Add(rel.Bytecode()...)
 }
 

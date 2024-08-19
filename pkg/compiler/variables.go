@@ -1,6 +1,8 @@
 package compiler
 
 import (
+	"fmt"
+
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
@@ -33,6 +35,10 @@ func (v *Variable) Escaping() bool {
 
 func (v *Variable) SetEscaping(escaping bool) {
 	v.escaping = true
+}
+
+func (v *Variable) String() string {
+	return fmt.Sprintf("<var %s %s>", v.name, v.typ)
 }
 
 type SymbolReferenceExpression struct {

@@ -1,5 +1,11 @@
 package compiler
 
+import (
+	"cmp"
+	"fmt"
+	"slices"
+)
+
 type Program struct {
 	root *SymbolScope
 
@@ -84,6 +90,7 @@ func (p *Program) GlobalSize() Size {
 
 	for _, drv := range p.DerivedTypes() {
 		size += funcType.Size() * Size(len(drv.MethodFunctions()))
+		size += funcType.Size() * Size(len(drv.PtrMethodFunctions()))
 	}
 
 	return size
@@ -145,6 +152,12 @@ func (p *Program) DerivedTypes() []*DerivedType {
 		ret = append(ret, pkg.DerivedTypes()...)
 	}
 
+	ret = append(ret, p.root.DerivedTypes()...)
+
+	slices.SortStableFunc(ret, func(a, b *DerivedType) int {
+		return cmp.Compare(a.GlobalName(), b.GlobalName())
+	})
+
 	return ret
 }
 
@@ -154,6 +167,8 @@ type Package struct {
 	prog          *Program
 	scope         *SymbolScope
 	values        *ValueScope
+
+	imports []*Package
 
 	varinit     *Function
 	initFuncs   []*Function
@@ -173,6 +188,73 @@ func NewPackage(prog *Program, name string) *Package {
 	pkg.scope.pkg = pkg
 
 	return pkg
+}
+
+func (p *Package) Imports() []*Package {
+	return p.imports
+}
+
+func (p *Package) AddImport(imp *Package) error {
+	if slices.Contains(p.imports, p) {
+		return nil
+	}
+
+	_, err := p.transitiveImports(nil, imp)
+	if err != nil {
+		return err
+	}
+
+	p.imports = append(p.imports, imp)
+
+	slices.SortStableFunc(p.imports, func(a, b *Package) int {
+		return cmp.Compare(a.QualifiedName(), b.QualifiedName())
+	})
+
+	return nil
+}
+
+func (p *Package) transitiveImports(stack []*Package, maybe *Package) (_ map[string]*Package, err error) {
+	errs := newErrorSetWithWrapper(func(err error) error {
+		return fmt.Errorf("from %s: %w", p.QualifiedName())
+	})
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	if slices.Contains(stack, p) {
+		errs.Add(fmt.Errorf("import cycle detected %s transitively imports %s", p.Name(), p.Name()))
+	}
+
+	stack = append(stack, p)
+	seen := make(map[string]*Package)
+	for _, imp := range p.imports {
+		subSeen, err := imp.transitiveImports(stack, nil)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		for name, pkg := range subSeen {
+			seen[name] = pkg
+		}
+	}
+
+	if maybe != nil {
+		subSeen, err := maybe.transitiveImports(stack, nil)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		for name, pkg := range subSeen {
+			seen[name] = pkg
+		}
+	}
+
+	return seen, nil
+}
+
+func (p *Package) TransitiveImports() []*Package {
+	seen, _ := p.transitiveImports(nil, nil)
+	return sortedMapByKey(seen)
 }
 
 func (p *Package) Name() string {
@@ -207,15 +289,19 @@ func (p *Package) Bytecode() BytecodeSnippet {
 	return p.bytecode
 }
 
-func (p *Package) SetAddr(addr Addr) {
+func (p *Package) OffsetAddr(addr Addr) {
 	p.addr = addr
 	for _, fun := range p.Functions() {
-		fun.SetAddr(fun.Addr() + addr)
+		fun.OffsetAddr(addr)
 	}
 
 	for _, drv := range p.DerivedTypes() {
 		for _, met := range drv.MethodFunctions() {
-			met.SetAddr(met.Addr() + addr)
+			met.OffsetAddr(addr)
+		}
+
+		for _, met := range drv.PtrMethodFunctions() {
+			met.OffsetAddr(addr)
 		}
 	}
 }
@@ -230,10 +316,6 @@ func (p *Package) Constants() []*Constant {
 
 func (p *Package) DerivedTypes() []*DerivedType {
 	return p.scope.DerivedTypes()
-}
-
-func (p *Package) Imports() *Package {
-	return nil
 }
 
 func (p *Package) VarInitFunction() *Function {

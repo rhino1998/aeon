@@ -32,12 +32,74 @@ func newFunction(name string, pkg *Package) *Function {
 		symbols: newScope(pkg.scope, name),
 
 		addrOp: Operand{
-			Kind: OperandKindImmediate,
+			Kind:  OperandKindImmediate,
+			Value: Int(0),
 		},
 	}
 	f.symbols.function = f
 
 	return f
+}
+
+func (f *Function) withPointerReceiver() *Function {
+	symbols := newScope(f.symbols.parent, f.name)
+	ptrReceiver := &Variable{
+		name: "#recv",
+		typ:  NewPointerType(f.receiver.typ),
+	}
+	symbols.put(ptrReceiver)
+
+	var newParams []*Variable
+	var newArgs []Expression
+	for i, param := range f.parameters {
+		paramName := fmt.Sprintf("#arg_%d", i)
+		newParam := &Variable{
+			name: paramName,
+			typ:  param.typ,
+		}
+		newParams = append(newParams, newParam)
+		symbols.put(newParam)
+		newArgs = append(newArgs, &SymbolReferenceExpression{
+			scope: symbols,
+			name:  paramName,
+		})
+	}
+
+	ptrF := &Function{
+		name: f.name,
+		pkg:  f.pkg,
+
+		symbols: symbols,
+		addrOp: Operand{
+			Kind:  OperandKindImmediate,
+			Value: Int(0),
+		},
+
+		receiver:   ptrReceiver,
+		parameters: newParams,
+		ret:        f.ret,
+	}
+
+	ptrF.body = append(ptrF.body,
+		&ReturnStatement{
+			Function: ptrF,
+			Expression: &CallExpression{
+				Function: &DotExpression{
+					Receiver: &UnaryExpression{
+						Operator: OperatorDereference,
+						Expression: &SymbolReferenceExpression{
+							scope: symbols,
+							name:  ptrReceiver.name,
+						},
+					},
+					Key: f.name,
+				},
+				Args: newArgs,
+			},
+		},
+	)
+
+	return ptrF
 }
 
 func (f *Function) Package() *Package {
@@ -94,9 +156,9 @@ func (f *Function) Addr() Addr {
 	return f.addr
 }
 
-func (f *Function) SetAddr(addr Addr) {
-	f.addr = addr
-	f.addrOp.Value = Int(f.addr)
+func (f *Function) OffsetAddr(addr Addr) {
+	f.addr += addr
+	f.addrOp.Value = f.addrOp.Value.(Int) + Int(addr)
 }
 
 func (f *Function) SetInfoAddr(addr Addr) {

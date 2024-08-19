@@ -134,7 +134,7 @@ func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
 			return nil, fmt.Errorf("cannot dereference non-pointer type: %v", expr)
 		}
 
-		return BaseType(expr).(*PointerType).Pointee(), nil
+		return dereferenceType(expr).(*PointerType).Pointee(), nil
 	} else if operator == OperatorAddress {
 		return NewPointerType(expr), nil
 	}

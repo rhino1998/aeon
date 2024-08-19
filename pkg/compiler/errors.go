@@ -19,11 +19,26 @@ func (e FileError) Error() string {
 }
 
 type ErrorSet struct {
-	Errs []error
+	Errs    []error
+	wrapper func(error) error
 }
 
 func newErrorSet() *ErrorSet {
 	return new(ErrorSet)
+}
+
+func newErrorSetWithWrapper(wrapper func(error) error) *ErrorSet {
+	return &ErrorSet{
+		wrapper: wrapper,
+	}
+}
+
+func (e *ErrorSet) wrap(err error) error {
+	if e.wrapper == nil {
+		return err
+	}
+
+	return e.wrapper(err)
 }
 
 func (e *ErrorSet) Add(err error) {
@@ -32,7 +47,11 @@ func (e *ErrorSet) Add(err error) {
 	}
 	var subErrs *ErrorSet
 	if errors.As(err, &subErrs) {
-		e.Errs = append(e.Errs, subErrs.Unwrap()...)
+		var errs []error
+		for _, subErr := range subErrs.Unwrap() {
+			errs = append(errs, e.wrap(subErr))
+		}
+		e.Errs = append(e.Errs, errs...)
 	} else {
 		e.Errs = append(e.Errs, err)
 	}

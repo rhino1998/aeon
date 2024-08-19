@@ -619,7 +619,7 @@ func TypeMethod(typ Type, name string) (*Function, bool) {
 	switch typ := dereferenceType(typ).(type) {
 	case *DerivedType:
 		if typ.Methods(false).Has(name) {
-			return typ.Method(name), true
+			return typ.Method(name, false), true
 		}
 
 		return nil, false
@@ -627,7 +627,7 @@ func TypeMethod(typ Type, name string) (*Function, bool) {
 		switch typ := dereferenceType(typ.pointee).(type) {
 		case *DerivedType:
 			if typ.Methods(false).Has(name) {
-				return typ.Method(name), true
+				return typ.Method(name, true), true
 			}
 
 			return nil, false
@@ -644,7 +644,20 @@ type DerivedType struct {
 	ptrMethods MethodSet
 	underlying Type
 
-	methodFuncs map[string]*Function
+	methodFuncs    map[string]*Function
+	ptrMethodFuncs map[string]*Function
+}
+
+func NewDerivedType(name string, pkg *Package, underlying Type) *DerivedType {
+	return &DerivedType{
+		name:       name,
+		pkg:        pkg,
+		underlying: underlying,
+
+		methodFuncs:    make(map[string]*Function),
+		ptrMethodFuncs: make(map[string]*Function),
+	}
+
 }
 
 func (t *DerivedType) Name() string {
@@ -677,11 +690,9 @@ func (t *DerivedType) Size() Size {
 }
 
 func (t *DerivedType) AddMethod(name string, f *Function) error {
-	if t.Method(name) != nil {
+	if t.Method(name, true) != nil {
 		return fmt.Errorf("type %s already has a method %q", t, name)
 	}
-
-	t.methodFuncs[name] = f
 
 	params := f.Parameters()
 
@@ -691,36 +702,52 @@ func (t *DerivedType) AddMethod(name string, f *Function) error {
 	}
 
 	if _, ok := f.receiver.Type().(*PointerType); ok {
+		t.ptrMethodFuncs[name] = f
 		t.ptrMethods.Add(name, f.receiver.Type(), paramTypes, f.Return())
 	} else {
+		ptrF := f.withPointerReceiver()
+		t.methodFuncs[name] = f
 		t.methods.Add(name, f.receiver.Type(), paramTypes, f.Return())
+
+		t.ptrMethodFuncs[name] = ptrF
+		t.ptrMethods.Add(name, ptrF.receiver.Type(), paramTypes, ptrF.Return())
 	}
 
 	return nil
 }
 
 func (t *DerivedType) Methods(ptr bool) MethodSet {
-	ret := make([]Method, 0, len(t.methods)+len(t.ptrMethods))
-	ret = append(ret, t.methods...)
-
 	if ptr {
-		ret = append(ret, t.ptrMethods...)
+		return t.ptrMethods
+	} else {
+		return t.methods
 	}
-
-	slices.SortStableFunc(ret, func(a, b Method) int {
-		return cmp.Compare(a.Name, b.Name)
-	})
-
-	return ret
 }
 
-func (t *DerivedType) Method(name string) *Function {
-	return t.methodFuncs[name]
+func (t *DerivedType) Method(name string, ptr bool) *Function {
+	if ptr {
+		return t.ptrMethodFuncs[name]
+	} else {
+		return t.methodFuncs[name]
+	}
 }
 
 func (t *DerivedType) MethodFunctions() []*Function {
 	var funs []*Function
 	for _, fun := range t.methodFuncs {
+		funs = append(funs, fun)
+	}
+
+	slices.SortStableFunc(funs, func(a, b *Function) int {
+		return cmp.Compare(a.Name(), b.Name())
+	})
+
+	return funs
+}
+
+func (t *DerivedType) PtrMethodFunctions() []*Function {
+	var funs []*Function
+	for _, fun := range t.ptrMethodFuncs {
 		funs = append(funs, fun)
 	}
 

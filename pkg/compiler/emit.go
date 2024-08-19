@@ -108,6 +108,15 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 
 			pkg.bytecode.Mount(met)
 		}
+
+		for _, met := range drv.PtrMethodFunctions() {
+			err := met.compileBytecode(ctx, pkg.values)
+			if err != nil {
+				return err
+			}
+
+			pkg.bytecode.Mount(met)
+		}
 	}
 
 	err = pkg.scope.put(varInitFunc)
@@ -204,6 +213,25 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	for _, drv := range pkg.DerivedTypes() {
 		for _, met := range drv.MethodFunctions() {
 			hdr := scope.newGlobal("@"+met.Name(), funcType)
+			hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+				NewLiteral(Int(2)),
+				NewLiteral(String(met.QualifiedName())),
+				NewLiteral(Int(0)),
+				&CompilerFunctionReferenceExpression{met},
+			}, scope, hdr)
+			if err != nil {
+				return nil, err
+			}
+
+			f.bytecode.Add(hdrBC...)
+
+			scope.newConstant(met.Name(), met.Type(), hdr.Operand.AddressOf())
+
+			met.SetInfoAddr(Addr(hdr.AddressOf().Value.(Int)))
+		}
+
+		for _, met := range drv.PtrMethodFunctions() {
+			hdr := scope.newGlobal("@*"+met.Name(), funcType)
 			hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
@@ -575,13 +603,13 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		return bc, nil
 	case *ReturnStatement:
 		var offset Size
-		offset += scope.function.Return().Size()
-		offset += scope.function.Receiver().Type().Size()
-		for _, param := range scope.function.Parameters() {
+		offset += stmt.Function.Return().Size()
+		offset += stmt.Function.Receiver().Type().Size()
+		for _, param := range stmt.Function.Parameters() {
 			offset += param.Type().Size()
 		}
 
-		if scope.function.Return() != VoidType {
+		if stmt.Expression != nil {
 			var exprBC []Bytecode
 			var err error
 
@@ -874,6 +902,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		if !ok {
 			return nil, nil, expr.WrapError(fmt.Errorf("unknown symbol %q", expr.Name()))
 		}
+
 		return nil, sym, nil
 	case *ParenthesizedExpression:
 		return prog.compileBCExpression(ctx, expr.Expression, scope, dst)
@@ -1284,7 +1313,7 @@ func (prog *Program) compileBCIndexExpression(ctx context.Context, expr *IndexEx
 		}
 
 		return nil, elemLoc, nil
-	case *StructType:
+	case *SliceType:
 		// TODO:
 		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
 	case *MapType:

@@ -1,11 +1,5 @@
 package main
 
-type intIntMap map[int]int
-
-type A *B
-
-type B [3]int
-
 extern func itoa(a int) string
 
 extern func print(a string)
@@ -16,72 +10,88 @@ extern func print3(a string, b string, c string)
 
 extern func add(a int, b int) int
 
-var d any
-
 type iface interface {
   l()
 }
 
-type G [1]int
+type A int
 
-func (g G) l() {
-  print("G")
-  print(itoa(g[0]))
+func (a A) l() {
+  print("A")
+  print(itoa(int(a)))
 }
 
-type F (int,)
+type B [1]int
 
-func (f F) l() {
-  print("F")
-  print(itoa(int(f.0)))
+func (b B) l() {
+  print("B")
+  print(itoa(b[0]))
 }
 
 type C struct {
-  F func(D)
+  X int
 }
 
-type D int
+func (c C) l() {
+  print("C")
+  print(itoa(c.X))
+}
+
+type D (int,)
 
 func (d D) l() {
-  print("D")
-	print(itoa(int(d)))
+  print("d")
+  print(itoa(int(d.0)))
 }
+
 
 type E int
 
-func (d E) l() {
+func (e *E) l() {
   print("E")
-	print(itoa(int(d)))
+  print(itoa(int(*e)))
 }
 
-type J int
+type F func()
 
-func (j *J) l() {
-	print("J")
-	print(itoa(int(*j)))
+func (f F) l() {
+  f()
 }
 
-type H func()
+func fImpl() {
+  print("F")
+  print("6")
+}
+
+type G ()
+
+func (g G) l() {
+  print("G")
+  print("7")
+}
+
+type H int
 
 func (h H) l() {
-	h()
-}
-
-func h() {
 	print("H")
-	print("6")
+	print(itoa(int(h)))
 }
 
 #init
 func f2() {
-	var d int = 4
+  var e int = 5
+  var c C
+	var h H = 8
+  c.X = 3
   x := [...]iface{
-    E(1),
-    D(2),
-    F((3,)),
-    (*J)(&d),
-    G([...]int{5}),
-		H(h),
+    A(1),
+    B([...]int{2}),
+    c,
+    D((4,)),
+    (*E)(&e),
+    F(fImpl),
+    G(()),
+		&h,
   }
 
   for i := 0; i < len(x); i++ {

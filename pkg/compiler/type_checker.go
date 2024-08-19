@@ -55,6 +55,13 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 				errs.Add(err)
 			}
 		}
+
+		for _, m := range typ.PtrMethodFunctions() {
+			err := c.resolveFunctionTypes(m)
+			if err != nil {
+				errs.Add(err)
+			}
+		}
 	}
 
 	return nil
@@ -325,10 +332,6 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		return nil
 	case *ReturnStatement:
-		if stmt.Expression != nil && stmt.Function.Return() == VoidType {
-			errs.Add(stmt.WrapError(fmt.Errorf("unexpected return value on void function")))
-		}
-
 		if stmt.Expression == nil && stmt.Function.Return() != VoidType {
 			errs.Add(stmt.WrapError(fmt.Errorf("expected return value of type %s", stmt.Function.Return())))
 		}
