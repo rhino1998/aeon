@@ -107,7 +107,7 @@ func (f *Function) Package() *Package {
 }
 
 func (f *Function) Name() string {
-	if f.receiver.Type() == VoidType {
+	if f.receiver.Type() == TypeVoid {
 		return f.name
 	}
 
@@ -124,7 +124,7 @@ func (f *Function) Type() Type {
 		paramTypes = append(paramTypes, param.Type())
 	}
 
-	var receiverTyp Type = VoidType
+	var receiverTyp Type = TypeVoid
 	if f.receiver != nil {
 		receiverTyp = f.receiver.Type()
 	}
@@ -221,7 +221,7 @@ func (f *ExternFunction) Type() Type {
 	}
 
 	return &FunctionType{
-		Receiver:   VoidType,
+		Receiver:   TypeVoid,
 		Parameters: paramTypes,
 		Return:     f.ret,
 	}
@@ -235,15 +235,15 @@ const (
 var externType = NewTupleType(
 	TypeInt,
 	TypeString,
-	NewPointerType(VoidType),
+	NewPointerType(TypeVoid),
 	TypeString,
 )
 
 var funcType = NewTupleType(
 	TypeInt,
 	TypeString,
-	NewPointerType(VoidType),
-	NewPointerType(VoidType),
+	NewPointerType(TypeVoid),
+	NewPointerType(TypeVoid),
 )
 
 type CompilerFunctionReferenceExpression struct {

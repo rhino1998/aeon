@@ -129,7 +129,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 
 func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Function, error) {
 	f := newFunction(VarInitFuncName, pkg)
-	f.receiver = &Variable{typ: VoidType}
+	f.receiver = &Variable{typ: TypeVoid}
 
 	// TODO: special varinit tmp var semantics
 
@@ -314,7 +314,7 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 	}
 
 	// implicit return at end of void functions
-	if _, ok := last.(*ReturnStatement); !ok && f.Return() == VoidType {
+	if _, ok := last.(*ReturnStatement); !ok && f.Return() == TypeVoid {
 		f.bytecode.Add(Return{Args: argReturnSize})
 	}
 

@@ -37,7 +37,7 @@ func (unknownType) GlobalName() TypeName { return "<unknown>" }
 func (unknownType) Kind() Kind           { return KindUnknown }
 func (unknownType) Size() Size           { return 0 }
 
-var VoidType = voidType{}
+var TypeVoid = voidType{}
 
 type voidType struct{}
 
@@ -480,7 +480,7 @@ type Method struct {
 
 func (e Method) BoundType() *FunctionType {
 	return &FunctionType{
-		Receiver:   VoidType,
+		Receiver:   TypeVoid,
 		Parameters: e.Parameters,
 		Return:     e.Return,
 	}
@@ -493,7 +493,7 @@ func (e Method) String() string {
 	}
 
 	var retStr string
-	if e.Return != VoidType {
+	if e.Return != TypeVoid {
 		retStr = fmt.Sprintf(" %s", e.Return)
 
 	}
@@ -508,7 +508,7 @@ func (e Method) typeNameString() string {
 	}
 
 	var retStr string
-	if e.Return != VoidType {
+	if e.Return != TypeVoid {
 		retStr = fmt.Sprintf(" %s", string(e.Return.GlobalName()))
 	}
 
@@ -533,7 +533,7 @@ func (e Method) Equal(o Method) bool {
 
 func (e Method) BoundFunctionType() *FunctionType {
 	return &FunctionType{
-		Receiver:   VoidType,
+		Receiver:   TypeVoid,
 		Parameters: e.Parameters,
 		Return:     e.Return,
 	}
@@ -541,7 +541,7 @@ func (e Method) BoundFunctionType() *FunctionType {
 
 func (e Method) UnboundFunction() *FunctionType {
 	return &FunctionType{
-		Receiver:   VoidType,
+		Receiver:   TypeVoid,
 		Parameters: append([]Type{e.Receiver}, e.Parameters...),
 		Return:     e.Return,
 	}
@@ -814,7 +814,7 @@ func (*SliceType) Size() Size   { return 3 }
 var sliceHeader = NewTupleType(
 	TypeInt,
 	TypeInt,
-	NewPointerType(VoidType),
+	NewPointerType(TypeVoid),
 )
 
 type ArrayType struct {
@@ -1007,14 +1007,14 @@ type FunctionType struct {
 }
 
 func (t *FunctionType) ToFunction() *FunctionType {
-	if t.Receiver == VoidType {
+	if t.Receiver == TypeVoid {
 		return t
 	}
 
 	return &FunctionType{
-		Receiver:   VoidType,
+		Receiver:   TypeVoid,
 		Parameters: append([]Type{t.Receiver}, t.Parameters...),
-		Return:     VoidType,
+		Return:     TypeVoid,
 	}
 }
 
@@ -1041,12 +1041,12 @@ func (t *FunctionType) String() string {
 	}
 
 	var recvStr string
-	if t.Receiver != VoidType {
+	if t.Receiver != TypeVoid {
 		recvStr = fmt.Sprintf("(%s) ", t.Receiver)
 	}
 
 	var retStr string
-	if t.Return != VoidType {
+	if t.Return != TypeVoid {
 		retStr = fmt.Sprintf(" %s", t.Return)
 	}
 
@@ -1060,12 +1060,12 @@ func (t *FunctionType) GlobalName() TypeName {
 	}
 
 	var recvStr string
-	if t.Receiver != VoidType {
+	if t.Receiver != TypeVoid {
 		recvStr = fmt.Sprintf("(%s) ", string(t.Receiver.GlobalName()))
 	}
 
 	var retStr string
-	if t.Return != VoidType {
+	if t.Return != TypeVoid {
 		retStr = fmt.Sprintf(" %s", string(t.Return.GlobalName()))
 	}
 
@@ -1116,7 +1116,7 @@ func (*InterfaceType) Size() Size {
 
 var interfaceTuple = NewTupleType(
 	TypeKind(KindType),
-	NewPointerType(VoidType),
+	NewPointerType(TypeVoid),
 )
 
 func (t *InterfaceType) ImplementedBy(i Type) bool {

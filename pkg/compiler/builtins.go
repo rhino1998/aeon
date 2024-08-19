@@ -22,6 +22,11 @@ var (
 	}
 )
 
+var (
+	BuiltinLen    = &BuiltinSymbol{name: "len"}
+	BuiltinAssert = &BuiltinSymbol{name: "assert"}
+)
+
 func BuiltinsSymbols() *SymbolScope {
 	s := newScope(nil, "builtins")
 
@@ -94,11 +99,9 @@ func (e *BuiltinExpression) Type() Type {
 	switch e.Name {
 	case "len":
 		return TypeInt
+	case "assert":
+		return TypeVoid
 	default:
 		return UnknownType
 	}
 }
-
-var (
-	BuiltinLen = &BuiltinSymbol{name: "len"}
-)

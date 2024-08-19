@@ -151,7 +151,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 
 		f.ret = typ
 	} else {
-		f.ret = VoidType
+		f.ret = TypeVoid
 	}
 
 	p.prog.externFuncs[f.Name()] = f
@@ -397,7 +397,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 
 			parameters[i] = typ
 		}
-		var ret Type = VoidType
+		var ret Type = TypeVoid
 		if typ.Return != nil {
 			ret, err = c.compileTypeReference(scope, typ.Return)
 			if err != nil {
@@ -406,7 +406,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 		}
 
 		return &FunctionType{
-			Receiver:   VoidType,
+			Receiver:   TypeVoid,
 			Return:     ret,
 			Parameters: parameters,
 		}, nil
@@ -425,7 +425,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 				params = append(params, paramType)
 			}
 
-			var retType Type = VoidType
+			var retType Type = TypeVoid
 			if field.Return != nil {
 				retType, err = c.compileTypeReference(scope, field.Return)
 				if err != nil {
@@ -433,7 +433,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 				}
 			}
 
-			err = methods.Add(string(field.Name.Str), VoidType, params, retType)
+			err = methods.Add(string(field.Name.Str), TypeVoid, params, retType)
 			if err != nil {
 				errs.Add(err)
 			}
@@ -467,7 +467,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 	f := newFunction(string(decl.Name.Str), p)
 
 	f.receiver = &Variable{
-		typ: VoidType,
+		typ: TypeVoid,
 	}
 
 	var lastParamType parser.Type
@@ -522,7 +522,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 
 		f.ret = typ
 	} else {
-		f.ret = VoidType
+		f.ret = TypeVoid
 	}
 
 	f.symbols.put(f)
@@ -645,7 +645,7 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 
 		f.ret = typ
 	} else {
-		f.ret = VoidType
+		f.ret = TypeVoid
 	}
 
 	f.symbols.put(f)
@@ -655,7 +655,7 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 		errs.Add(err)
 	}
 
-	if f.Return() != VoidType {
+	if f.Return() != TypeVoid {
 		var last Statement
 		var wrapper ErrorWrapper = decl
 		if len(f.body) > 0 {
@@ -798,7 +798,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			errs.Add(stmt.WrapError(fmt.Errorf("return statement outside function")))
 		}
 
-		if expr != nil && function.Return() == VoidType {
+		if expr != nil && function.Return() == TypeVoid {
 			errs.Add(stmt.WrapError(fmt.Errorf("unexpected return value on void function")))
 		}
 
