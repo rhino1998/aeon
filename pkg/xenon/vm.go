@@ -148,6 +148,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	for typeID, typ := range prog.Types() {
 		r.vtables[typeID] = make(map[string]float64)
 		log.Printf("type %v: %d", typ, typeID)
+		r.vtables[typeID]["#size"] = float64(typ.Size())
 		switch typ := typ.(type) {
 		case *compiler.DerivedType:
 			for _, method := range typ.Methods(false) {
