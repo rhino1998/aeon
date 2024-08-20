@@ -241,6 +241,8 @@ func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
 		return nil, fmt.Errorf("cannot pass unknown type to extern function")
 	case KindVoid:
 		return nil, nil
+	case KindNil:
+		return nil, fmt.Errorf("cannot pass nil type to extern function")
 	case KindInt, KindFloat, KindBool, KindString, KindPointer, KindType:
 		return []Kind{kind}, nil
 	case KindArray:
