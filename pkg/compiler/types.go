@@ -111,7 +111,7 @@ func IsConvertibleTo(v, to Type) bool {
 		return true
 	}
 
-	if v.Kind() == KindTypeConversion {
+	if v.Kind() == KindType {
 		return false
 	}
 
@@ -384,7 +384,6 @@ const (
 	KindArray
 	KindFunction
 	KindInterface
-	KindTypeConversion
 	KindType
 	KindBuiltin
 )
@@ -420,8 +419,6 @@ func (k Kind) String() string {
 		return "function"
 	case KindInterface:
 		return "interface"
-	case KindTypeConversion:
-		return "type conversion"
 	case KindType:
 		return "type"
 	default:

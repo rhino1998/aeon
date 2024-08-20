@@ -170,8 +170,8 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot declare variable of type void")))
 			}
 
-			if expr.Type().Kind() == KindTypeConversion {
-				errs.Add(expr.WrapError(fmt.Errorf("cannot use type conversion as a value")))
+			if expr.Type().Kind() == KindType {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot use type as a value")))
 			}
 
 			if !IsAssignableTo(expr.Type(), stmt.Type) {
@@ -200,8 +200,8 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot declare variable of type void")))
 		}
 
-		if expr.Type().Kind() == KindTypeConversion {
-			errs.Add(expr.WrapError(fmt.Errorf("cannot use type conversion as a value")))
+		if expr.Type().Kind() == KindType {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot use type as a value")))
 		}
 
 		stmt.Expression = expr

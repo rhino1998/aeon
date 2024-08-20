@@ -219,6 +219,79 @@ func NewExternFunction(name string, params []Type, ret Type) *ExternFunction {
 	}
 }
 
+func (f *ExternFunction) FlattenParameters() ([]Kind, error) {
+	var ret []Kind
+	for _, param := range f.parameters {
+		flatParam, err := f.flattenParameters(param)
+		if err != nil {
+			return nil, err
+		}
+
+		ret = append(ret, flatParam...)
+	}
+
+	return ret, nil
+}
+
+func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
+	param = BaseType(param)
+	kind := param.Kind()
+	switch kind {
+	case KindUnknown:
+		return nil, fmt.Errorf("cannot pass unknown type to extern function")
+	case KindVoid:
+		return nil, nil
+	case KindInt, KindFloat, KindBool, KindString, KindPointer, KindType:
+		return []Kind{kind}, nil
+	case KindArray:
+		var ret []Kind
+		array := param.(*ArrayType)
+		for range array.Length() {
+			flatElem, err := f.flattenParameters(array.Elem())
+			if err != nil {
+				return nil, err
+			}
+
+			ret = append(ret, flatElem...)
+		}
+		return ret, nil
+	case KindTuple:
+		var ret []Kind
+		tuple := param.(*TupleType)
+		for _, elem := range tuple.Elems() {
+			flatElem, err := f.flattenParameters(elem)
+			if err != nil {
+				return nil, err
+			}
+
+			ret = append(ret, flatElem...)
+		}
+		return ret, nil
+	case KindStruct:
+		var ret []Kind
+		struc := param.(*StructType)
+		for _, field := range struc.Fields() {
+			flatField, err := f.flattenParameters(field.Type)
+			if err != nil {
+				return nil, err
+			}
+
+			ret = append(ret, flatField...)
+		}
+		return ret, nil
+	case KindInterface:
+		return []Kind{KindType, KindPointer}, nil
+	case KindFunction:
+		return nil, fmt.Errorf("cannot pass function type %s to extern function", param)
+	case KindMap:
+		return nil, fmt.Errorf("cannot pass map type %s to extern function (because it is unimplemented)", param)
+	case KindSlice:
+		return nil, fmt.Errorf("cannot pass slice type %s to extern function (because it is unimplemented)", param)
+	default:
+		return nil, fmt.Errorf("cannot pass unhandled type %s to extern function", param)
+	}
+}
+
 func (f *ExternFunction) Name() string {
 	return f.name
 }
