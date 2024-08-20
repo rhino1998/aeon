@@ -67,7 +67,7 @@ func (c *Compiler) Compile(ctx context.Context) (_ *Program, err error) {
 		errs.Add(err)
 	}
 
-	err = prog.compileBytecode(ctx)
+	err = c.compileBC(ctx, prog)
 	if err != nil {
 		errs.Add(err)
 	}

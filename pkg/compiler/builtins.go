@@ -36,121 +36,30 @@ var (
 var (
 	BuiltinLen = &BuiltinSymbol{
 		name: "len",
-		impls: []builtinImpl{
-			{
-				shape:   []Kind{KindArray},
-				compile: builtinImplArrayLen(),
-				ret:     func([]Expression) Type { return TypeInt },
-			},
-			{
-				shape:   []Kind{KindSlice},
-				compile: builtinImplUnimp(),
-				ret:     func([]Expression) Type { return TypeInt },
-			},
-			{
-				shape:   []Kind{KindMap},
-				compile: builtinImplUnimp(),
-				ret:     func([]Expression) Type { return TypeInt },
-			},
+		impls: []BuiltinImpl{
+			builtinLenArray{},
 		},
 	}
 	BuiltinAssert = &BuiltinSymbol{
 		name: "assert",
-		impls: []builtinImpl{
-			{
-				shape:   []Kind{KindBool},
-				compile: builtinImplAssert1,
-				ret:     func([]Expression) Type { return TypeVoid },
-			},
-			{
-				shape:   []Kind{KindBool, KindString},
-				compile: builtinImplExtern(BuiltinExternAssert),
-				ret:     func([]Expression) Type { return TypeVoid },
-			},
+		impls: []BuiltinImpl{
+			builtinAssert1{},
+			builtinAssert2{},
 		},
 	}
 	BuiltinNew = &BuiltinSymbol{
 		name: "new",
-		impls: []builtinImpl{
-			{
-				shape:   []Kind{KindType},
-				compile: builtinImplNew,
-				ret: func(args []Expression) Type {
-					if args[0].Type().Kind() != KindType {
-						return UnknownType
-					}
-					return NewPointerType(dereferenceType(args[0].Type()).(*TypeType).Type)
-				},
-			},
+		impls: []BuiltinImpl{
+			builtinNew{},
 		},
 	}
 )
 
-type builtinImpl struct {
-	shape   []Kind
-	compile builtinImplFunc
-	ret     func(args []Expression) Type
-}
-
-type builtinImplFunc func(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error)
-
-func builtinImplExtern(extern *ExternFunction) builtinImplFunc {
-	return func(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
-		return prog.compileBCExpression(ctx, &CallExpression{
-			Function: &SymbolReferenceExpression{
-				name:  extern.name,
-				scope: prog.root,
-
-				Position: pos,
-			},
-			Args:     args,
-			Position: pos,
-		}, scope, dst)
-	}
-}
-
-func builtinImplArrayLen() builtinImplFunc {
-	return func(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
-		if len(args) != 1 {
-			return nil, nil, pos.WrapError(fmt.Errorf("builtin len expects exactly 1 argument, got %d", len(args)))
-		}
-
-		switch arg := resolveType(args[0].Type()).(type) {
-		case *ArrayType:
-			return nil, scope.newImmediate(Int(arg.Length())), nil
-		default:
-			return nil, nil, pos.WrapError(fmt.Errorf("cannot get length of %s", args[0].Type()))
-		}
-	}
-}
-
-func builtinImplAssert1(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
-	var exprText string
-	if rawTexter, ok := args[0].(interface{ RawText() string }); ok {
-		exprText = rawTexter.RawText()
-	}
-
-	exprTextLiteral := NewLiteral(String(exprText))
-
-	args = append(args, exprTextLiteral)
-
-	return builtinImplExtern(BuiltinExternAssert)(ctx, prog, pos, args, scope, dst)
-}
-
-func builtinImplNew(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
-	var bc BytecodeSnippet
-	if args[0].Type().Kind() != KindType {
-		return nil, nil, pos.WrapError(fmt.Errorf("builtin new expects a type, got value expression %q", args[0]))
-	}
-
-	bc.Alloc(dst)
-	return bc, dst, nil
-}
-
-func builtinImplUnimp() builtinImplFunc {
-	return func(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
-		return nil, nil, pos.WrapError(fmt.Errorf("builtin currently unimplemented"))
-	}
+type BuiltinImpl interface {
+	Match(args []Expression) bool
+	TypeCheck(c *Compiler, pos parser.Position, args []Expression) error
+	Type(args []Expression) Type
+	Compile(ctx context.Context, c *Compiler, p *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error)
 }
 
 func BuiltinsSymbols() *SymbolScope {
@@ -185,7 +94,7 @@ const (
 
 type BuiltinSymbol struct {
 	name    string
-	impls   []builtinImpl
+	impls   []BuiltinImpl
 	shapes  [][]Kind
 	externs []*ExternFunction
 	parser.Position
@@ -199,27 +108,29 @@ func (s *BuiltinSymbol) Type() Type {
 	return &BuiltinType{symbol: s}
 }
 
-func (s *BuiltinSymbol) impl(args []Expression) (builtinImpl, error) {
+func (s *BuiltinSymbol) CallExpression(c *Compiler, expr *CallExpression) (Expression, error) {
 	for _, impl := range s.impls {
-		if len(impl.shape) != len(args) {
-			continue
-		}
-
-		for i := range len(impl.shape) {
-			if args[i].Type().Kind() == impl.shape[i] {
-				continue
+		if impl.Match(expr.Args) {
+			err := impl.TypeCheck(c, expr.Position, expr.Args)
+			if err != nil {
+				return nil, err
 			}
-		}
 
-		return impl, nil
+			return &BuiltinExpression{
+				Builtin:  s,
+				Impl:     impl,
+				Args:     expr.Args,
+				Position: expr.Position,
+			}, nil
+		}
 	}
 
 	var argTypeStrs []string
-	for _, arg := range args {
+	for _, arg := range expr.Args {
 		argTypeStrs = append(argTypeStrs, arg.Type().String())
 	}
 
-	return builtinImpl{}, fmt.Errorf("cannot use builtin %s with arguments of type %s", s.name, strings.Join(argTypeStrs, ", "))
+	return expr, fmt.Errorf("cannot use builtin %s with arguments of type %s", s.name, strings.Join(argTypeStrs, ", "))
 }
 
 type BuiltinType struct {
@@ -246,16 +157,176 @@ func (t *BuiltinType) Name() string {
 
 type BuiltinExpression struct {
 	Builtin *BuiltinSymbol
+	Impl    BuiltinImpl
 	Args    []Expression
 
 	parser.Position
 }
 
 func (e *BuiltinExpression) Type() Type {
-	impl, err := e.Builtin.impl(e.Args)
-	if err != nil {
-		return UnknownType
+	return e.Impl.Type(e.Args)
+}
+
+type builtinLenArray struct{}
+
+func (b builtinLenArray) Match(args []Expression) bool {
+	return len(args) == 1 && args[0].Type().Kind() == KindArray
+}
+
+func (b builtinLenArray) TypeCheck(c *Compiler, pos parser.Position, args []Expression) error {
+	if len(args) != 1 {
+		return pos.WrapError(fmt.Errorf("builtin len expects exactly 1 argument, got %d", len(args)))
 	}
 
-	return impl.ret(e.Args)
+	var err error
+	args[0], err = c.resolveExpressionTypes(args[0], TypeKind(KindArray))
+	if err != nil {
+		return err
+	}
+
+	if args[0].Type().Kind() != KindArray {
+		return pos.WrapError(fmt.Errorf("builtin len expects an array, got %s", args[0].Type()))
+	}
+
+	return nil
+}
+
+func (b builtinLenArray) Type([]Expression) Type {
+	return TypeInt
+}
+
+func (b builtinLenArray) Compile(ctx context.Context, c *Compiler, p *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+	err := b.TypeCheck(c, pos, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return nil, scope.newImmediate(Int(resolveType(args[0].Type()).(*ArrayType).Length())), nil
+}
+
+type builtinAssert1 struct{}
+
+func (b builtinAssert1) Match(args []Expression) bool {
+	return len(args) == 1 && args[0].Type().Kind() == KindBool
+}
+
+func (b builtinAssert1) TypeCheck(c *Compiler, pos parser.Position, args []Expression) error {
+	if len(args) != 1 {
+		return pos.WrapError(fmt.Errorf("builtin assert expects 1 argument, got %d", len(args)))
+	}
+
+	if args[0].Type().Kind() != KindBool {
+		return pos.WrapError(fmt.Errorf("builtin assert expects argument to be a boolean, got %s", args[0].Type()))
+	}
+
+	return nil
+}
+
+func (b builtinAssert1) Type(args []Expression) Type {
+	return TypeVoid
+}
+
+func (b builtinAssert1) Compile(ctx context.Context, c *Compiler, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+	err := b.TypeCheck(c, pos, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var exprText string
+	if rawTexter, ok := args[0].(interface{ RawText() string }); ok {
+		exprText = rawTexter.RawText()
+	}
+
+	exprTextLiteral := NewLiteral(String(exprText))
+
+	args = append(args, exprTextLiteral)
+
+	return c.compileBCExpression(ctx, prog, &CallExpression{
+		Function: &SymbolReferenceExpression{
+			name:  BuiltinExternAssert.Name(),
+			scope: prog.root,
+
+			Position: pos,
+		},
+		Args:     args,
+		Position: pos,
+	}, scope, dst)
+}
+
+type builtinAssert2 struct{}
+
+func (b builtinAssert2) Match(args []Expression) bool {
+	return len(args) == 2 && args[0].Type().Kind() == KindBool && args[1].Type().Kind() == KindString
+}
+
+func (b builtinAssert2) TypeCheck(c *Compiler, pos parser.Position, args []Expression) error {
+	if len(args) != 2 {
+		return pos.WrapError(fmt.Errorf("builtin assert expects 2 arguments, got %d", len(args)))
+	}
+
+	if args[0].Type().Kind() != KindBool {
+		return pos.WrapError(fmt.Errorf("builtin assert expects first argument to be a boolean, got %s", args[0].Type()))
+	}
+
+	if args[1].Type().Kind() != KindString {
+		return pos.WrapError(fmt.Errorf("builtin assert expects second argument to be a string, got %s", args[1].Type()))
+	}
+
+	return nil
+}
+
+func (b builtinAssert2) Type(args []Expression) Type {
+	return TypeVoid
+}
+
+func (b builtinAssert2) Compile(ctx context.Context, c *Compiler, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+	err := b.TypeCheck(c, pos, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return c.compileBCExpression(ctx, prog, &CallExpression{
+		Function: &SymbolReferenceExpression{
+			name:  BuiltinExternAssert.Name(),
+			scope: prog.root,
+
+			Position: pos,
+		},
+		Args:     args,
+		Position: pos,
+	}, scope, dst)
+}
+
+type builtinNew struct{}
+
+func (b builtinNew) Match(args []Expression) bool {
+	return len(args) == 1 && args[0].Type().Kind() == KindType
+}
+
+func (b builtinNew) TypeCheck(c *Compiler, pos parser.Position, args []Expression) error {
+	if len(args) != 1 {
+		return pos.WrapError(fmt.Errorf("builtin new expects 1 argument, got %d", len(args)))
+	}
+
+	if args[0].Type().Kind() != KindType {
+		return pos.WrapError(fmt.Errorf("builtin new expects a type, got value expression %q", args[0]))
+	}
+
+	return nil
+}
+
+func (b builtinNew) Type(args []Expression) Type {
+	return NewPointerType(dereferenceType(args[0].Type()).(*TypeType).Type)
+}
+
+func (b builtinNew) Compile(ctx context.Context, c *Compiler, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+	err := b.TypeCheck(c, pos, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var bc BytecodeSnippet
+	bc.Alloc(dst)
+
+	return bc, dst, nil
 }

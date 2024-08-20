@@ -78,11 +78,11 @@ const (
 func validateBinaryExpression(left Type, operator Operator, right Type) (Type, error) {
 	kind := binaryOperatorKinds[BinaryOperatorKinds{operator, left.Kind(), right.Kind()}]
 	if kind == KindUnknown {
-		return nil, fmt.Errorf("invalid binary operator %q for types %q and %q", operator, left, right)
+		return UnknownType, fmt.Errorf("invalid binary operator %q for types %q and %q", operator, left, right)
 	}
 
 	if !TypesEqual(left, right) {
-		return nil, fmt.Errorf("invalid binary operator %q for types %q and %q", operator, left, right)
+		return TypeKind(kind), fmt.Errorf("invalid binary operator %q for types %q and %q", operator, left, right)
 	}
 
 	if left.Kind() != kind {
@@ -193,12 +193,17 @@ type BinaryExpression struct {
 }
 
 func (e *BinaryExpression) Type() Type {
-	typ, err := validateBinaryExpression(e.Left.Type(), e.Operator, e.Right.Type())
-	if err != nil {
-		return UnknownType
-	}
+	switch e.Operator {
+	case OperatorEqual, OperatorNotEqual, OperatorLessThan, OperatorLessThanOrEqual, OperatorGreaterThan, OperatorGreaterThanOrEqual:
+		return TypeKind(KindBool)
+	default:
+		typ, err := validateBinaryExpression(e.Left.Type(), e.Operator, e.Right.Type())
+		if err != nil {
+			return typ
+		}
 
-	return typ
+		return typ
+	}
 }
 
 type AssignmentOperatorStatement struct {

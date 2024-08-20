@@ -8,7 +8,7 @@ import (
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
-func (prog *Program) compileBytecode(ctx context.Context) error {
+func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	// TODO: sort by import orderings
 	registerOperands := make([]*Operand, prog.Registers())
 
@@ -22,7 +22,7 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 	}
 
 	for _, pkg := range prog.Packages() {
-		err := pkg.compileBytecode(ctx)
+		err := c.compileBCPackage(ctx, pkg)
 		if err != nil {
 			return err
 		}
@@ -69,7 +69,7 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 	return nil
 }
 
-func (pkg *Package) compileBytecode(ctx context.Context) error {
+func (c *Compiler) compileBCPackage(ctx context.Context, pkg *Package) error {
 	pkg.values = BuiltinValues(pkg.prog.Registers(), pkg.scope)
 
 	// TODO: sort topologically
@@ -82,7 +82,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 		pkg.values.newConstant(constant.Name(), constant.Type(), val.Location(pkg.values).Operand)
 	}
 
-	varInitFunc, err := pkg.compileVarInit(ctx, pkg.values)
+	varInitFunc, err := c.compilePackageVarInit(ctx, pkg)
 	if err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 	pkg.bytecode.Mount(varInitFunc)
 
 	for _, fun := range pkg.Functions() {
-		err := fun.compileBytecode(ctx, pkg.values)
+		err := c.compileBCFunction(ctx, fun, pkg.values)
 		if err != nil {
 			return err
 		}
@@ -100,7 +100,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 
 	for _, drv := range pkg.DerivedTypes() {
 		for _, met := range drv.MethodFunctions() {
-			err := met.compileBytecode(ctx, pkg.values)
+			err := c.compileBCFunction(ctx, met, pkg.values)
 			if err != nil {
 				return err
 			}
@@ -109,7 +109,7 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 		}
 
 		for _, met := range drv.PtrMethodFunctions() {
-			err := met.compileBytecode(ctx, pkg.values)
+			err := c.compileBCFunction(ctx, met, pkg.values)
 			if err != nil {
 				return err
 			}
@@ -126,10 +126,11 @@ func (pkg *Package) compileBytecode(ctx context.Context) error {
 	return nil
 }
 
-func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Function, error) {
+func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Function, error) {
 	f := newFunction(VarInitFuncName, pkg)
 	f.receiver = &Variable{typ: TypeVoid}
 
+	scope := pkg.values
 	// TODO: special varinit tmp var semantics
 
 	numLocals := ImmediateOperand(Int(0))
@@ -144,7 +145,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	// TODO: make these truly global
 	for _, externFunc := range pkg.prog.root.ExternFunctions() {
 		hdr := scope.newGlobal("@"+externFunc.Name(), externType)
-		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(Int(1)),
 			NewLiteral(String(externFunc.Name())),
 			NewLiteral(Int(0)),
@@ -161,7 +162,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 
 	for _, externFunc := range pkg.ExternFunctions() {
 		hdr := scope.newGlobal("@"+externFunc.Name(), externType)
-		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(Int(1)),
 			NewLiteral(String(externFunc.Name())),
 			NewLiteral(Int(0)),
@@ -179,7 +180,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	for _, fun := range pkg.Functions() {
 		fName := fun.Name()
 		hdr := scope.newGlobal("@"+fName, funcType)
-		hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(Int(2)),
 			NewLiteral(String(fun.pkg.qualifiedName)),
 			NewLiteral(Int(0)),
@@ -199,7 +200,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	for _, global := range pkg.Globals() {
 		ptr := scope.newGlobal(global.Name(), global.Type())
 		if global.expr != nil {
-			exprBC, exprLoc, err := pkg.prog.compileBCExpression(ctx, global.expr, scope, ptr)
+			exprBC, exprLoc, err := c.compileBCExpression(ctx, pkg.prog, global.expr, scope, ptr)
 			if err != nil {
 				return nil, err
 			}
@@ -214,7 +215,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 				})
 			}
 		} else {
-			exprBC, exprLoc, err := pkg.prog.compileBCZeroValue(ctx, global.Position, global.Type(), scope, ptr)
+			exprBC, exprLoc, err := c.compileBCZeroValue(ctx, pkg.prog, global.Position, global.Type(), scope, ptr)
 			if err != nil {
 				return nil, err
 			}
@@ -230,7 +231,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	for _, drv := range pkg.DerivedTypes() {
 		for _, met := range drv.MethodFunctions() {
 			hdr := scope.newGlobal("@"+met.Name(), funcType)
-			hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+			hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
 				NewLiteral(Int(0)),
@@ -249,7 +250,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 
 		for _, met := range drv.PtrMethodFunctions() {
 			hdr := scope.newGlobal("@"+met.Name(), funcType)
-			hdrBC, err := pkg.prog.compileBCValuesLiteral(ctx, []Expression{
+			hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
 				NewLiteral(Int(0)),
@@ -276,7 +277,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 	return f, nil
 }
 
-func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error {
+func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *ValueScope) error {
 	scope = scope.fun(f.symbols)
 
 	numLocals := ImmediateOperand(Int(0))
@@ -315,7 +316,7 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 	body := f.Body()
 
 	for _, stmt := range body {
-		bcs, err := f.pkg.prog.compileBCStatement(ctx, stmt, scope)
+		bcs, err := c.compileBCStatement(ctx, f.pkg.prog, stmt, scope)
 		if err != nil {
 			return err
 		}
@@ -344,9 +345,9 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 	return nil
 }
 
-func (prog *Program) compileBCGlobal(ctx context.Context, name string, expr Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, error) {
+func (c *Compiler) compileBCGlobal(ctx context.Context, prog *Program, name string, expr Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, error) {
 	var bc BytecodeSnippet
-	globBC, globLoc, err := prog.compileBCExpression(ctx, expr, scope, dst)
+	globBC, globLoc, err := c.compileBCExpression(ctx, prog, expr, scope, dst)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +361,7 @@ func (prog *Program) compileBCGlobal(ctx context.Context, name string, expr Expr
 	return bc, nil
 }
 
-func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *ValueScope) (BytecodeSnippet, *Location, error) {
+func (c *Compiler) compileBCLHS(ctx context.Context, prog *Program, expr Expression, scope *ValueScope) (BytecodeSnippet, *Location, error) {
 	var bc BytecodeSnippet
 	switch expr := expr.(type) {
 	case *SymbolReferenceExpression:
@@ -370,18 +371,18 @@ func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *V
 		}
 		return nil, op, nil
 	case *ParenthesizedExpression:
-		return prog.compileBCLHS(ctx, expr, scope)
+		return c.compileBCLHS(ctx, prog, expr, scope)
 	case *DotExpression:
 		receiverTmp := scope.allocTemp(expr.Receiver.Type())
 		defer scope.deallocTemp(receiverTmp)
-		receiverBC, receiverLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		receiverBC, receiverLoc, err := c.compileBCExpression(ctx, prog, expr.Receiver, scope, receiverTmp)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		bc.Add(receiverBC...)
 
-		lhsBC, lhsLoc, err := prog.compileBCLHSDotExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc)
+		lhsBC, lhsLoc, err := c.compileBCLHSDotExpression(ctx, prog, expr, expr.Receiver.Type(), scope, receiverLoc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -392,7 +393,7 @@ func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *V
 	case *IndexExpression:
 		receiverTmp := scope.allocTemp(expr.Receiver.Type())
 		defer scope.deallocTemp(receiverTmp)
-		receiverBC, receiverLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		receiverBC, receiverLoc, err := c.compileBCExpression(ctx, prog, expr.Receiver, scope, receiverTmp)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -401,14 +402,14 @@ func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *V
 
 		indexTmp := scope.allocTemp(expr.Index.Type())
 		defer scope.deallocTemp(indexTmp)
-		indexBC, indexLoc, err := prog.compileBCExpression(ctx, expr.Index, scope, indexTmp)
+		indexBC, indexLoc, err := c.compileBCExpression(ctx, prog, expr.Index, scope, indexTmp)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		bc.Add(indexBC...)
 
-		lhsBC, lhsLoc, err := prog.compileBCLHSIndexExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
+		lhsBC, lhsLoc, err := c.compileBCLHSIndexExpression(ctx, prog, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -421,7 +422,7 @@ func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *V
 		case OperatorDereference:
 			tmp := scope.allocTemp(expr.Expression.Type())
 			defer scope.deallocTemp(tmp)
-			subExprBC, subExprLoc, err := prog.compileBCExpression(ctx, expr.Expression, scope, tmp)
+			subExprBC, subExprLoc, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, tmp)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -442,7 +443,7 @@ func (prog *Program) compileBCLHS(ctx context.Context, expr Expression, scope *V
 	}
 }
 
-func (prog *Program) compileBCLHSDotExpression(ctx context.Context, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
+func (c *Compiler) compileBCLHSDotExpression(ctx context.Context, prog *Program, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
 	switch typ := resolveType(typ).(type) {
 	case *TupleType:
 		index, err := strconv.Atoi(expr.Key)
@@ -473,13 +474,13 @@ func (prog *Program) compileBCLHSDotExpression(ctx context.Context, expr *DotExp
 			return nil, nil, expr.WrapError(err)
 		}
 
-		return prog.compileBCLHSDotExpression(ctx, expr, typ.Pointee(), scope, receiverLocValue)
+		return c.compileBCLHSDotExpression(ctx, prog, expr, typ.Pointee(), scope, receiverLocValue)
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", dereferenceType(expr.Receiver.Type())))
 	}
 }
 
-func (prog *Program) compileBCLHSIndexExpression(ctx context.Context, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
+func (c *Compiler) compileBCLHSIndexExpression(ctx context.Context, prog *Program, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
 	switch resolveType(typ).(type) {
 	case *ArrayType:
 		elemLoc, err := receiverLoc.IndexArray(indexLoc)
@@ -499,7 +500,7 @@ func (prog *Program) compileBCLHSIndexExpression(ctx context.Context, expr *Inde
 	}
 }
 
-func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, scope *ValueScope) (BytecodeSnippet, error) {
+func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt Statement, scope *ValueScope) (BytecodeSnippet, error) {
 	var bc BytecodeSnippet
 	switch stmt := stmt.(type) {
 	case *VarStatement:
@@ -510,12 +511,12 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		local := scope.newLocal(stmt.Variable.Name(), stmt.Type)
 
 		if stmt.Expression != nil {
-			initBC, rhsLoc, err = prog.compileBCExpression(ctx, stmt.Expression, scope, local)
+			initBC, rhsLoc, err = c.compileBCExpression(ctx, prog, stmt.Expression, scope, local)
 			if err != nil {
 				return nil, err
 			}
 		} else {
-			initBC, rhsLoc, err = prog.compileBCZeroValue(ctx, stmt.Position, stmt.Type, scope, local)
+			initBC, rhsLoc, err = c.compileBCZeroValue(ctx, prog, stmt.Position, stmt.Type, scope, local)
 			if err != nil {
 				return nil, err
 			}
@@ -531,7 +532,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 	case *DeclarationStatement:
 		local := scope.newLocal(stmt.Variable.Name(), stmt.Expression.Type())
 
-		initBC, rhsOp, err := prog.compileBCExpression(ctx, stmt.Expression, scope, local)
+		initBC, rhsOp, err := c.compileBCExpression(ctx, prog, stmt.Expression, scope, local)
 		if err != nil {
 			return nil, err
 		}
@@ -544,12 +545,12 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		return bc, nil
 	case *AssignmentStatement:
-		lhsBC, lhsOp, err := prog.compileBCLHS(ctx, stmt.Left, scope)
+		lhsBC, lhsOp, err := c.compileBCLHS(ctx, prog, stmt.Left, scope)
 		if err != nil {
 			return nil, err
 		}
 
-		rhsBC, rhsOp, err := prog.compileBCExpression(ctx, stmt.Right, scope, lhsOp)
+		rhsBC, rhsOp, err := c.compileBCExpression(ctx, prog, stmt.Right, scope, lhsOp)
 		if err != nil {
 			return nil, err
 		}
@@ -562,7 +563,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		return bc, nil
 	case *AssignmentOperatorStatement:
-		lhsBC, lhsLoc, err := prog.compileBCLHS(ctx, stmt.Left, scope)
+		lhsBC, lhsLoc, err := c.compileBCLHS(ctx, prog, stmt.Left, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -570,7 +571,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		rhsLoc := scope.allocTemp(stmt.Right.Type())
 		defer scope.deallocTemp(rhsLoc)
 
-		rhsBC, rhsLoc, err := prog.compileBCExpression(ctx, stmt.Right, scope, rhsLoc)
+		rhsBC, rhsLoc, err := c.compileBCExpression(ctx, prog, stmt.Right, scope, rhsLoc)
 		if err != nil {
 			return nil, err
 		}
@@ -596,7 +597,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		return bc, nil
 	case *PostfixStatement:
-		lhsBC, lhsLoc, err := prog.compileBCLHS(ctx, stmt.Expression, scope)
+		lhsBC, lhsLoc, err := c.compileBCLHS(ctx, prog, stmt.Expression, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -629,7 +630,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			var err error
 
 			returnVar, _ := scope.Get("__return")
-			exprBC, exprLoc, err := prog.compileBCExpression(ctx, stmt.Expression, scope, returnVar)
+			exprBC, exprLoc, err := c.compileBCExpression(ctx, prog, stmt.Expression, scope, returnVar)
 			if err != nil {
 				return nil, err
 			}
@@ -652,7 +653,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		var err error
 		var initBC []Bytecode
 		if stmt.Init != nil {
-			initBC, err = prog.compileBCStatement(ctx, stmt.Init, forScope)
+			initBC, err = c.compileBCStatement(ctx, prog, stmt.Init, forScope)
 			if err != nil {
 				return nil, err
 			}
@@ -662,7 +663,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		var bodyBC []Bytecode
 		for _, subStmt := range stmt.Body {
-			bodyStmtBC, err := prog.compileBCStatement(ctx, subStmt, forScope)
+			bodyStmtBC, err := c.compileBCStatement(ctx, prog, subStmt, forScope)
 			if err != nil {
 				return nil, err
 			}
@@ -672,7 +673,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		var stepBC []Bytecode
 		if stmt.Step != nil {
-			stepBC, err = prog.compileBCStatement(ctx, stmt.Step, forScope)
+			stepBC, err = c.compileBCStatement(ctx, prog, stmt.Step, forScope)
 			if err != nil {
 				return nil, err
 			}
@@ -687,7 +688,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 			var condLoc *Location
 
-			condBC, condLoc, err = prog.compileBCExpression(ctx, stmt.Condition, forScope, condTmp)
+			condBC, condLoc, err = c.compileBCExpression(ctx, prog, stmt.Condition, forScope, condTmp)
 			if err != nil {
 				return nil, err
 			}
@@ -711,14 +712,14 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			tmp := scope.allocTemp(stmt.Expression.Type())
 			defer scope.deallocTemp(tmp)
 
-			exprBC, _, err := prog.compileBCExpression(ctx, stmt.Expression, scope, tmp)
+			exprBC, _, err := c.compileBCExpression(ctx, prog, stmt.Expression, scope, tmp)
 			if err != nil {
 				return nil, err
 			}
 
 			bc.Add(exprBC...)
 		} else {
-			exprBC, _, err := prog.compileBCExpression(ctx, stmt.Expression, scope, nil)
+			exprBC, _, err := c.compileBCExpression(ctx, prog, stmt.Expression, scope, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -735,7 +736,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			condReg := scope.allocTemp(stmt.Condition.Type())
 
 			var err error
-			condBC, condLoc, err = prog.compileBCExpression(ctx, stmt.Condition, scope, condReg)
+			condBC, condLoc, err = c.compileBCExpression(ctx, prog, stmt.Condition, scope, condReg)
 			if err != nil {
 				return nil, err
 			}
@@ -747,7 +748,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 
 		var bodyBC []Bytecode
 		for _, subStmt := range stmt.Body {
-			bodyStmtBC, err := prog.compileBCStatement(ctx, subStmt, bodyScope)
+			bodyStmtBC, err := c.compileBCStatement(ctx, prog, subStmt, bodyScope)
 			if err != nil {
 				return nil, err
 			}
@@ -773,7 +774,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 		if stmt.Else != nil {
 			bc.JumpAfter(endLabel, nil)
 			bc.LabelLast(elseLabel)
-			elseBC, err := prog.compileBCStatement(ctx, stmt.Else, scope)
+			elseBC, err := c.compileBCStatement(ctx, prog, stmt.Else, scope)
 			if err != nil {
 				return nil, err
 			}
@@ -789,7 +790,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 	}
 }
 
-func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, typ Type, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+func (c *Compiler) compileBCZeroValue(ctx context.Context, prog *Program, pos parser.Position, typ Type, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
 	var bc BytecodeSnippet
 
 	switch typ := resolveType(typ).(type) {
@@ -818,7 +819,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 				return nil, nil, pos.WrapError(err)
 			}
 
-			fieldBC, fieldLoc, err := p.compileBCZeroValue(ctx, pos, field.Type, scope, fieldDst)
+			fieldBC, fieldLoc, err := c.compileBCZeroValue(ctx, prog, pos, field.Type, scope, fieldDst)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -843,7 +844,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 				return nil, nil, pos.WrapError(err)
 			}
 
-			elemBC, elemLoc, err := p.compileBCZeroValue(ctx, pos, elem, scope, elemDst)
+			elemBC, elemLoc, err := c.compileBCZeroValue(ctx, prog, pos, elem, scope, elemDst)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -866,7 +867,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 				return nil, nil, pos.WrapError(err)
 			}
 
-			elemBC, elemLoc, err := p.compileBCZeroValue(ctx, pos, elem, scope, dst)
+			elemBC, elemLoc, err := c.compileBCZeroValue(ctx, prog, pos, elem, scope, dst)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -882,7 +883,7 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 
 		return bc, dst, nil
 	case *InterfaceType:
-		valBC, err := p.compileBCValuesLiteral(ctx, []Expression{
+		valBC, err := c.compileBCValuesLiteral(ctx, prog, []Expression{
 			NewLiteral(NilType.GlobalName()),
 			NewLiteral(NilValue),
 		}, scope, dst.AsType(interfaceTuple))
@@ -900,13 +901,13 @@ func (p *Program) compileBCZeroValue(ctx context.Context, pos parser.Position, t
 	}
 }
 
-func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, scope *ValueScope, dst *Location) ([]Bytecode, *Location, error) {
+func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr Expression, scope *ValueScope, dst *Location) ([]Bytecode, *Location, error) {
 	var bc BytecodeSnippet
 	switch expr := expr.(type) {
 	case *Literal:
 		switch expr.Type().Kind() {
 		case KindNil:
-			return prog.compileBCZeroValue(ctx, expr.Position, dst.Type, scope, dst)
+			return c.compileBCZeroValue(ctx, prog, expr.Position, dst.Type, scope, dst)
 		default:
 			return nil, expr.Value().Location(scope), nil
 		}
@@ -920,7 +921,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 		return nil, sym, nil
 	case *ParenthesizedExpression:
-		return prog.compileBCExpression(ctx, expr.Expression, scope, dst)
+		return c.compileBCExpression(ctx, prog, expr.Expression, scope, dst)
 	case *BuiltinSymbol:
 		return nil, nil, expr.WrapError(fmt.Errorf("builtin %q used as value", expr.Name()))
 	case *BinaryExpression:
@@ -932,7 +933,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			defer scope.deallocTemp(lhsTmp)
 		}
 
-		lhsBC, lhsLoc, err := prog.compileBCExpression(ctx, expr.Left, scope, lhsTmp)
+		lhsBC, lhsLoc, err := c.compileBCExpression(ctx, prog, expr.Left, scope, lhsTmp)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -940,7 +941,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 		bc.Add(lhsBC...)
 
 		rhsTmp := scope.allocTemp(expr.Right.Type())
-		rhsBC, rhsLoc, err := prog.compileBCExpression(ctx, expr.Right, scope, rhsTmp)
+		rhsBC, rhsLoc, err := c.compileBCExpression(ctx, prog, expr.Right, scope, rhsTmp)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -972,7 +973,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			tmp := scope.allocTemp(expr.Expression.Type())
 			defer scope.deallocTemp(tmp)
 
-			srcBC, srcLoc, err := prog.compileBCExpression(ctx, expr.Expression, scope, tmp)
+			srcBC, srcLoc, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, tmp)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -984,7 +985,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			tmp := scope.allocTemp(expr.Expression.Type())
 			defer scope.deallocTemp(tmp)
 
-			srcBC, srcOp, err := prog.compileBCExpression(ctx, expr.Expression, scope, tmp)
+			srcBC, srcOp, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, tmp)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -998,7 +999,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			return bc, srcLocValue, nil
 		default:
-			srcBC, srcOp, err := prog.compileBCExpression(ctx, expr.Expression, scope, dst)
+			srcBC, srcOp, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, dst)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1029,7 +1030,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 				bc.Mov(scope.SP(), scope.SP().AddConst(ftype.Return.Size()))
 			}
 
-			callBC, callLoc, err := prog.compileBCCallReceiverExpression(ctx, expr.Function, callScope, recvVar, callTmp)
+			callBC, callLoc, err := c.compileBCCallReceiverExpression(ctx, prog, expr.Function, callScope, recvVar, callTmp)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1039,7 +1040,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			for i, arg := range expr.Args {
 				argVar := callScope.newArg(fmt.Sprintf("%d", i), 0, ftype.Parameters[i])
 
-				argBC, argLoc, err := prog.compileBCExpression(ctx, arg, callScope, argVar)
+				argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argVar)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1069,7 +1070,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			switch ftype.Type.Kind() {
 			case expr.Args[0].Type().Kind():
-				argsBC, argsLoc, err := prog.compileBCExpression(ctx, expr.Args[0], scope, dst)
+				argsBC, argsLoc, err := c.compileBCExpression(ctx, prog, expr.Args[0], scope, dst)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -1087,18 +1088,18 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *DotExpression:
 		receiverTmp := scope.allocTemp(expr.Receiver.Type())
 		defer scope.deallocTemp(receiverTmp)
-		receiverBC, receiverLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		receiverBC, receiverLoc, err := c.compileBCExpression(ctx, prog, expr.Receiver, scope, receiverTmp)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		bc.Add(receiverBC...)
 
-		return prog.compileBCDotExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc)
+		return c.compileBCDotExpression(ctx, prog, expr, expr.Receiver.Type(), scope, receiverLoc)
 	case *IndexExpression:
 		receiverTmp := scope.allocTemp(expr.Receiver.Type())
 		defer scope.deallocTemp(receiverTmp)
-		receiverBC, receiverLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, receiverTmp)
+		receiverBC, receiverLoc, err := c.compileBCExpression(ctx, prog, expr.Receiver, scope, receiverTmp)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1107,14 +1108,14 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 		indexTmp := scope.allocTemp(expr.Receiver.Type())
 		defer scope.deallocTemp(indexTmp)
-		indexBC, indexLoc, err := prog.compileBCExpression(ctx, expr.Index, scope, indexTmp)
+		indexBC, indexLoc, err := c.compileBCExpression(ctx, prog, expr.Index, scope, indexTmp)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		bc.Add(indexBC...)
 
-		return prog.compileBCIndexExpression(ctx, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
+		return c.compileBCIndexExpression(ctx, prog, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
 	case *TupleExpression:
 		for i, elem := range expr.Elems {
 			dst, err := dst.IndexTuple(i)
@@ -1122,7 +1123,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 				return nil, nil, expr.WrapError(err)
 			}
 
-			elemBC, elemLoc, err := prog.compileBCExpression(ctx, elem, scope, dst)
+			elemBC, elemLoc, err := c.compileBCExpression(ctx, prog, elem, scope, dst)
 			if err != nil {
 				return nil, nil, expr.WrapError(err)
 			}
@@ -1142,7 +1143,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 				return nil, nil, err
 			}
 
-			elemBC, elemLoc, err := prog.compileBCExpression(ctx, elem, scope, dst)
+			elemBC, elemLoc, err := c.compileBCExpression(ctx, prog, elem, scope, dst)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -1175,7 +1176,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 			return nil, nil, expr.WrapError(fmt.Errorf("currently interfaces with values of size > 1 not implemented"))
 		}
 
-		valBC, valOp, err := prog.compileBCExpression(ctx, expr.Expression, scope, valElem)
+		valBC, valOp, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, valElem)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1190,22 +1191,17 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 	case *TypeExpression:
 		return bc, scope.typeName(expr.typ), nil
 	case *BuiltinExpression:
-		impl, err := expr.Builtin.impl(expr.Args)
-		if err != nil {
-			return nil, nil, expr.WrapError(err)
-		}
-
-		return impl.compile(ctx, prog, expr.Position, expr.Args, scope, dst)
+		return expr.Impl.Compile(ctx, c, prog, expr.Position, expr.Args, scope, dst)
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
 }
 
-func (prog *Program) compileBCCallReceiverExpression(ctx context.Context, expr Expression, scope *ValueScope, recvDst, callDst *Location) (BytecodeSnippet, *Location, error) {
+func (c *Compiler) compileBCCallReceiverExpression(ctx context.Context, prog *Program, expr Expression, scope *ValueScope, recvDst, callDst *Location) (BytecodeSnippet, *Location, error) {
 	var bc BytecodeSnippet
 	switch expr := expr.(type) {
 	case *MethodExpression:
-		recvBC, recvLoc, err := prog.compileBCExpression(ctx, expr.Receiver, scope, recvDst)
+		recvBC, recvLoc, err := c.compileBCExpression(ctx, prog, expr.Receiver, scope, recvDst)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1259,13 +1255,13 @@ func (prog *Program) compileBCCallReceiverExpression(ctx context.Context, expr E
 			return bc, callLoc, nil
 		}
 	case *ParenthesizedExpression:
-		return prog.compileBCCallReceiverExpression(ctx, expr.Expression, scope, recvDst, callDst)
+		return c.compileBCCallReceiverExpression(ctx, prog, expr.Expression, scope, recvDst, callDst)
 	default:
-		return prog.compileBCExpression(ctx, expr, scope, callDst)
+		return c.compileBCExpression(ctx, prog, expr, scope, callDst)
 	}
 }
 
-func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
+func (c *Compiler) compileBCDotExpression(ctx context.Context, prog *Program, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
 	switch typ := resolveType(typ).(type) {
 	case *TupleType:
 		index, err := strconv.Atoi(expr.Key)
@@ -1285,7 +1281,7 @@ func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpres
 			return nil, nil, expr.WrapError(err)
 		}
 
-		return prog.compileBCDotExpression(ctx, expr, typ.Pointee(), scope, receiverLocValue)
+		return c.compileBCDotExpression(ctx, prog, expr, typ.Pointee(), scope, receiverLocValue)
 	case *StructType:
 		fieldLoc, err := receiverLoc.IndexFieldConst(expr.Key)
 		if err != nil {
@@ -1310,7 +1306,7 @@ func (prog *Program) compileBCDotExpression(ctx context.Context, expr *DotExpres
 	}
 }
 
-func (prog *Program) compileBCIndexExpression(ctx context.Context, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
+func (c *Compiler) compileBCIndexExpression(ctx context.Context, prog *Program, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
 	switch resolveType(typ).(type) {
 	case *ArrayType:
 		elemLoc, err := receiverLoc.IndexArray(indexLoc)
@@ -1330,7 +1326,7 @@ func (prog *Program) compileBCIndexExpression(ctx context.Context, expr *IndexEx
 	}
 }
 
-func (prog *Program) compileBCValuesLiteral(ctx context.Context, exprs []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, error) {
+func (c *Compiler) compileBCValuesLiteral(ctx context.Context, prog *Program, exprs []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, error) {
 	var bc BytecodeSnippet
 	var offset Size
 
@@ -1340,7 +1336,7 @@ func (prog *Program) compileBCValuesLiteral(ctx context.Context, exprs []Express
 			return nil, err
 		}
 
-		exprBC, exprOp, err := prog.compileBCExpression(ctx, expr, scope, elemDst)
+		exprBC, exprOp, err := c.compileBCExpression(ctx, prog, expr, scope, elemDst)
 		if err != nil {
 			return nil, err
 		}

@@ -873,26 +873,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				return expr, nil
 			}
 		case *BuiltinType:
-			impl, err := ftype.symbol.impl(expr.Args)
-			if err != nil {
-				errs.Add(expr.WrapError(err))
-			}
-
-			for i := range expr.Args {
-				arg, err := c.resolveExpressionTypes(expr.Args[i], TypeKind(impl.shape[i]))
-				if err != nil {
-					errs.Add(expr.WrapError(err))
-				}
-
-				expr.Args[i] = arg
-			}
-
-			return &BuiltinExpression{
-				Builtin: ftype.symbol,
-				Args:    expr.Args,
-
-				Position: expr.Position,
-			}, nil
+			return ftype.symbol.CallExpression(c, expr)
 		default:
 			return expr, expr.WrapError(fmt.Errorf("cannot call non-function type %v", fExpr.Type()))
 		}
