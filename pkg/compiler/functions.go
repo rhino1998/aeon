@@ -16,6 +16,8 @@ type Function struct {
 	ret        Type
 	body       []Statement
 
+	parser.Position
+
 	symbols *SymbolScope
 
 	bytecode BytecodeSnippet
@@ -79,6 +81,8 @@ func (f *Function) withPointerReceiver() *Function {
 		receiver:   ptrReceiver,
 		parameters: newParams,
 		ret:        f.ret,
+
+		Position: f.Position,
 	}
 
 	ptrF.body = append(ptrF.body,
@@ -91,12 +95,17 @@ func (f *Function) withPointerReceiver() *Function {
 						Expression: &SymbolReferenceExpression{
 							scope: symbols,
 							name:  ptrReceiver.name,
+
+							Position: f.Position,
 						},
 					},
-					Key: f.name,
+					Key:      f.name,
+					Position: f.Position,
 				},
-				Args: newArgs,
+				Args:     newArgs,
+				Position: f.Position,
 			},
+			Position: f.Position,
 		},
 	)
 

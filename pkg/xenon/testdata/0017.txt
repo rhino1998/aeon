@@ -1,0 +1,37 @@
+package main
+
+extern func print(string)
+
+extern func itoa(int) string
+
+type X int
+
+func (x *X) incr() X {
+  *x++
+  return *x
+}
+
+#init
+func main() {
+  parts := [...]string{
+    "a",
+    "b",
+    "c",
+    "d",
+    "e",
+    "f",
+  }
+
+
+  var str string
+  for i := 0; i < len(parts); i++ {
+    str += parts[i]
+    if i < len(parts)-1 {
+      str += ", "
+    }
+  }
+
+  print(str)
+}
+---
+a, b, c, d, e, f

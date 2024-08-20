@@ -1,0 +1,20 @@
+package main
+
+extern func print(string)
+
+extern func itoa(int) string
+
+#init
+func main() {
+  var a any = 5
+  a = "hello"
+  a = true
+  a = 3.4
+
+  a = any(3)
+  a = interface{}(true)
+
+  var y int
+  a = &y
+}
+---

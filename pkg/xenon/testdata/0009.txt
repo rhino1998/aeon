@@ -6,11 +6,18 @@ extern func itoa(int) string
 
 #init
 func main() {
-  print(itoa(f(1,2)))
-}
-
-func f(a,b int) int {
-  return a+b
+  for i := 0; i < 10; i++ {
+    print(itoa(i))
+  }
 }
 ---
+0
+1
+2
 3
+4
+5
+6
+7
+8
+9

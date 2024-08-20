@@ -4,13 +4,16 @@ extern func print(string)
 
 extern func itoa(int) string
 
+type X int
+
 #init
 func main() {
-  print(itoa(f(1,2)))
-}
+  var x X = 5
+  x = 10
 
-func f(a,b int) int {
-  return a+b
+  x += 3
+
+  print(itoa(int(x)))
 }
 ---
-3
+13

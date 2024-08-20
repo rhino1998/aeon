@@ -3,7 +3,6 @@ package compiler
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/parser"
@@ -63,9 +62,9 @@ func (prog *Program) compileBytecode(ctx context.Context) error {
 
 	prog.bytecode.OptimizeOperands()
 
-	for i, bc := range prog.bytecode {
-		log.Printf("%02x: %v", i, bc)
-	}
+	// for i, bc := range prog.bytecode {
+	// 	log.Printf("%02x: %v", i, bc)
+	// }
 
 	return nil
 }
@@ -268,9 +267,7 @@ func (pkg *Package) compileVarInit(ctx context.Context, scope *ValueScope) (*Fun
 		}
 	}
 
-	log.Println(scope.variables)
-
-	f.bytecode.Add(Return{})
+	f.bytecode.Add(Ret{})
 
 	numLocals.Value = Int(*scope.maxLocal)
 
@@ -333,7 +330,7 @@ func (f *Function) compileBytecode(ctx context.Context, scope *ValueScope) error
 
 	// implicit return at end of void functions
 	if _, ok := last.(*ReturnStatement); !ok && f.Return() == TypeVoid {
-		f.bytecode.Add(Return{Args: argReturnSize})
+		f.bytecode.Add(Ret{Args: argReturnSize})
 	}
 
 	// Can resolve here for debugging
@@ -644,7 +641,7 @@ func (prog *Program) compileBCStatement(ctx context.Context, stmt Statement, sco
 			}
 		}
 
-		bc.Add(Return{
+		bc.Add(Ret{
 			Args: offset,
 		})
 
@@ -1028,7 +1025,6 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 			recvVar := callScope.newArg("__recv", 0, ftype.Receiver)
 
-			log.Println(ftype.Return)
 			if ftype.Return.Size() > 0 {
 				bc.Mov(scope.SP(), scope.SP().AddConst(ftype.Return.Size()))
 			}
@@ -1057,17 +1053,22 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 				bc.Mov(scope.SP(), scope.SP().AddConst(arg.Type().Size()))
 			}
 
-			bc.Add(Call{
+			bc.Add(Cal{
 				Func: callLoc.Operand,
 			})
 
-			if retVar.Type.Size() > 0 {
+			if retVar.Type.Size() > 0 && !retVar.SameMemory(dst) {
 				bc.Mov(dst, retVar)
 			}
 
 			return bc, dst, nil
 		case *TypeType:
-			if ftype.Type.Kind() == expr.Args[0].Type().Kind() {
+			if expr.Args[0].Type().Kind() == KindUnknown {
+				return nil, nil, expr.WrapError(fmt.Errorf("cannot convert unknown type to %s", ftype.Type))
+			}
+
+			switch ftype.Type.Kind() {
+			case expr.Args[0].Type().Kind():
 				argsBC, argsLoc, err := prog.compileBCExpression(ctx, expr.Args[0], scope, dst)
 				if err != nil {
 					return nil, nil, err
@@ -1077,9 +1078,9 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 				// basic type conversions are no-ops
 				return bc, argsLoc, nil
+			default:
+				return nil, nil, expr.WrapError(fmt.Errorf("type conversions not yet implemented"))
 			}
-			// TODO
-			return nil, nil, expr.WrapError(fmt.Errorf("type conversions not yet implemented"))
 		default:
 			return nil, nil, expr.WrapError(fmt.Errorf("cannot call non-function type %v", ftype))
 		}

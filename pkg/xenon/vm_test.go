@@ -18,7 +18,7 @@ import (
 const MemPages = 10
 const Registers = 16
 
-func TestXenon(t *testing.T) {
+func TestRuntime(t *testing.T) {
 	ctx := context.Background()
 	t.Parallel()
 
@@ -29,7 +29,8 @@ func TestXenon(t *testing.T) {
 	}
 
 	for _, testFile := range testFiles {
-		t.Run(testFile, func(t *testing.T) {
+		name := strings.Split(testFile, ".")[0]
+		t.Run(name, func(t *testing.T) {
 			r := require.New(t)
 			logger := slogt.New(t)
 			c, err := compiler.New(logger, compiler.Config{})

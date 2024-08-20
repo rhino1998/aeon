@@ -11,15 +11,13 @@ type iface interface {
 type A int
 
 func (a A) l() {
-  print("A")
-  print(itoa(int(a)))
+  print("A" + itoa(int(a)))
 }
 
 type B [1]int
 
 func (b B) l() {
-  print("B")
-  print(itoa(b[0]))
+  print("B" + itoa(b[0]))
 }
 
 type C struct {
@@ -27,23 +25,20 @@ type C struct {
 }
 
 func (c C) l() {
-  print("C")
-  print(itoa(c.X))
+  print("C" + itoa(c.X))
 }
 
 type D (int,)
 
 func (d D) l() {
-  print("d")
-  print(itoa(int(d.0)))
+  print("D" + itoa(int(d.0)))
 }
 
 
 type E int
 
 func (e *E) l() {
-  print("E")
-  print(itoa(int(*e)))
+  print("E"+itoa(int(*e)))
 }
 
 type F func()
@@ -53,22 +48,19 @@ func (f F) l() {
 }
 
 func fImpl() {
-  print("F")
-  print("6")
+  print("F6")
 }
 
 type G ()
 
 func (g G) l() {
-  print("G")
-  print("7")
+  print("G7")
 }
 
 type H int
 
 func (h H) l() {
-	print("H")
-	print(itoa(int(h)))
+	print("H" + itoa(int(h)))
 }
 
 #init
@@ -78,9 +70,6 @@ func f2() {
 	var h H = 8
 
 	assert(1==1, "example text here")
-
-  h2 := new(H)
-  *h2 = 9
 
   c.X = 3
   x := [...]iface{
@@ -92,7 +81,6 @@ func f2() {
     F(fImpl),
     G(()),
 		&h,
-    h2,
   }
 
   q := interface{}(2)
@@ -101,19 +89,12 @@ func f2() {
     x[i].l()
   }
 }
-
-type X struct {
-  a int
-  b float
-  c string
-  d bool
-}
-
-#init
-func main() {
-  x := new(X)
-  assert(x.a == 0)
-  assert(x.b == 0)
-  assert(x.c == "")
-  assert(x.d == false)
-}
+---
+A1
+B2
+C3
+D4
+E5
+F6
+G7
+H8

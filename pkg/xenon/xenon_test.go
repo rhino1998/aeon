@@ -1,11 +1,15 @@
 package xenon_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
-	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/neilotoole/slogt"
@@ -14,7 +18,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRuntime(t *testing.T) {
+func runXenoncode(ctx context.Context, t *testing.T, dir string, w io.Writer) error {
+	compile := exec.CommandContext(ctx, "xenoncode", "-compile", dir)
+	err := compile.Run()
+	if err != nil {
+		return err
+	}
+
+	run := exec.CommandContext(ctx, "xenoncode", "-run", dir)
+	out, err := run.StdoutPipe()
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		scanner := bufio.NewScanner(out)
+		for scanner.Scan() {
+			line := scanner.Bytes()
+			if bytes.HasPrefix(line, []byte("debug: ")) {
+				t.Log(string(line[7:]))
+			} else {
+				_, _ = w.Write(line)
+				_, _ = w.Write([]byte("\n"))
+			}
+		}
+	}()
+
+	return run.Run()
+}
+
+func TestXenonCode(t *testing.T) {
 	ctx := context.Background()
 	t.Parallel()
 
@@ -24,11 +57,9 @@ func TestRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// TODO: wrap xenoncode compiler
-	return
-
 	for _, testFile := range testFiles {
-		t.Run(testFile, func(t *testing.T) {
+		name := strings.Split(testFile, ".")[0]
+		t.Run(name, func(t *testing.T) {
 			r := require.New(t)
 			logger := slogt.New(t)
 			c, err := compiler.New(logger, compiler.Config{})
@@ -39,37 +70,31 @@ func TestRuntime(t *testing.T) {
 
 			parts := bytes.SplitN(testData, []byte("\n---\n"), 2)
 			source := bytes.TrimSpace(parts[0])
-			expected := bytes.TrimSpace(parts[1])
+			expected := strings.TrimSpace(string(parts[1]))
 
 			var output bytes.Buffer
-
-			externs := xenon.DefaultExternFuncs()
-			externs["print"] = xenon.RuntimeExternFuncEntry{
-				ArgSize:    1,
-				ReturnSize: 0,
-				Func: func(r *xenon.Runtime, s []float64) float64 {
-					str, err := r.LoadString(xenon.Addr(s[0]))
-					if err != nil {
-						panic(err)
-					}
-					fmt.Fprintln(&output, string(str))
-					return 0
-				},
-			}
 
 			c.AddFile(testFile, bytes.NewReader(source))
 
 			prog, err := c.Compile(ctx)
 			r.NoError(err)
 
-			runtime, err := xenon.NewRuntime(prog, externs, MemPages, Registers, false)
+			tmpDir := t.TempDir()
+			tmpFilename := filepath.Join(tmpDir, "main.xc")
+			tmpFile, err := os.Create(tmpFilename)
 			r.NoError(err)
 
-			err = runtime.Run(ctx)
+			err = xenon.EmitXenonCode(tmpFile, prog, true)
 			r.NoError(err)
 
-			result := output.Bytes()
-			result = bytes.TrimSpace(result)
+			err = tmpFile.Close()
+			r.NoError(err)
+
+			err = runXenoncode(ctx, t, tmpDir, &output)
+			r.NoError(err)
+
+			result := string(output.Bytes())
+			result = strings.TrimSpace(result)
 			r.Equal(expected, result)
 		})
 	}

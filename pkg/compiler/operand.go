@@ -1,6 +1,9 @@
 package compiler
 
-import "fmt"
+import (
+	"fmt"
+	"reflect"
+)
 
 type OperandKind int
 
@@ -257,6 +260,11 @@ func (o *Operand) Bound(bound *Operand) *Operand {
 			Right: bound,
 		},
 	}
+}
+
+func (o *Operand) Equal(b *Operand) bool {
+	// TODO: non-reflect
+	return reflect.DeepEqual(o, b)
 }
 
 func ImmediateOperand(imm Immediate) *Operand {

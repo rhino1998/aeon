@@ -128,7 +128,9 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 
 	xeCtx.Code = make(map[PageAddr]string)
 
-	log.Printf("Program BC:%d PageSize:%d", len(prog.Bytecode()), xeCtx.PageSize)
+	if debug {
+		log.Printf("Program BC:%d PageSize:%d", len(prog.Bytecode()), xeCtx.PageSize)
+	}
 
 	for _, extern := range prog.ExternFuncs() {
 		ftype := extern.Type().(*compiler.FunctionType)
@@ -166,7 +168,9 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 		page := i / xeCtx.PageSize
 		pageAddr := i % xeCtx.PageSize
 
-		log.Printf("%d:%d:%s", page, pageAddr, bc)
+		if debug {
+			log.Printf("%d:%d:%s", page, pageAddr, bc)
+		}
 		xeCtx.Code[PageAddr{
 			Page: page,
 			Addr: pageAddr}] = string(bcBytes)
@@ -209,6 +213,13 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 
 		fmt.Fprintf(w, "%s", x.OPSep)
 		err = x.marshalOperand(w, bc.Src)
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Size))
+	case compiler.Alc:
+		err := x.marshalOperand(w, bc.Dst)
 		if err != nil {
 			return err
 		}
@@ -257,7 +268,7 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 		if err != nil {
 			return err
 		}
-	case compiler.Return:
+	case compiler.Ret:
 		fmt.Fprintf(w, "%d", int(bc.Args))
 	case compiler.Str:
 		err := x.marshalOperand(w, bc.Dst)
@@ -265,7 +276,7 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 			return err
 		}
 		fmt.Fprintf(w, "%s%s", x.OPSep, string(bc.Str))
-	case compiler.Call:
+	case compiler.Cal:
 		err := x.marshalOperand(w, bc.Func)
 		if err != nil {
 			return err

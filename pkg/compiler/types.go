@@ -67,6 +67,12 @@ func (v nilValue) Location(vs *ValueScope) *Location {
 }
 
 func IsValidMethodReceiverType(t Type) bool {
+	switch t.Kind() {
+	case KindInterface, KindVoid, KindNil, KindUnknown:
+		return false
+	default:
+	}
+
 	switch t := dereferenceType(t).(type) {
 	case *DerivedType:
 		return true
@@ -75,6 +81,7 @@ func IsValidMethodReceiverType(t Type) bool {
 		case *DerivedType:
 			return true
 		}
+
 	}
 
 	return false
@@ -629,7 +636,7 @@ func TypeMethod(typ Type, name string) (*Function, bool) {
 	case *PointerType:
 		switch typ := dereferenceType(typ.pointee).(type) {
 		case *DerivedType:
-			if typ.Methods(false).Has(name) {
+			if typ.Methods(true).Has(name) {
 				return typ.Method(name, true), true
 			}
 
@@ -1005,6 +1012,15 @@ func (f StructField) IsExported() bool {
 
 type InterfaceType struct {
 	methods MethodSet
+}
+
+func NewInterfaceType() *InterfaceType {
+	return &InterfaceType{}
+}
+
+func (t *InterfaceType) With(name string, params []Type, ret Type) *InterfaceType {
+	t.methods.Add(name, TypeVoid, params, ret)
+	return t
 }
 
 func (t *InterfaceType) String() string {

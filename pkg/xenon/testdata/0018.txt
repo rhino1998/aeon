@@ -1,0 +1,29 @@
+package main
+
+extern func print(string)
+
+extern func itoa(int) string
+
+type X int
+
+func (x *X) incr() X {
+  *x++
+  return *x
+}
+
+#init
+func main() {
+  n := 20
+
+  var str string
+  for i := 0; i < n; i++ {
+    str += itoa(i)
+    if i < n-1 {
+      str += ", "
+    }
+  }
+
+  print(str)
+}
+---
+0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19

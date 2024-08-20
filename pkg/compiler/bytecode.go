@@ -34,6 +34,13 @@ func newLabel() Label {
 	return Label(fmt.Sprintf("%d", labelIndex))
 }
 
+func (s *BytecodeSnippet) Alloc(dst *Location) {
+	*s = append(*s, Alc{
+		Dst:  dst.Operand,
+		Size: resolveType(dst.Type).(*PointerType).Pointee().Size(),
+	})
+}
+
 func (s *BytecodeSnippet) Str(dst *Location, str String) {
 	*s = append(*s, Str{
 		Dst: dst.Operand,
@@ -119,8 +126,8 @@ type bytecodeWalker struct {
 	BinOp  func(int, BinOp) (Bytecode, error)
 	UnOp   func(int, UnOp) (Bytecode, error)
 	Str    func(int, Str) (Bytecode, error)
-	Call   func(int, Call) (Bytecode, error)
-	Return func(int, Return) (Bytecode, error)
+	Call   func(int, Cal) (Bytecode, error)
+	Return func(int, Ret) (Bytecode, error)
 }
 
 func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalker {
@@ -201,7 +208,7 @@ func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalk
 
 			return bc, nil
 		},
-		Call: func(index int, bc Call) (Bytecode, error) {
+		Call: func(index int, bc Cal) (Bytecode, error) {
 			var err error
 			bc.Func, err = bc.Func.walk(wi(index))
 			if err != nil {
@@ -210,7 +217,7 @@ func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalk
 
 			return bc, nil
 		},
-		Return: func(index int, bc Return) (Bytecode, error) {
+		Return: func(index int, bc Ret) (Bytecode, error) {
 			return bc, nil
 		},
 	}
@@ -245,16 +252,17 @@ func (s BytecodeSnippet) walk(w bytecodeWalker) error {
 				continue
 			}
 			s[i], err = w.Str(i, bc)
-		case Call:
+		case Cal:
 			if w.Str == nil {
 				continue
 			}
 			s[i], err = w.Call(i, bc)
-		case Return:
+		case Ret:
 			if w.Str == nil {
 				continue
 			}
 			s[i], err = w.Return(i, bc)
+		case Alc:
 		default:
 			return fmt.Errorf("unhandled bytecode type %T", bc)
 		}
@@ -522,7 +530,7 @@ func (o UnOp) Name() string {
 }
 
 func (o UnOp) String() string {
-	return fmt.Sprintf("unOp(%s) %v = %v %v", o.Op, o.Dst, o.Op, o.Src)
+	return fmt.Sprintf("UnOp(%s) %v = %v %v", o.Op, o.Dst, o.Op, o.Src)
 }
 
 type BinOp struct {
@@ -540,27 +548,27 @@ func (o BinOp) String() string {
 	return fmt.Sprintf("BinOp(%s) %v = %v %v %v", o.Op, o.Dst, o.Left, o.Op, o.Right)
 }
 
-type Return struct {
+type Ret struct {
 	Args Size `xc:"s"`
 }
 
-func (r Return) Name() string {
+func (r Ret) Name() string {
 	return "ret"
 }
 
-func (r Return) String() string {
+func (r Ret) String() string {
 	return fmt.Sprintf("RET(%s)", r.Args)
 }
 
-type Call struct {
+type Cal struct {
 	Func *Operand `xc:"f"`
 }
 
-func (c Call) String() string {
+func (c Cal) String() string {
 	return fmt.Sprintf("CAL %s", c.Func)
 }
 
-func (c Call) Name() string {
+func (c Cal) Name() string {
 	return "cal"
 }
 
@@ -613,4 +621,17 @@ func (s Str) Name() string {
 
 func (s Str) String() string {
 	return fmt.Sprintf("STR %v = %q", s.Dst, s.Str)
+}
+
+type Alc struct {
+	Dst  *Operand
+	Size Size
+}
+
+func (a Alc) Name() string {
+	return "alc"
+}
+
+func (a Alc) String() string {
+	return fmt.Sprintf("ALC(%v) %v", a.Size, a.Dst)
 }

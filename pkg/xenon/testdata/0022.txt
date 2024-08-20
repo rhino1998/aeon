@@ -1,0 +1,22 @@
+package main
+
+extern func print(string)
+
+extern func itoa(int) string
+
+type X struct {
+  a int
+  b float
+  c string
+  d bool
+}
+
+#init
+func main() {
+  x := new(X)
+  assert(x.a == 0)
+  assert(x.b == 0)
+  assert(x.c == "")
+  assert(x.d == false)
+}
+---

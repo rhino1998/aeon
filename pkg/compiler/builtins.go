@@ -13,7 +13,8 @@ var (
 	TypeString          = NewDerivedType("string", nil, TypeKind(KindString))
 	TypeBool            = NewDerivedType("bool", nil, TypeKind(KindBool))
 	TypeFloat           = NewDerivedType("float", nil, TypeKind(KindFloat))
-	TypeAny             = NewDerivedType("any", nil, &InterfaceType{})
+	TypeAny             = NewDerivedType("any", nil, NewInterfaceType())
+	TypeError           = NewDerivedType("error", nil, NewInterfaceType().With("Error", nil, TypeString))
 	BuiltinExternAssert = &ExternFunction{
 		name: "__builtin_assert",
 		parameters: []Type{
@@ -39,15 +40,17 @@ var (
 			{
 				shape:   []Kind{KindArray},
 				compile: builtinImplArrayLen(),
-				ret:     TypeInt},
+				ret:     func([]Expression) Type { return TypeInt },
+			},
 			{
 				shape:   []Kind{KindSlice},
 				compile: builtinImplUnimp(),
-				ret:     TypeInt},
+				ret:     func([]Expression) Type { return TypeInt },
+			},
 			{
 				shape:   []Kind{KindMap},
 				compile: builtinImplUnimp(),
-				ret:     TypeInt,
+				ret:     func([]Expression) Type { return TypeInt },
 			},
 		},
 	}
@@ -57,12 +60,27 @@ var (
 			{
 				shape:   []Kind{KindBool},
 				compile: builtinImplAssert1,
-				ret:     TypeVoid,
+				ret:     func([]Expression) Type { return TypeVoid },
 			},
 			{
 				shape:   []Kind{KindBool, KindString},
 				compile: builtinImplExtern(BuiltinExternAssert),
-				ret:     TypeVoid,
+				ret:     func([]Expression) Type { return TypeVoid },
+			},
+		},
+	}
+	BuiltinNew = &BuiltinSymbol{
+		name: "new",
+		impls: []builtinImpl{
+			{
+				shape:   []Kind{KindType},
+				compile: builtinImplNew,
+				ret: func(args []Expression) Type {
+					if args[0].Type().Kind() != KindType {
+						return UnknownType
+					}
+					return NewPointerType(dereferenceType(args[0].Type()).(*TypeType).Type)
+				},
 			},
 		},
 	}
@@ -71,7 +89,7 @@ var (
 type builtinImpl struct {
 	shape   []Kind
 	compile builtinImplFunc
-	ret     Type
+	ret     func(args []Expression) Type
 }
 
 type builtinImplFunc func(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error)
@@ -119,6 +137,16 @@ func builtinImplAssert1(ctx context.Context, prog *Program, pos parser.Position,
 	return builtinImplExtern(BuiltinExternAssert)(ctx, prog, pos, args, scope, dst)
 }
 
+func builtinImplNew(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+	var bc BytecodeSnippet
+	if args[0].Type().Kind() != KindType {
+		return nil, nil, pos.WrapError(fmt.Errorf("builtin new expects a type, got value expression %q", args[0]))
+	}
+
+	bc.Alloc(dst)
+	return bc, dst, nil
+}
+
 func builtinImplUnimp() builtinImplFunc {
 	return func(ctx context.Context, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
 		return nil, nil, pos.WrapError(fmt.Errorf("builtin currently unimplemented"))
@@ -133,10 +161,12 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(TypeString)
 	s.put(TypeFloat)
 	s.put(TypeAny)
+	s.put(TypeError)
 	s.put(Nil)
 	s.put(BuiltinLen)
 	s.put(BuiltinAssert)
 	s.put(BuiltinExternAssert)
+	s.put(BuiltinNew)
 
 	return s
 }
@@ -227,5 +257,5 @@ func (e *BuiltinExpression) Type() Type {
 		return UnknownType
 	}
 
-	return impl.ret
+	return impl.ret(e.Args)
 }

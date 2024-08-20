@@ -108,6 +108,8 @@ type Runtime struct {
 	debug bool
 
 	codePages [][PageSize]compiler.Bytecode
+	heapStart Addr
+	heapIndex Addr
 
 	registers []float64
 
@@ -119,6 +121,8 @@ type Runtime struct {
 }
 
 func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, strPages int, debug bool) (*Runtime, error) {
+	heapStart := Addr(memPages * PageSize / 2)
+
 	r := &Runtime{
 		prog:        prog,
 		externFuncs: externs,
@@ -130,11 +134,13 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		strPages:  make([][PageSize]String, strPages),
 		registers: make([]float64, prog.Registers()),
 
+		heapStart: heapStart,
+		heapIndex: heapStart,
+
 		vtables: make(map[int]map[string]float64),
 	}
 
 	for i, str := range prog.Strings() {
-		log.Printf("%02d: %s", i, str)
 		page, pageAddr := r.splitAddr(compiler.Addr(i))
 		r.strPages[page][pageAddr] = str
 		r.strIndex++
@@ -147,7 +153,9 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 	for typeID, typ := range prog.Types() {
 		r.vtables[typeID] = make(map[string]float64)
-		log.Printf("type %v: %d", typ, typeID)
+		if debug {
+			log.Printf("type %v: %d", typ, typeID)
+		}
 		r.vtables[typeID]["#size"] = float64(typ.Size())
 		r.vtables[typeID]["#kind"] = float64(typ.Kind())
 		switch typ := typ.(type) {
@@ -208,11 +216,11 @@ func (r *Runtime) fetch(addr compiler.Addr) (compiler.Bytecode, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.codePages)) {
-		return nil, fmt.Errorf("invalid code page 0x%08x for addr %s", page, addr)
+		return nil, fmt.Errorf("invalid code page %v for addr %v", page, addr)
 	}
 
 	if pageAddr >= uint64(len(r.codePages[page])) {
-		return nil, fmt.Errorf("invalid code page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, addr)
+		return nil, fmt.Errorf("invalid code page addr %v in page %v for addr %v", pageAddr, page, addr)
 	}
 
 	return r.codePages[page][pageAddr], nil
@@ -222,11 +230,11 @@ func (r *Runtime) loadAddr(addr compiler.Addr) (float64, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
-		return 0, fmt.Errorf("invalid page 0x%08x for addr 0x%08x", page, addr)
+		return 0, fmt.Errorf("invalid page %v for addr %v", page, addr)
 	}
 
 	if pageAddr >= uint64(len(r.memPages[page])) {
-		return 0, fmt.Errorf("invalid page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, addr)
+		return 0, fmt.Errorf("invalid page addr %v in page %v for addr %v", pageAddr, page, addr)
 	}
 
 	return r.memPages[page][pageAddr], nil
@@ -236,11 +244,11 @@ func (r *Runtime) LoadString(addr compiler.Addr) (String, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.strPages)) {
-		return "", fmt.Errorf("invalid str page 0x%08x for addr 0x%08x", page, addr)
+		return "", fmt.Errorf("invalid str page %v for addr %v", page, addr)
 	}
 
 	if pageAddr >= uint64(len(r.strPages[page])) {
-		return "", fmt.Errorf("invalid str page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, addr)
+		return "", fmt.Errorf("invalid str page addr %v in page %v for addr %v", pageAddr, page, addr)
 	}
 
 	return r.strPages[page][pageAddr], nil
@@ -260,19 +268,18 @@ func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]float64, error) {
 	return args, nil
 }
 
-func (env *Runtime) storeAddr(addr compiler.Addr, val float64) error {
-	page := addr / 65536
-	pageAddr := addr % 65536
+func (r *Runtime) storeAddr(addr compiler.Addr, val float64) error {
+	page, pageAddr := r.splitAddr(addr)
 
-	if page >= compiler.Addr(len(env.memPages)) {
-		return fmt.Errorf("invalid page 0x%08x for addr 0x%08x", page, addr)
+	if page >= uint64(len(r.memPages)) {
+		return fmt.Errorf("invalid page %v for addr %v", page, addr)
 	}
 
-	if pageAddr >= compiler.Addr(len(env.memPages[page])) {
-		return fmt.Errorf("invalid page addr 0x%08x in page 0x%08x for addr 0x%08x", pageAddr, page, addr)
+	if pageAddr >= uint64(len(r.memPages[page])) {
+		return fmt.Errorf("invalid page addr %v in page %v for addr %v", pageAddr, page, addr)
 	}
 
-	env.memPages[page][pageAddr] = val
+	r.memPages[page][pageAddr] = val
 
 	return nil
 }
@@ -308,6 +315,18 @@ func (r *Runtime) allocStr(val String) (Addr, error) {
 	r.strPages[page][pageAddr] = val
 
 	return r.strIndex, nil
+}
+
+func (r *Runtime) alloc(size Size) (Addr, error) {
+	addr := r.heapIndex
+	r.heapIndex += Addr(size)
+	if r.heapIndex > Addr(len(r.memPages)*PageSize) {
+		return 0, fmt.Errorf("out of memory")
+	}
+
+	// TODO: garbage collection
+
+	return addr, nil
 }
 
 func (env *Runtime) push(val float64) error {
@@ -606,7 +625,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 					return err
 				}
 			}
-		case compiler.Call:
+		case compiler.Cal:
 			funcInfoAddr, err := r.load(code.Func)()
 			if err != nil {
 				return fmt.Errorf("could not resolve function info: %w", err)
@@ -681,7 +700,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			default:
 				return fmt.Errorf("unhandled function type %d", int(funcType))
 			}
-		case compiler.Return:
+		case compiler.Ret:
 			fp := r.fp()
 
 			for reg := range r.registers {
@@ -739,6 +758,16 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			)
 		case compiler.Str:
 			addr, err := r.allocStr(code.Str)
+			if err != nil {
+				return err
+			}
+
+			err = r.store(code.Dst)(float64(addr), nil)
+			if err != nil {
+				return err
+			}
+		case compiler.Alc:
+			addr, err := r.alloc(code.Size)
 			if err != nil {
 				return err
 			}

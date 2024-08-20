@@ -77,6 +77,20 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 		err = errs.Defer(err)
 	}()
 
+	if f.Receiver() != nil && f.Receiver().Type().Kind() == KindUnknown {
+		errs.Add(f.WrapError(fmt.Errorf("function %q has unknown receiver %q of type %s", f.Name(), f.Receiver().Name(), f.Receiver().Type())))
+	}
+
+	for _, param := range f.Parameters() {
+		if param.Type().Kind() == KindUnknown {
+			errs.Add(f.WrapError(fmt.Errorf("function %q has unknown parameter %q of type %s", f.Name(), param.Name(), param.Type())))
+		}
+	}
+
+	if f.Return().Kind() == KindUnknown {
+		errs.Add(f.WrapError(fmt.Errorf("function %q has unknown return type %s", f.Name(), f.Return())))
+	}
+
 	for _, stmt := range f.Body() {
 		err := c.resolveStatementTypes(stmt)
 		if err != nil {
@@ -175,7 +189,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			}
 
 			if !IsAssignableTo(expr.Type(), stmt.Type) {
-				errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable %q of type %v", expr.Type(), stmt.Variable.Name, stmt.Type)))
+				errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable %q of type %v", expr.Type(), stmt.Variable.Name(), stmt.Type)))
 			}
 
 			if stmt.Type.Kind() == KindInterface && expr.Type().Kind() != KindInterface {
@@ -693,6 +707,12 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		default:
 			return expr, expr.WrapError(fmt.Errorf("unhandled literal type %T", val))
 		}
+	case *TypeExpression:
+		if expr.typ.Kind() == KindUnknown {
+			errs.Add(fmt.Errorf("type expression %s is unknown", expr.typ))
+		}
+
+		return expr, nil
 	case *SymbolReferenceExpression:
 		sym := expr.Dereference()
 
@@ -738,12 +758,17 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			errs.Add(err)
 		}
 
+		log.Println(expr.Right.Type())
+		log.Println(left.Type())
+
 		expr.Left = left
 
 		right, err := c.resolveExpressionTypes(expr.Right, expr.Left.Type())
 		if err != nil {
 			errs.Add(err)
 		}
+
+		log.Println(right.Type())
 
 		expr.Right = right
 
@@ -809,7 +834,6 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 					errs.Add(err)
 				}
 
-				log.Println(arg.Type(), ftype.Parameters[i])
 				if !IsAssignableTo(arg.Type(), ftype.Parameters[i]) {
 					errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in argument %d in function call", arg.Type(), ftype.Parameters[i], i)))
 				}
@@ -823,22 +847,44 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				errs.Add(expr.WrapError(fmt.Errorf("type conversion expects 1 parameter, got %d", len(expr.Args))))
 			}
 
-			arg, err := c.resolveExpressionTypes(expr.Args[0], TypeKind(ftype.Type.Kind()))
-			if err != nil {
-				errs.Add(err)
+			if ftype.Type.Kind() == KindInterface {
+				arg, err := c.resolveExpressionTypes(expr.Args[0], nil)
+				if err != nil {
+					errs.Add(err)
+				}
+
+				return &InterfaceTypeCoercionExpression{
+					Interface:  resolveType(ftype.Type).(*InterfaceType),
+					Expression: arg,
+					Position:   expr.Position,
+				}, nil
+			} else {
+				arg, err := c.resolveExpressionTypes(expr.Args[0], TypeKind(ftype.Type.Kind()))
+				if err != nil {
+					errs.Add(err)
+				}
+
+				expr.Args[0] = arg
+
+				if len(expr.Args) > 0 && !IsConvertibleTo(expr.Args[0].Type(), ftype.Type) {
+					errs.Add(expr.WrapError(fmt.Errorf("cannot convert type %v to %v", expr.Args[0].Type(), ftype.Type)))
+				}
+
+				return expr, nil
 			}
-
-			expr.Args[0] = arg
-
-			if len(expr.Args) > 0 && !IsConvertibleTo(expr.Args[0].Type(), ftype.Type) {
-				errs.Add(expr.WrapError(fmt.Errorf("cannot convert type %v to %v", expr.Args[0].Type(), ftype.Type)))
-			}
-
-			return expr, nil
 		case *BuiltinType:
-			_, err := ftype.symbol.impl(expr.Args)
+			impl, err := ftype.symbol.impl(expr.Args)
 			if err != nil {
 				errs.Add(expr.WrapError(err))
+			}
+
+			for i := range expr.Args {
+				arg, err := c.resolveExpressionTypes(expr.Args[i], TypeKind(impl.shape[i]))
+				if err != nil {
+					errs.Add(expr.WrapError(err))
+				}
+
+				expr.Args[i] = arg
 			}
 
 			return &BuiltinExpression{
@@ -1009,7 +1055,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 			}
 
 			return &BoundMethodExpression{
-				Receiver: expr,
+				Receiver: receiver,
 				Method:   method,
 
 				Position: expr.Position,

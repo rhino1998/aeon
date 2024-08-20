@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 )
 
@@ -270,6 +271,15 @@ type Location struct {
 	*Operand
 }
 
+func (l *Location) Equal(o *Location) bool {
+	// TOOD: non-reflect
+	return reflect.DeepEqual(l, o)
+}
+
+func (l *Location) SameMemory(o *Location) bool {
+	return reflect.DeepEqual(l.Type, o.Type) && l.Operand.Equal(o.Operand)
+}
+
 func (l *Location) AddConst(size Size) *Location {
 	return &Location{
 		Kind:    l.Kind,
@@ -283,7 +293,7 @@ func (l *Location) AsType(typ Type) *Location {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    l.Name,
-		Type:    typ,
+		Type:    dereferenceType(typ),
 		Operand: l.Operand,
 	}
 }
@@ -322,7 +332,7 @@ func (l *Location) IndexTuple(index int) (*Location, error) {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    fmt.Sprintf("%s.%d", l.Name, index),
-		Type:    typ.Elems()[index],
+		Type:    dereferenceType(typ.Elems()[index]),
 		Operand: l.Operand.AddressOf().ConstOffset(typ.ElemOffset(index)).Dereference(),
 	}, nil
 }
@@ -337,7 +347,7 @@ func (l *Location) IndexArrayConst(index int) (*Location, error) {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    fmt.Sprintf("%s.%d", l.Name, index),
-		Type:    typ.Elem(),
+		Type:    dereferenceType(typ.Elem()),
 		Operand: l.Operand.AddressOf().ConstOffset(typ.Elem().Size() * Size(index)).Dereference(),
 	}, nil
 }
@@ -348,7 +358,7 @@ func (l *Location) IndexArray(index *Location) (*Location, error) {
 	return &Location{
 		Kind: l.Kind,
 		Name: fmt.Sprintf("%s[%s]", l.Name, index),
-		Type: typ.Elem(),
+		Type: dereferenceType(typ.Elem()),
 		Operand: l.Operand.AddressOf().Offset(
 			index.Operand.
 				Bound(ImmediateOperand(Int(typ.Length()))).
@@ -366,7 +376,7 @@ func (l *Location) IndexSlice(index *Location) (*Location, error) {
 	return &Location{
 		Kind:    LocationKindHeap,
 		Name:    fmt.Sprintf("%s[%s]", l.Name, index.Name),
-		Type:    typ.Elem(),
+		Type:    dereferenceType(typ.Elem()),
 		Operand: l.Operand.AddressOf().ConstOffset(2).Dereference().Offset(index.Operand).Dereference(),
 	}, nil
 }
@@ -387,7 +397,7 @@ func (l *Location) IndexFieldConst(name string) (*Location, error) {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    fmt.Sprintf("%s.%s", l.Name, name),
-		Type:    field.Type,
+		Type:    dereferenceType(field.Type),
 		Operand: l.Operand.AddressOf().ConstOffset(offset).Dereference(),
 	}, nil
 }
@@ -532,7 +542,7 @@ func (vs *ValueScope) newLocal(name string, typ Type) *Location {
 	loc := &Location{
 		Kind:    LocationKindLocal,
 		Name:    name,
-		Type:    typ,
+		Type:    dereferenceType(typ),
 		Operand: OperandRegisterFP.ConstOffset(vs.nextLocal).Dereference(),
 	}
 
@@ -560,7 +570,7 @@ func (vs *ValueScope) allocTemp(typ Type) *Location {
 					return &Location{
 						Kind: LocationKindRegister,
 						Name: reg.String(),
-						Type: typ,
+						Type: dereferenceType(typ),
 						Operand: &Operand{
 							Kind:  OperandKindRegister,
 							Value: reg,

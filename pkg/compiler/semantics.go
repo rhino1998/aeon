@@ -453,6 +453,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 	}()
 
 	f := newFunction(string(decl.Name.Str), p)
+	f.Position = decl.Position
 
 	f.receiver = &Variable{
 		typ: TypeVoid,
@@ -535,6 +536,7 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 	}()
 
 	f := newFunction(string(decl.Name.Str), p)
+	f.Position = decl.Position
 
 	var recvName string
 	if decl.Receiver.Name != nil {
@@ -1138,6 +1140,17 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 			Length:   lengthLiteral,
 			ElemType: typeRef,
 			Elems:    elems,
+
+			Position: expr.Position,
+		}, nil
+	case parser.TypeExpr:
+		typ, err := c.compileTypeReference(scope, expr.Type)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		return &TypeExpression{
+			typ: typ,
 
 			Position: expr.Position,
 		}, nil

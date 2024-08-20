@@ -1,0 +1,23 @@
+package main
+
+extern func print(string)
+
+extern func itoa(int) string
+
+type X int
+
+func (x X) succ() X {
+  return x+1
+}
+
+#init
+func main() {
+  var x X = 5
+  y := x.succ()
+
+  print(itoa(int(x)))
+  print(itoa(int(y)))
+}
+---
+5
+6
