@@ -99,6 +99,10 @@ func IsAssignableTo(v, to Type) bool {
 		}
 	}
 
+	if v.Kind() == KindNil {
+		return true
+	}
+
 	if to, ok := BaseType(to).(*InterfaceType); ok {
 		return to.ImplementedBy(v)
 	}
@@ -421,6 +425,8 @@ func (k Kind) String() string {
 		return "interface"
 	case KindType:
 		return "type"
+	case KindNil:
+		return "<nil>"
 	default:
 		return "<unknown>"
 	}

@@ -175,7 +175,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			}
 
 			if !IsAssignableTo(expr.Type(), stmt.Type) {
-				errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable of type %v", expr.Type(), stmt.Type)))
+				errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable %q of type %v", expr.Type(), stmt.Variable.Name, stmt.Type)))
 			}
 
 			if stmt.Type.Kind() == KindInterface && expr.Type().Kind() != KindInterface {
@@ -245,7 +245,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 		stmt.Right = right
 
 		if !IsAssignableTo(right.Type(), left.Type()) {
-			errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable of type %v", right.Type(), left.Type())))
+			errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to %q of type %v", right.Type(), left, left.Type())))
 		}
 
 		if stmt.Left.Type().Kind() == KindInterface && stmt.Right.Type().Kind() != KindInterface {
