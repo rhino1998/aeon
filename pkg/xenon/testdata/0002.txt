@@ -1,5 +1,7 @@
 package main
 
 #init
-func main() {}
+func main() {
+	return
+}
 ---

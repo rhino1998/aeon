@@ -225,7 +225,7 @@ func (p *Package) AddImport(imp *Package) error {
 
 func (p *Package) transitiveImports(stack []*Package, maybe *Package) (_ map[string]*Package, err error) {
 	errs := newErrorSetWithWrapper(func(err error) error {
-		return fmt.Errorf("from %s: %w", p.QualifiedName())
+		return fmt.Errorf("from %s: %w", p.QualifiedName(), err)
 	})
 	defer func() {
 		err = errs.Defer(err)

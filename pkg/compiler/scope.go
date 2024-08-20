@@ -347,7 +347,7 @@ func (l *Location) IndexArray(index *Location) (*Location, error) {
 
 	return &Location{
 		Kind: l.Kind,
-		Name: fmt.Sprintf("%s.%d", l.Name, index),
+		Name: fmt.Sprintf("%s[%s]", l.Name, index),
 		Type: typ.Elem(),
 		Operand: l.Operand.AddressOf().Offset(
 			index.Operand.

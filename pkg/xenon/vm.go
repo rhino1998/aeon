@@ -28,13 +28,13 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 			ArgSize:    2,
 			ReturnSize: 0,
 			Func: func(r *Runtime, s []float64) float64 {
-				str, err := r.loadStr(Addr(s[1]))
+				str, err := r.LoadString(Addr(s[1]))
 				if err != nil {
 					panic(err)
 				}
 
 				if s[0] == 0 {
-					panic(string(str))
+					panic(fmt.Sprintf("assertion failed: %s", string(str)))
 				}
 
 				return 0
@@ -44,7 +44,7 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 			ArgSize:    1,
 			ReturnSize: 0,
 			Func: func(r *Runtime, s []float64) float64 {
-				str, err := r.loadStr(Addr(s[0]))
+				str, err := r.LoadString(Addr(s[0]))
 				if err != nil {
 					panic(err)
 				}
@@ -231,7 +231,7 @@ func (r *Runtime) loadAddr(addr compiler.Addr) (float64, error) {
 	return r.memPages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadStr(addr compiler.Addr) (String, error) {
+func (r *Runtime) LoadString(addr compiler.Addr) (String, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.strPages)) {
@@ -448,7 +448,7 @@ func (r *Runtime) loadVTable(lookup compiler.VTableLookup) loadFunc {
 			return 0, fmt.Errorf("failed to get method name addr: %w", err)
 		}
 
-		name, err := r.loadStr(Addr(nameAddr))
+		name, err := r.LoadString(Addr(nameAddr))
 		if err != nil {
 			return 0, fmt.Errorf("failed to get method name: %w", err)
 		}
@@ -458,9 +458,6 @@ func (r *Runtime) loadVTable(lookup compiler.VTableLookup) loadFunc {
 			return 0, fmt.Errorf("no such vtable entry for %d %s", int(typeID), name)
 		}
 
-		log.Printf("resolved vtable entry %d %s to %v", int(typeID), name, Addr(funAddr))
-
-		// TODO:
 		return funAddr, nil
 	})
 }
@@ -628,7 +625,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 					return fmt.Errorf("could not resolve extern function name")
 				}
 
-				externNameStr, err := r.loadStr(Addr(externName))
+				externNameStr, err := r.LoadString(Addr(externName))
 				if err != nil {
 					return fmt.Errorf("could not load extern function name string")
 				}
@@ -637,7 +634,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 				entry, ok := r.externFuncs[externNameStr]
 				if !ok {
-					return fmt.Errorf("undefined extern func %q %d", string(externNameStr), externName)
+					return fmt.Errorf("undefined extern func %q %d", string(externNameStr), int(externName))
 				}
 
 				args, err := r.loadArgs(r.sp(), entry.ArgSize)
@@ -889,12 +886,12 @@ func opAdd[T Int | Float](a, b float64) float64 {
 }
 
 func opAddStr(r *Runtime, a, b float64) (float64, error) {
-	aStr, err := r.loadStr(Addr(a))
+	aStr, err := r.LoadString(Addr(a))
 	if err != nil {
 		return 0, err
 	}
 
-	bStr, err := r.loadStr(Addr(b))
+	bStr, err := r.LoadString(Addr(b))
 	if err != nil {
 		return 0, err
 	}
@@ -961,12 +958,12 @@ func opEQ[T Int | Float | Bool](a, b float64) float64 {
 }
 
 func opEQStr(r *Runtime, a, b float64) (float64, error) {
-	aStr, err := r.loadStr(Addr(a))
+	aStr, err := r.LoadString(Addr(a))
 	if err != nil {
 		return 0, err
 	}
 
-	bStr, err := r.loadStr(Addr(b))
+	bStr, err := r.LoadString(Addr(b))
 	if err != nil {
 		return 0, err
 	}
@@ -986,12 +983,12 @@ func opNE[T Int | String | Float | Bool](a, b float64) float64 {
 }
 
 func opNEStr(r *Runtime, a, b float64) (float64, error) {
-	aStr, err := r.loadStr(Addr(a))
+	aStr, err := r.LoadString(Addr(a))
 	if err != nil {
 		return 0, err
 	}
 
-	bStr, err := r.loadStr(Addr(a))
+	bStr, err := r.LoadString(Addr(a))
 	if err != nil {
 		return 0, err
 	}

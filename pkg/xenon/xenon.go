@@ -108,6 +108,7 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 
 	for i, typ := range prog.Types() {
 		xeCtx.VTable[i] = make(map[string]int)
+		xeCtx.VTable[i]["#size"] = int(typ.Size())
 		switch typ := typ.(type) {
 		case *compiler.DerivedType:
 			for _, method := range typ.Methods(false) {

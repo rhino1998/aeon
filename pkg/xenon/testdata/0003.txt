@@ -1,0 +1,9 @@
+package main
+
+extern func print(string)
+
+#init
+func main() {
+	print("")
+}
+---

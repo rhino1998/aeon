@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/rhino1998/aeon/pkg/parser"
 )
@@ -210,6 +211,14 @@ type ExternFunction struct {
 	ret        Type
 }
 
+func NewExternFunction(name string, params []Type, ret Type) *ExternFunction {
+	return &ExternFunction{
+		name:       name,
+		parameters: params,
+		ret:        ret,
+	}
+}
+
 func (f *ExternFunction) Name() string {
 	return f.name
 }
@@ -294,4 +303,88 @@ type MethodFunctionExpression struct {
 
 func (e *MethodFunctionExpression) Type() Type {
 	return e.Function.Type().(*FunctionType).ToFunction()
+}
+
+type FunctionType struct {
+	Receiver   Type
+	Parameters []Type
+	Return     Type
+}
+
+func NewFunctionType(recv Type, parameters []Type, ret Type) *FunctionType {
+	return &FunctionType{
+		Receiver:   recv,
+		Parameters: parameters,
+		Return:     ret,
+	}
+}
+
+func (t *FunctionType) ToFunction() *FunctionType {
+	if t.Receiver == TypeVoid {
+		return t
+	}
+
+	return &FunctionType{
+		Receiver:   TypeVoid,
+		Parameters: append([]Type{t.Receiver}, t.Parameters...),
+		Return:     TypeVoid,
+	}
+}
+
+func (t *FunctionType) MethodEqual(o *FunctionType) bool {
+	if len(t.Parameters) != len(o.Parameters) {
+		return false
+	}
+
+	for i := range len(t.Parameters) {
+		if !TypesEqual(t.Parameters[i], o.Parameters[i]) {
+			return false
+		}
+	}
+
+	return TypesEqual(t.Return, o.Return)
+}
+
+func (t *FunctionType) Kind() Kind { return KindFunction }
+
+func (t *FunctionType) String() string {
+	params := make([]string, 0, len(t.Parameters))
+	for _, param := range t.Parameters {
+		params = append(params, string(param.GlobalName()))
+	}
+
+	var recvStr string
+	if t.Receiver != TypeVoid {
+		recvStr = fmt.Sprintf("(%s) ", t.Receiver)
+	}
+
+	var retStr string
+	if t.Return != TypeVoid {
+		retStr = fmt.Sprintf(" %s", t.Return)
+	}
+
+	return fmt.Sprintf("%sfunc(%s)%s", recvStr, strings.Join(params, ", "), retStr)
+}
+
+func (t *FunctionType) GlobalName() TypeName {
+	params := make([]string, 0, len(t.Parameters))
+	for _, param := range t.Parameters {
+		params = append(params, string(param.GlobalName()))
+	}
+
+	var recvStr string
+	if t.Receiver != TypeVoid {
+		recvStr = fmt.Sprintf("(%s) ", string(t.Receiver.GlobalName()))
+	}
+
+	var retStr string
+	if t.Return != TypeVoid {
+		retStr = fmt.Sprintf(" %s", string(t.Return.GlobalName()))
+	}
+
+	return TypeName(fmt.Sprintf("%sfunc(%s)%s", recvStr, strings.Join(params, ", "), retStr))
+}
+
+func (FunctionType) Size() Size {
+	return 1
 }

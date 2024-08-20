@@ -39,6 +39,11 @@ function @aeon_fatal()
 	var $x = "hello"
 	$x = $x:number
 
+function @__builtin_assert($cond:number, $msg:text)
+	if !($cond)
+		print(text("assertion failed: {}", $msg))
+		@aeon_fatal()
+
 function @aeon_trunc($a:number):number
 	if ($a > 0)
 		return floor($a)

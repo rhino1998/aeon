@@ -951,7 +951,7 @@ func (prog *Program) compileBCExpression(ctx context.Context, expr Expression, s
 
 		bc.Add(rhsBC...)
 
-		if expr.Type().Kind().IsPrimitive() && expr.Left.Type().Kind().IsPrimitive() && expr.Right.Type().Kind().IsPrimitive() {
+		if expr.Operator.CanOperand() && expr.Type().Kind().IsPrimitive() && expr.Left.Type().Kind().IsPrimitive() && expr.Right.Type().Kind().IsPrimitive() {
 			return bc, &Location{
 				Kind: LocationKindLocal,
 				Type: dst.Type,

@@ -8,6 +8,27 @@ import (
 
 type Operator string
 
+func (o Operator) CanOperand() bool {
+	switch o {
+	case OperatorAddition,
+		OperatorSubtraction,
+		OperatorBoundsCheck,
+		OperatorLessThan,
+		OperatorLessThanOrEqual,
+		OperatorEqual,
+		OperatorNotEqual,
+		OperatorGreaterThan,
+		OperatorGreaterThanOrEqual:
+		return true
+	case OperatorNot:
+		//OperatorNegate,
+		//OperatorPositive
+		return true
+	default:
+		return false
+	}
+}
+
 const (
 	OperatorExponentiation Operator = "**"
 
