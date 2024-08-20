@@ -5,6 +5,5 @@ extern func print(string)
 extern func itoa(int) string
 
 #init
-func main() {
-}
+func main() {}
 ---
