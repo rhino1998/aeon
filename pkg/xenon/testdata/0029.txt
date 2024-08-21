@@ -2,8 +2,6 @@ package main
 
 extern func itoa(a int) string
 
-extern func print(a string)
-
 #init
 func main() {
   var x []int
@@ -11,8 +9,8 @@ func main() {
     x = append(x, i)
   }
 
-  print(itoa(len(x)))
-  print(itoa(cap(x)))
+  print(len(x))
+  print(cap(x))
 }
 ---
 1000

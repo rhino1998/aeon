@@ -1,13 +1,9 @@
 package main
 
-extern func print(string)
-
-extern func itoa(int) string
-
 #init
 func main() {
   x := new(int)
-  print(itoa(*x))
+  print(*x)
 }
 ---
 0

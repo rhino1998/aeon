@@ -1,9 +1,5 @@
 package main
 
-extern func print(string)
-
-extern func itoa(int) string
-
 type X int
 
 func (x *X) incr() X {

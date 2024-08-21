@@ -3,8 +3,10 @@ package xenon
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"math"
+	"os"
 	"strings"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
@@ -41,14 +43,36 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 			},
 		},
 		"print": {
-			ArgSize:    1,
+			ArgSize:    2,
 			ReturnSize: 0,
 			Func: func(r *Runtime, s []float64) float64 {
-				str, err := r.LoadString(Addr(s[0]))
-				if err != nil {
-					panic(err)
+				kind, ok := r.vtables[int(s[0])]["#kind"]
+				if !ok {
+					panic("runtime: could not resolve kind")
 				}
-				fmt.Println(string(str))
+				switch compiler.Kind(kind) {
+				case compiler.KindNil:
+					fmt.Fprintln(r.stdout, "<nil>")
+				case compiler.KindBool:
+					if s[1] == 0 {
+						fmt.Fprintln(r.stdout, "false")
+					} else {
+						fmt.Fprintln(r.stdout, "true")
+					}
+				case compiler.KindInt:
+					fmt.Fprintf(r.stdout, "%d\n", int(s[1]))
+				case compiler.KindFloat:
+					fmt.Fprintf(r.stdout, "%f\n", s[1])
+				case compiler.KindString:
+					str, err := r.LoadString(Addr(s[1]))
+					if err != nil {
+						panic(err)
+					}
+					fmt.Fprintln(r.stdout, string(str))
+				default:
+					panic(fmt.Sprintf("unhandled kind %v", compiler.Kind(kind)))
+				}
+
 				return 0
 			},
 		},
@@ -104,6 +128,7 @@ type RuntimeExternFunc func(*Runtime, []float64) float64
 type Runtime struct {
 	prog        *compiler.Program
 	externFuncs RuntimeExternFuncs
+	stdout      io.Writer
 
 	debug bool
 
@@ -120,12 +145,13 @@ type Runtime struct {
 	vtables map[int]map[string]float64
 }
 
-func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, strPages int, debug bool) (*Runtime, error) {
+func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, strPages int, stdout io.Writer, debug bool) (*Runtime, error) {
 	heapStart := Addr(memPages * PageSize / 2)
 
 	r := &Runtime{
 		prog:        prog,
 		externFuncs: externs,
+		stdout:      stdout,
 
 		debug: debug,
 
@@ -138,6 +164,10 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		heapIndex: heapStart,
 
 		vtables: make(map[int]map[string]float64),
+	}
+
+	if stdout == nil {
+		r.stdout = os.Stdout
 	}
 
 	for i, str := range prog.Strings() {
@@ -620,8 +650,16 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			return fmt.Errorf("invalid nil bytecode: %w", err)
 		case compiler.Nop:
 		case compiler.Mov:
+			tmp := make([]float64, code.Size)
 			for i := Size(0); i < code.Size; i++ {
-				err := r.store(code.Dst.OffsetReference(i))(r.load(code.Src.OffsetReference(i))())
+				tmp[i], err = r.load(code.Src.OffsetReference(i))()
+				if err != nil {
+					return err
+				}
+			}
+
+			for i := Size(0); i < code.Size; i++ {
+				err = r.store(code.Dst.OffsetReference(i))(tmp[i], nil)
 				if err != nil {
 					return err
 				}
@@ -744,7 +782,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			err = r.store(code.Dst)(
 				binaryOp(
 					r,
-					binaryOperatorFuncs[code.Op],
+					binaryOperatorFuncs[compiler.BinaryOperation(code.Kind, code.Op, code.Kind)],
 					r.load(code.Left),
 					r.load(code.Right),
 				),
@@ -1095,8 +1133,8 @@ func opNEStr(r *Runtime, a, b float64) (float64, error) {
 
 func (r *Runtime) printRegisters() {
 	regStrs := make([]string, 0, len(r.registers))
-	for reg, regVal := range r.registers {
-		regStrs = append(regStrs, fmt.Sprintf("%v=%v", Register(reg), regVal))
+	for reg, regVal := range r.registers[3:] {
+		regStrs = append(regStrs, fmt.Sprintf("%v=%v", Register(reg), Addr(regVal)))
 	}
 
 	log.Printf("Registers: %s", strings.Join(regStrs, ", "))

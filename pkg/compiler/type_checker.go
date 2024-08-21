@@ -236,7 +236,12 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		stmt.Right = right
 
-		_, err = validateBinaryExpression(left.Type(), stmt.Operator, right.Type())
+		op, err := stmt.Operator.AssignmentToInfix()
+		if err != nil {
+			errs.Add(stmt.WrapError(err))
+		}
+
+		_, err = validateBinaryExpression(left.Type(), op, right.Type())
 		if err != nil {
 			errs.Add(stmt.WrapError(err))
 		}
@@ -276,7 +281,10 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 		}
 		stmt.Expression = expr
 
-		// TODO: validate by operator
+		_, err = validatePostfixExpression(expr.Type(), stmt.Operator)
+		if err != nil {
+			errs.Add(stmt.WrapError(err))
+		}
 
 		return nil
 	case *IfStatement:
@@ -750,6 +758,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			val, err := sym.Evaluate()
 			if err != nil {
 				errs.Add(expr.WrapError(err))
+				return expr, err
 			}
 
 			return NewLiteral(val), nil
@@ -848,7 +857,14 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 					errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in argument %d in function call", arg.Type(), ftype.Parameters[i], i)))
 				}
 
-				expr.Args[i] = arg
+				if ftype.Parameters[i].Kind() == KindInterface && arg.Type().Kind() != KindInterface {
+					expr.Args[i] = &InterfaceTypeCoercionExpression{
+						Interface:  resolveType(ftype.Parameters[i]).(*InterfaceType),
+						Expression: arg,
+					}
+				} else {
+					expr.Args[i] = arg
+				}
 			}
 
 			return expr, nil

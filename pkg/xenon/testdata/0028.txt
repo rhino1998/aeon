@@ -2,8 +2,6 @@ package main
 
 extern func itoa(a int) string
 
-extern func print(a string)
-
 #init
 func main() {
   x := make([](int,int), 0, 5)
@@ -11,7 +9,7 @@ func main() {
     x = append(x, (i, i*i))
   }
 
-  print(itoa(len(x)))
+  print(len(x))
 }
 ---
 1000

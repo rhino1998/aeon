@@ -228,7 +228,7 @@ func NewExternFunction(name string, params []Type, ret Type) *ExternFunction {
 	}
 }
 
-func (f *ExternFunction) FlattenParameters() ([]Kind, error) {
+func (f *ExternFunction) FlatParameterKinds() ([]Kind, error) {
 	var ret []Kind
 	for _, param := range f.parameters {
 		flatParam, err := f.flattenParameters(param)

@@ -1,9 +1,5 @@
 package main
 
-extern func itoa(a int) string
-
-extern func print(a string)
-
 #init
 func main() {
   x := make([](int,int), 10)
@@ -12,8 +8,8 @@ func main() {
   }
 
   for i := 0; i < len(x); i++ {
-    print(itoa(x[i].0))
-    print(itoa(x[i].1))
+    print(x[i].0)
+    print(x[i].1)
   }
 }
 ---

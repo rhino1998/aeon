@@ -80,6 +80,20 @@ func (e *SymbolReferenceExpression) Dereference() Symbol {
 	return v
 }
 
+func (e *SymbolReferenceExpression) Evaluate() (LiteralValue, error) {
+	v := e.Dereference()
+	if v == nil {
+		return nil, e.WrapError(fmt.Errorf("undefined variable %s", e.name))
+	}
+
+	vConst, ok := v.(*Constant)
+	if !ok {
+		return nil, e.WrapError(fmt.Errorf("symbol is not a constant %s", e.name))
+	}
+
+	return vConst.Evaluate()
+}
+
 type AssignmentStatement struct {
 	Left  Expression
 	Right Expression

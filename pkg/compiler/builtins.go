@@ -23,6 +23,13 @@ var (
 		},
 		ret: TypeVoid,
 	}
+	ExternPrint = &ExternFunction{
+		name: "print",
+		parameters: []Type{
+			TypeAny,
+		},
+		ret: TypeVoid,
+	}
 )
 
 var (
@@ -98,6 +105,7 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(BuiltinNew)
 	s.put(BuiltinMake)
 	s.put(BuiltinAppend)
+	s.put(ExternPrint)
 
 	return s
 }

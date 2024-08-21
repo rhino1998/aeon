@@ -56,6 +56,12 @@ type xenonContext struct {
 
 	OPSep  string
 	UOPSep string
+
+	KindNil    int
+	KindInt    int
+	KindFloat  int
+	KindBool   int
+	KindString int
 }
 
 func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Function, error) {
@@ -86,7 +92,13 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	xeCtx.UOPSep = "\x9C"
 
 	xeCtx.OPSep = "|"
-	xeCtx.UOPSep = ":"
+	xeCtx.UOPSep = ""
+
+	xeCtx.KindNil = int(compiler.KindNil)
+	xeCtx.KindInt = int(compiler.KindInt)
+	xeCtx.KindFloat = int(compiler.KindFloat)
+	xeCtx.KindBool = int(compiler.KindBool)
+	xeCtx.KindString = int(compiler.KindString)
 
 	var err error
 
@@ -109,6 +121,7 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	for i, typ := range prog.Types() {
 		xeCtx.VTable[i] = make(map[string]int)
 		xeCtx.VTable[i]["#size"] = int(typ.Size())
+		xeCtx.VTable[i]["#kind"] = int(typ.Kind())
 		switch typ := typ.(type) {
 		case *compiler.DerivedType:
 			for _, method := range typ.Methods(false) {
@@ -137,14 +150,20 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 		argTypes := make([]ArgWrapper, 0)
 		var size Size
 		size += ftype.Return.Size()
-		for _, param := range ftype.Parameters {
+
+		kinds, err := extern.FlatParameterKinds()
+		if err != nil {
+			return fmt.Errorf("failed to get flat parameter kinds: %w", err)
+		}
+
+		for _, kind := range kinds {
 			var wrapper ArgWrapper
-			if param.Kind() == compiler.KindString {
+			if kind == compiler.KindString {
 				wrapper.Prefix = "@aeon_str_load("
 				wrapper.Suffix = ")"
 			}
 
-			size += param.Size()
+			size += 1
 
 			argTypes = append(argTypes, wrapper)
 		}
@@ -252,6 +271,7 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 			return err
 		}
 
+		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Kind))
 		fmt.Fprintf(w, "%s%s", x.OPSep, bc.Op)
 
 		fmt.Fprintf(w, "%s", x.OPSep)
@@ -316,14 +336,14 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 	case compiler.OperandKindImmediate:
 		switch imm := op.Value.(type) {
 		case Int:
-			fmt.Fprintf(w, "I%v", int(imm))
+			fmt.Fprintf(w, "I%s%v", x.UOPSep, int(imm))
 		case Float:
-			fmt.Fprintf(w, "I%v", float64(imm))
+			fmt.Fprintf(w, "I%s%v", x.UOPSep, float64(imm))
 		case Bool:
 			if imm {
-				fmt.Fprintf(w, "I1")
+				fmt.Fprintf(w, "I%s1", x.UOPSep)
 			} else {
-				fmt.Fprintf(w, "I0")
+				fmt.Fprintf(w, "I%s0", x.UOPSep)
 			}
 		case String:
 			panic("BAD")
@@ -331,7 +351,7 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 
 		return nil
 	case compiler.OperandKindRegister:
-		fmt.Fprintf(w, "R%d", int(op.Value.(Register)))
+		fmt.Fprintf(w, "I%s%d%sR", x.UOPSep, int(op.Value.(Register)), x.UOPSep)
 
 		return nil
 	case compiler.OperandKindIndirect:
@@ -349,7 +369,7 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Value.(compiler.UnaryOperand).Op)
+		fmt.Fprintf(w, "%s%s", x.UOPSep, operatorChar(op.Value.(compiler.UnaryOperand).Op))
 
 		return nil
 	case compiler.OperandKindBinary:
@@ -364,7 +384,7 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Value.(compiler.BinaryOperand).Op)
+		fmt.Fprintf(w, "%s%s", x.UOPSep, operatorChar(op.Value.(compiler.BinaryOperand).Op))
 
 		return nil
 	case compiler.OperandKindVTableLookup:
@@ -384,5 +404,30 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 		return nil
 	default:
 		return fmt.Errorf("unknown operand kind %v", op.Kind)
+	}
+}
+
+func operatorChar(op compiler.Operator) string {
+	switch op {
+	case compiler.OperatorAddition,
+		compiler.OperatorSubtraction,
+		compiler.OperatorMultiplication,
+		compiler.OperatorDivision,
+		compiler.OperatorLessThan,
+		compiler.OperatorGreaterThan,
+		compiler.OperatorNot,
+		compiler.OperatorBoundsCheck,
+		compiler.OperatorModulo:
+		return string(op)
+	case compiler.OperatorEqual:
+		return "="
+	case compiler.OperatorNotEqual:
+		return "≠"
+	case compiler.OperatorLessThanOrEqual:
+		return "󰥽"
+	case compiler.OperatorGreaterThanOrEqual:
+		return "≥"
+	default:
+		return "?"
 	}
 }

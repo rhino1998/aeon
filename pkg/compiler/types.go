@@ -104,6 +104,10 @@ func IsAssignableTo(v, to Type) bool {
 		if _, ok := to.(TypeKind); ok {
 			return true
 		}
+
+		if _, ok := v.(TypeKind); ok {
+			return true
+		}
 	}
 
 	if v.Kind() == KindNil {
@@ -398,6 +402,10 @@ const (
 	KindType
 	KindBuiltin
 )
+
+func (k Kind) IsOperand() bool {
+	return k == KindBool || k == KindInt || k == KindFloat || k == KindString || k == KindPointer
+}
 
 func (k Kind) IsPrimitive() bool {
 	// TODO: maybe pointers here too

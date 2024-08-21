@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/parser"
@@ -99,6 +100,15 @@ type ParenthesizedExpression struct {
 	Expression Expression
 
 	parser.Position
+}
+
+func (e *ParenthesizedExpression) Evaluate() (LiteralValue, error) {
+	exprConst, ok := e.Expression.(ConstantExpression)
+	if !ok {
+		return nil, e.Expression.WrapError(fmt.Errorf("expression is not constant %s", e.Expression))
+	}
+
+	return exprConst.Evaluate()
 }
 
 func (e *ParenthesizedExpression) Type() Type {

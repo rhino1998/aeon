@@ -3,7 +3,6 @@ package xenon_test
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io/fs"
 	"os"
 	"strings"
@@ -46,25 +45,12 @@ func TestRuntime(t *testing.T) {
 			var output bytes.Buffer
 
 			externs := xenon.DefaultExternFuncs()
-			externs["print"] = xenon.RuntimeExternFuncEntry{
-				ArgSize:    1,
-				ReturnSize: 0,
-				Func: func(r *xenon.Runtime, s []float64) float64 {
-					str, err := r.LoadString(xenon.Addr(s[0]))
-					if err != nil {
-						panic(err)
-					}
-					fmt.Fprintln(&output, string(str))
-					return 0
-				},
-			}
-
 			c.AddFile(testFile, bytes.NewReader(source))
 
 			prog, err := c.Compile(ctx)
 			r.NoError(err)
 
-			runtime, err := xenon.NewRuntime(prog, externs, MemPages, Registers, false)
+			runtime, err := xenon.NewRuntime(prog, externs, MemPages, Registers, &output, false)
 			r.NoError(err)
 
 			err = runtime.Run(ctx)

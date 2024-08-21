@@ -465,6 +465,8 @@ func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
 	for _, typ := range symbols.DerivedTypes() {
 		types[typ.GlobalName()] = typ
 	}
+	types[NilType.GlobalName()] = NilType
+
 	strings := make(map[String]struct{})
 	strings[""] = struct{}{}
 	return &ValueScope{
@@ -588,11 +590,10 @@ func (vs *ValueScope) newLocal(name string, typ Type) *Location {
 
 	vs.variables[name] = loc
 
-	if *vs.maxLocal < vs.nextLocal {
-		*vs.maxLocal = vs.nextLocal
-	}
-
 	vs.nextLocal += Size(typ.Size())
+	if *vs.maxLocal < vs.nextLocal-1 {
+		*vs.maxLocal = vs.nextLocal - 1
+	}
 
 	return loc
 }

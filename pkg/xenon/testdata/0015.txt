@@ -1,9 +1,5 @@
 package main
 
-extern func print(string)
-
-extern func itoa(int) string
-
 type X int
 
 func (x *X) incr() X {
@@ -16,8 +12,8 @@ func main() {
   var x X = 5
   y := x.incr()
 
-  print(itoa(int(x)))
-  print(itoa(int(y)))
+  print(x)
+  print(y)
 }
 ---
 6

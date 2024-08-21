@@ -208,7 +208,7 @@ func main() {
 						os.Exit(1)
 					}
 
-					runtime, err := xenon.NewRuntime(prog, xenon.DefaultExternFuncs(), 10, 10, c.Bool("debug"))
+					runtime, err := xenon.NewRuntime(prog, xenon.DefaultExternFuncs(), 10, 10, nil, c.Bool("debug"))
 					if err != nil {
 						return err
 					}

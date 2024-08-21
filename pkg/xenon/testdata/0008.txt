@@ -1,12 +1,8 @@
 package main
 
-extern func print(string)
-
-extern func itoa(int) string
-
 #init
 func main() {
-  print(itoa(f(1,2)))
+  print(f(1,2))
 }
 
 func f(a,b int) int {

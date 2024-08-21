@@ -396,10 +396,12 @@ func (s *BytecodeSnippet) JumpAfter(label Label, cond *Operand) {
 
 func (s *BytecodeSnippet) BinOp(dst *Location, left *Location, operator Operator, right *Location) {
 	s.Add(BinOp{
-		Op:    BinaryOperation(left.Type.Kind(), operator, right.Type.Kind()),
+		Op:    operator,
+		Kind:  left.Type.Kind(),
 		Dst:   dst.Operand,
 		Left:  left.Operand,
 		Right: right.Operand,
+		Size:  1,
 	})
 }
 
@@ -589,10 +591,12 @@ func (o UnOp) String() string {
 }
 
 type BinOp struct {
-	Op    Operation `xc:"o"`
-	Dst   *Operand  `xc:"d"`
-	Left  *Operand  `xc:"l"`
-	Right *Operand  `xc:"r"`
+	Op    Operator
+	Kind  Kind
+	Dst   *Operand
+	Left  *Operand
+	Right *Operand
+	Size  Size
 }
 
 func (o BinOp) Name() string {
@@ -600,7 +604,7 @@ func (o BinOp) Name() string {
 }
 
 func (o BinOp) String() string {
-	return fmt.Sprintf("BinOp(%s) %v = %v %v %v", o.Op, o.Dst, o.Left, o.Op, o.Right)
+	return fmt.Sprintf("BinOp(%s) %v = %v %v %v", o.Size, o.Dst, o.Left, o.Op, o.Right)
 }
 
 type Ret struct {

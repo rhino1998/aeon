@@ -195,10 +195,6 @@ func (o *Operand) OffsetReference(offset Size) *Operand {
 }
 
 func (o *Operand) ConstOffset(offset Size) *Operand {
-	if offset == 0 {
-		return o
-	}
-
 	return o.Offset(ImmediateOperand(Int(offset)))
 }
 

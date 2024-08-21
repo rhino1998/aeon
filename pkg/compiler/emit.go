@@ -13,6 +13,9 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	registerOperands := make([]*Operand, prog.Registers())
 
 	for reg := range Register(prog.Registers()) {
+		if reg < 3 {
+			continue
+		}
 		registerOperands[reg] = ImmediateOperand(Int(0))
 		prog.bytecode.Add(Mov{
 			Src:  registerOperands[reg],
@@ -133,14 +136,9 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 	scope := pkg.values
 	// TODO: special varinit tmp var semantics
 
-	numLocals := ImmediateOperand(Int(0))
+	numLocals := scope.newImmediate(Int(0))
 
-	f.bytecode.Add(BinOp{
-		Op:    BinaryOperation(KindInt, OperatorAddition, KindInt),
-		Dst:   OperandRegisterSP,
-		Left:  OperandRegisterSP,
-		Right: numLocals,
-	})
+	f.bytecode.Mov(scope.SP(), scope.SP().Add(numLocals))
 
 	// TODO: make these truly global
 	for _, externFunc := range pkg.prog.root.ExternFunctions() {
@@ -280,13 +278,9 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *ValueScope) error {
 	scope = scope.fun(f.symbols)
 
-	numLocals := ImmediateOperand(Int(0))
+	numLocals := scope.newImmediate(Int(0))
+	f.bytecode.Mov(scope.SP(), scope.SP().Add(numLocals))
 
-	f.bytecode.Add(Mov{
-		Dst:  OperandRegisterSP,
-		Src:  OperandRegisterSP.Offset(numLocals),
-		Size: 1,
-	})
 	var argReturnSize Size
 	argReturnSize += f.Return().Size()
 	argReturnSize += f.Receiver().Type().Size()
@@ -583,21 +577,12 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 		bc.Add(lhsBC...)
 		bc.Add(rhsBC...)
 
-		var operator Operator
-		switch stmt.Operator {
-		case OperatorPlusEquals:
-			operator = OperatorAddition
-		case OperatorMinusEquals:
-			operator = OperatorSubtraction
-		case OperatorMultiplyEquals:
-			operator = OperatorMultiplication
-		case OperatorDivideEquals:
-			operator = OperatorDivision
-		default:
-			return nil, stmt.WrapError(fmt.Errorf("unhandled assignment operator %q", stmt.Operator))
+		op, err := stmt.Operator.AssignmentToInfix()
+		if err != nil {
+			return nil, stmt.WrapError(err)
 		}
 
-		bc.BinOp(lhsLoc, lhsLoc, operator, rhsLoc)
+		bc.BinOp(lhsLoc, lhsLoc, op, rhsLoc)
 
 		return bc, nil
 	case *PostfixStatement:
@@ -608,17 +593,12 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 
 		bc.Add(lhsBC...)
 
-		var operator Operator
-		switch stmt.Operator {
-		case OperatorIncrement:
-			operator = OperatorAddition
-		case OperatorSubtraction:
-			operator = OperatorSubtraction
-		default:
-			return nil, stmt.WrapError(fmt.Errorf("unhandled postfix operator %q", stmt.Operator))
+		op, err := stmt.Operator.PostfixToInfix()
+		if err != nil {
+			return nil, stmt.WrapError(err)
 		}
 
-		bc.BinOp(lhsLoc, lhsLoc, operator, scope.newImmediate(Int(1)))
+		bc.BinOp(lhsLoc, lhsLoc, op, scope.newImmediate(Int(1)))
 
 		return bc, nil
 	case *ReturnStatement:
@@ -1194,15 +1174,15 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 			return nil, nil, expr.WrapError(fmt.Errorf("currently interfaces with values of size > 1 not implemented"))
 		}
 
-		valBC, valOp, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, valElem)
+		valBC, valLoc, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, valElem)
 		if err != nil {
 			return nil, nil, err
 		}
 
 		bc.Add(valBC...)
 
-		if valOp != valElem {
-			bc.Mov(valElem, valOp)
+		if valLoc != valElem {
+			bc.Mov(valElem, valLoc)
 		}
 
 		return bc, dst, nil

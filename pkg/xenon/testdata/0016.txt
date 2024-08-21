@@ -2,8 +2,6 @@ package main
 
 extern func itoa(a int) string
 
-extern func print(a string)
-
 type iface interface {
   l()
 }
