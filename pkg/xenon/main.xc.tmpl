@@ -283,23 +283,6 @@ function @aeon_ne_string($a:number, $b:number):number
 function @itoa($n:number):number
 	return @aeon_str_alloc($n:text)
 
-function @aeon_call_size($fname:text):number
-	var $sp = $aeon_reg.1
-	{{ range $entry := .ExternFuncs }}
-	if ($fname == "{{$entry.Name}}")
-		return {{$entry.Size}}
-	{{ end }}
-
-	print(text("invalid extern func {}", $fname))
-	@aeon_fatal()
-
-function @aeon_call_extern($fname:text, $size:number)
-	var $sp = $aeon_reg.1
-	{{ range $entry := .ExternFuncs }}
-	if ($fname == "{{$entry.Name}}")
-		{{if $entry.HasReturn}}@aeon_mem_store($aeon_reg.1 - $size, {{end}}@{{$entry.Name}}({{range $i, $t := $entry.ArgTypes}}{{if $i }},{{end}}{{$t.Prefix}}@aeon_mem_load($sp-{{len $entry.ArgTypes}}+{{$i}}){{$t.Suffix}}{{end}}){{if $entry.HasReturn}}){{end}}
-	{{ end }}
-
 function @aeon_bop($op:text, $a:text, $b:text):number
 	var $av = @aeon_load($a)
 	var $bv = @aeon_load($b)
@@ -396,12 +379,33 @@ function @__builtin_append1($data:number, $len:number, $cap:number, $elem:number
 
 		$data = $newData
 
-	repeat $size ($i)
-		@aeon_mem_store($data + ($len * $size) + $i, @aeon_mem_load($elem + $i))
+	if $size == 1
+		@aeon_mem_store($data + ($len * $size), $elem)
+	else
+		repeat $size ($i)
+			@aeon_mem_store($data + ($len * $size) + $i, @aeon_mem_load($elem + $i))
 	@aeon_mem_store($ret, $data)
 	@aeon_mem_store($ret + 1, $len + 1)
-	@aeon_mem_store($ret + 1, $cap)
+	@aeon_mem_store($ret + 2, $cap)
 	return
+
+; Extern Calls
+function @aeon_call_size($fname:text):number
+	var $sp = $aeon_reg.1
+	{{ range $entry := .ExternFuncs }}
+	if ($fname == "{{$entry.Name}}")
+		return {{$entry.Size}}
+	{{ end }}
+
+	print(text("invalid extern func {}", $fname))
+	@aeon_fatal()
+
+function @aeon_call_extern($fname:text, $size:number)
+	var $sp = $aeon_reg.1
+	{{ range $entry := .ExternFuncs }}
+	if ($fname == "{{$entry.Name}}")
+		{{if $entry.HasReturn}}@aeon_mem_store($aeon_reg.1 - $size, {{end}}@{{$entry.Name}}({{range $i, $t := $entry.ArgTypes}}{{if $i }},{{end}}{{$t.Prefix}}@aeon_mem_load($sp-{{len $entry.ArgTypes}}+{{$i}}){{$t.Suffix}}{{end}}){{if $entry.HasReturn}}){{end}}
+	{{ end }}
 
 ; Main Loop
 

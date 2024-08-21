@@ -99,15 +99,18 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				sliceData := Addr(s[0])
 				sliceLen := int(s[1])
 				sliceCap := int(s[2])
-				elemPtr := Addr(s[3])
+				elemPtr := s[3]
 				size := int(s[4])
 				retPtr := Addr(s[5])
+
+				log.Printf("append: %v %v %v %v %v %v", sliceData, sliceLen, sliceCap, elemPtr, size, retPtr)
 
 				if sliceCap < sliceLen {
 					panic("append: slice capacity less than length")
 				}
 
-				if sliceLen+1 > sliceCap {
+				if sliceLen == sliceCap {
+					log.Println("realloc")
 					if sliceCap == 0 {
 						sliceCap = 10
 					} else {
@@ -125,19 +128,33 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 						}
 						r.storeAddr(newData+Addr(i), val)
 					}
+					sliceData = newData
 				}
 
-				for i := 0; i < size; i++ {
-					val, err := r.loadAddr(elemPtr + Addr(i))
-					if err != nil {
-						panic(fmt.Errorf("append: failed to load elem data"))
+				if size == 1 {
+					r.storeAddr(sliceData+Addr(sliceLen*size), elemPtr)
+				} else {
+					for i := 0; i < size; i++ {
+						val, err := r.loadAddr(Addr(elemPtr) + Addr(i))
+						if err != nil {
+							panic(fmt.Errorf("append: failed to load elem data"))
+						}
+						r.storeAddr(sliceData+Addr((sliceLen*size)+i), val)
 					}
-					r.storeAddr(sliceData+Addr((sliceLen*size)+i), val)
 				}
 
-				r.storeAddr(sliceData+1, float64(sliceData))
-				r.storeAddr(retPtr+1, float64(sliceLen))
-				r.storeAddr(retPtr+2, float64(sliceCap))
+				err := r.storeAddr(retPtr, float64(sliceData))
+				if err != nil {
+					panic(fmt.Errorf("append: failed to store slice data: %w", err))
+				}
+				err = r.storeAddr(retPtr+1, float64(sliceLen+1))
+				if err != nil {
+					panic(fmt.Errorf("append: failed to store slice len: %w", err))
+				}
+				err = r.storeAddr(retPtr+2, float64(sliceCap))
+				if err != nil {
+					panic(fmt.Errorf("append: failed to store slice cap: %w", err))
+				}
 				return 0
 			},
 		},
@@ -367,6 +384,7 @@ func (r *Runtime) allocStr(val String) (Addr, error) {
 }
 
 func (r *Runtime) alloc(size Size) (Addr, error) {
+	log.Printf("alloc %d", size)
 	addr := r.heapIndex
 	r.heapIndex += Addr(size)
 	if r.heapIndex > Addr(len(r.memPages)*PageSize) {

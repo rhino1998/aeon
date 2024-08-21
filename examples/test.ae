@@ -6,8 +6,13 @@ extern func print(a string)
 
 #init
 func main() {
-  x := make([](int,int), 10)
+  x := make([](int,int), 0, 5)
+  for i := 0; i < 10; i++ {
+    x = append(x, (i, i*i))
+    print(itoa(len(x)))
+  }
+
   for i := 0; i < len(x); i++ {
-    x[i] = (i, i*i)
+    print(itoa(x[i].0) + ": " + itoa(x[i].1))
   }
 }
