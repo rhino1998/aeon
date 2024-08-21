@@ -92,6 +92,55 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				return opAdd[Int](s[0], s[1])
 			},
 		},
+		"__builtin_append1": {
+			ArgSize:    6,
+			ReturnSize: 0,
+			Func: func(r *Runtime, s []float64) float64 {
+				sliceData := Addr(s[0])
+				sliceLen := int(s[1])
+				sliceCap := int(s[2])
+				elemPtr := Addr(s[3])
+				size := int(s[4])
+				retPtr := Addr(s[5])
+
+				if sliceCap < sliceLen {
+					panic("append: slice capacity less than length")
+				}
+
+				if sliceLen+1 > sliceCap {
+					if sliceCap == 0 {
+						sliceCap = 10
+					} else {
+						sliceCap *= 2
+					}
+
+					newData, err := r.alloc(Size(sliceCap * size))
+					if err != nil {
+						panic(fmt.Errorf("append: failed to allocate new slice data: %w", err))
+					}
+					for i := 0; i < sliceLen*size; i++ {
+						val, err := r.loadAddr(sliceData + Addr(i))
+						if err != nil {
+							panic(fmt.Errorf("append: failed to load slice data: %w", err))
+						}
+						r.storeAddr(newData+Addr(i), val)
+					}
+				}
+
+				for i := 0; i < size; i++ {
+					val, err := r.loadAddr(elemPtr + Addr(i))
+					if err != nil {
+						panic(fmt.Errorf("append: failed to load elem data"))
+					}
+					r.storeAddr(sliceData+Addr((sliceLen*size)+i), val)
+				}
+
+				r.storeAddr(sliceData+1, float64(sliceData))
+				r.storeAddr(retPtr+1, float64(sliceLen))
+				r.storeAddr(retPtr+2, float64(sliceCap))
+				return 0
+			},
+		},
 	}
 }
 

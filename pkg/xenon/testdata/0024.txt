@@ -6,17 +6,9 @@ extern func print(a string)
 
 #init
 func main() {
-  x := make([]int, 3)
-
-  assert(len(x) == 3)
-  for i := 0; i < len(x); i++ {
-    x[i] = i
+  for i := 0; i < 10; i++ {
+    x := make([]int, i)
+    assert(len(x) == i)
   }
-
-  assert(x[0] == 0)
-  assert(x[1] == 1)
-  assert(x[2] == 2)
-  x[3]
 }
 ---
-

@@ -898,6 +898,19 @@ func (c *Compiler) compileBCZeroValue(ctx context.Context, prog *Program, pos pa
 		bc.Add(valBC...)
 
 		return bc, dst, nil
+	case *SliceType:
+		valBC, valDst, err := c.compileBCZeroValue(ctx, prog, pos, sliceHeader, scope, dst.AsType(sliceHeader))
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(valBC...)
+
+		if !valDst.AsType(typ).SameMemory(dst) {
+			bc.Mov(dst, valDst)
+		}
+
+		return bc, dst, nil
 	case *FunctionType:
 		return bc, scope.newImmediate(Int(0)).AsType(typ), nil
 	default:
@@ -1043,17 +1056,18 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 			for i, arg := range expr.Args {
 				argVar := callScope.newArg(fmt.Sprintf("%d", i), 0, ftype.Parameters[i])
+				argTmp := callScope.allocTemp(arg.Type())
 
-				argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argVar)
+				argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmp)
 				if err != nil {
 					return nil, nil, err
 				}
 
+				callScope.deallocTemp(argTmp)
+
 				bc.Add(argBC...)
 
-				if argVar != argLoc {
-					bc.Mov(argVar, argLoc)
-				}
+				bc.Mov(argVar, argLoc)
 
 				bc.Mov(scope.SP(), scope.SP().AddConst(arg.Type().Size()))
 			}
@@ -1110,7 +1124,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 		bc.Add(receiverBC...)
 
-		indexTmp := scope.allocTemp(expr.Receiver.Type())
+		indexTmp := scope.allocTemp(expr.Index.Type())
 		defer scope.deallocTemp(indexTmp)
 		indexBC, indexLoc, err := c.compileBCExpression(ctx, prog, expr.Index, scope, indexTmp)
 		if err != nil {

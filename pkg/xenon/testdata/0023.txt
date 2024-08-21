@@ -6,9 +6,12 @@ extern func print(a string)
 
 #init
 func main() {
-  x := make([]int, 3)
+  var x []int
+  assert(len(x) == 0)
 
+  x = make([]int, 3)
   assert(len(x) == 3)
+
   for i := 0; i < len(x); i++ {
     x[i] = i
   }

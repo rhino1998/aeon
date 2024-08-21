@@ -507,7 +507,7 @@ func (b builtinMakeSlice) Compile(ctx context.Context, c *Compiler, prog *Progra
 			bc.Mov(hdrCapDst, hdrCapLoc)
 		}
 	} else {
-		bc.Mov(hdrCapDst, hdrLenDst)
+		bc.Mov(hdrCapDst, hdrLenLoc)
 	}
 
 	hdrPtrDst, err := hdrDst.IndexTuple(0)
@@ -516,7 +516,7 @@ func (b builtinMakeSlice) Compile(ctx context.Context, c *Compiler, prog *Progra
 	}
 
 	elemTyp := dereferenceType(args[0].Type()).(*TypeType).Type.(*SliceType).Elem()
-	bc.Alloc(hdrPtrDst, hdrLenDst.Mul(scope.newImmediate(Int(elemTyp.Size()))))
+	bc.Alloc(hdrPtrDst, hdrLenLoc.Mul(scope.newImmediate(Int(elemTyp.Size()))))
 
 	return bc, dst, nil
 }

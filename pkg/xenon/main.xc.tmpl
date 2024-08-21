@@ -226,7 +226,9 @@ function @aeon_load_internal():number
 
 function @aeon_load($op:text):number
 	$aeon_op_uops.from($op, "{{.UOPSep}}")
-	return @aeon_load_internal()
+	var $ret = @aeon_load_internal()
+	@debug(text("load {} -> {}", $op, $ret))
+	return $ret
 
 function @aeon_load_addr($op:text):number
 	$aeon_op_uops.from($op, "{{.UOPSep}}")
@@ -235,7 +237,7 @@ function @aeon_load_addr($op:text):number
 	if ($uop == "@")
 		return @aeon_load_internal()
 	else
-		return @aeon_load_internal()
+		@__builtin_panic(text("bad operand for load addr {}", $uop))
 
 function @aeon_mov_size($dst:text, $src:text, $size:number)
 	var $dstAddr = @aeon_load_addr($dst)
@@ -262,7 +264,9 @@ function @aeon_store($op:text, $v:number)
 	if (substring($uop, 0, 1) == "R")
 		@aeon_reg_store(substring($uop, 1, $uop.size-1):number, $v)
 	elseif ($uop == "@")
-		@aeon_mem_store(@aeon_load_internal(), $v)
+		var $addr = @aeon_load_internal()
+		@debug(text("store {} -> {} = {}", $op, $addr, $v))
+		@aeon_mem_store($addr, $v)
 	else
 		print(text("bad operand for store {}", $uop))
 		@aeon_fatal()
@@ -374,6 +378,32 @@ function @aeon_uop($op:text, $a:text):number
 	else
 		print(text("bad unary operand {} {} {}", $op, $a))
 		@aeon_fatal()
+
+; Advanced Builtins
+
+function @__builtin_append1($data:number, $len:number, $cap:number, $elem:number, $size:number, $ret:number)
+	@__builtin_assert($cap >= $len, "append: cap < len")
+	if ($len + 1 == $cap)
+		if $cap == 0
+			$cap = 10 ; TODO: tune this?
+		else
+			$cap *= 2
+
+		var $newData = @aeon_heap_alloc($cap * $size)
+		var $totalSize = $len * $size
+		repeat $totalSize ($i)
+			@aeon_mem_store($newData + $i, @aeon_mem_load($data + $i))
+
+		$data = $newData
+
+	repeat $size ($i)
+		@aeon_mem_store($data + ($len * $size) + $i, @aeon_mem_load($elem + $i))
+	@aeon_mem_store($ret, $data)
+	@aeon_mem_store($ret + 1, $len + 1)
+	@aeon_mem_store($ret + 1, $cap)
+	return
+
+; Main Loop
 
 function @aeon_run($pc:number):number
 	@aeon_reg_init()

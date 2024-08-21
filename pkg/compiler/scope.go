@@ -395,7 +395,7 @@ func (l *Location) IndexSlice(index *Location) (*Location, error) {
 		Kind:    LocationKindHeap,
 		Name:    fmt.Sprintf("%s[%s]", l.Name, index.Name),
 		Type:    dereferenceType(typ.Elem()),
-		Operand: l.Operand.Offset(index.Operand.Bound(l.Operand.OffsetReference(1))).Dereference(),
+		Operand: l.Operand.Offset(index.Operand.Bound(l.Operand.ConstOffset(1)).Stride(ImmediateOperand(Int(typ.Elem().Size())))).Dereference(),
 	}, nil
 }
 
