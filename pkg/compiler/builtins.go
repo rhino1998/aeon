@@ -326,7 +326,117 @@ func (b builtinNew) Compile(ctx context.Context, c *Compiler, prog *Program, pos
 	}
 
 	var bc BytecodeSnippet
-	bc.Alloc(dst)
+	bc.Alloc(dst, scope.newImmediate(Int(resolveType(args[0].Type()).Size())))
+
+	return bc, dst, nil
+}
+
+type builtinMakeSlice struct{}
+
+func (b builtinMakeSlice) Match(args []Expression) bool {
+	switch len(args) {
+	case 2:
+		return args[0].Type().Kind() == KindType && args[1].Type().Kind() == KindInt
+	case 3:
+		return args[0].Type().Kind() == KindType && args[1].Type().Kind() == KindInt && args[2].Type().Kind() == KindInt
+	default:
+		return false
+	}
+}
+
+func (b builtinMakeSlice) TypeCheck(c *Compiler, pos parser.Position, args []Expression) error {
+	if len(args) != 2 && len(args) != 3 {
+		return pos.WrapError(fmt.Errorf("builtin make expects 2 or 3 arguments, got %d", len(args)))
+	}
+	var err error
+
+	args[0], err = c.resolveExpressionTypes(args[0], TypeKind(KindType))
+	if err != nil {
+		return err
+	}
+	if args[0].Type().Kind() != KindType {
+		return pos.WrapError(fmt.Errorf("builtin make expects a type, got value expression %q", args[0]))
+	}
+
+	args[1], err = c.resolveExpressionTypes(args[1], TypeKind(KindInt))
+	if err != nil {
+		return err
+	}
+
+	if args[1].Type().Kind() != KindInt {
+		return pos.WrapError(fmt.Errorf("builtin make expects length argument to be an int, got %s", args[1].Type()))
+	}
+
+	if len(args) == 3 {
+		args[2], err = c.resolveExpressionTypes(args[2], TypeKind(KindInt))
+		if err != nil {
+			return err
+		}
+
+		if args[2].Type().Kind() != KindInt {
+			return pos.WrapError(fmt.Errorf("builtin make expects capacity argument to be int, got %s", args[2].Type()))
+		}
+	}
+
+	return nil
+}
+
+func (b builtinMakeSlice) Type(args []Expression) Type {
+	return dereferenceType(args[0].Type()).(*TypeType).Type
+}
+
+func (b builtinMakeSlice) Compile(ctx context.Context, c *Compiler, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+	err := b.TypeCheck(c, pos, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var bc BytecodeSnippet
+
+	hdrDst := dst.AsType(sliceHeader)
+	hdrLenDst, err := hdrDst.IndexTuple(0)
+	if err != nil {
+		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
+	}
+
+	hdrLenBC, hdrLenLoc, err := c.compileBCExpression(ctx, prog, args[1], scope, hdrLenDst)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bc.Add(hdrLenBC...)
+
+	if !hdrLenLoc.SameMemory(hdrLenDst) {
+		bc.Mov(hdrLenDst, hdrLenLoc)
+	}
+
+	hdrCapDst, err := hdrDst.IndexTuple(1)
+	if err != nil {
+		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
+	}
+
+	if len(args) == 3 {
+		hdrCapBC, hdrCapLoc, err := c.compileBCExpression(ctx, prog, args[1], scope, hdrCapDst)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(hdrCapBC...)
+
+		if !hdrCapLoc.SameMemory(hdrCapDst) {
+			bc.Mov(hdrCapDst, hdrCapLoc)
+		}
+	} else {
+		bc.Mov(hdrCapDst, hdrLenDst)
+	}
+
+	hdrPtrDst, err := hdrDst.IndexTuple(2)
+	if err != nil {
+		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
+	}
+
+	elemTyp := dereferenceType(args[0].Type()).(*TypeType).Type.(*SliceType).Elem()
+	bc.Alloc(hdrPtrDst, hdrLenDst.Mul(scope.newImmediate(Int(elemTyp.Size()))))
 
 	return bc, dst, nil
 }

@@ -767,7 +767,12 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				return err
 			}
 		case compiler.Alc:
-			addr, err := r.alloc(code.Size)
+			size, err := r.load(code.Size)()
+			if err != nil {
+				return err
+			}
+
+			addr, err := r.alloc(Size(size))
 			if err != nil {
 				return err
 			}

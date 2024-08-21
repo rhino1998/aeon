@@ -289,6 +289,24 @@ func (l *Location) AddConst(size Size) *Location {
 	}
 }
 
+func (l *Location) Add(o *Location) *Location {
+	return &Location{
+		Kind:    l.Kind,
+		Name:    l.Name,
+		Type:    l.Type,
+		Operand: l.Operand.Offset(o.Operand),
+	}
+}
+
+func (l *Location) Mul(o *Location) *Location {
+	return &Location{
+		Kind:    l.Kind,
+		Name:    l.Name,
+		Type:    l.Type,
+		Operand: l.Operand.Stride(o.Operand),
+	}
+}
+
 func (l *Location) AsType(typ Type) *Location {
 	return &Location{
 		Kind:    l.Kind,

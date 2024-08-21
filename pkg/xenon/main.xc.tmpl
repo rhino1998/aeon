@@ -449,7 +449,7 @@ function @aeon_run($pc:number):number
 				$str = $aeon_ops.2
 			@aeon_store($aeon_ops.1, @aeon_str_alloc($str))
 		elseif ($aeon_ops.0 == "alc")
-			@aeon_store($aeon_ops.1, @aeon_heap_alloc($aeon_ops.2:number))
+			@aeon_store($aeon_ops.1, @aeon_heap_alloc(@aeon_load($aeon_ops.2)))
 		elseif ($aeon_ops.0 == "nop")
 			continue
 		else

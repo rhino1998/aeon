@@ -34,10 +34,17 @@ func newLabel() Label {
 	return Label(fmt.Sprintf("%d", labelIndex))
 }
 
-func (s *BytecodeSnippet) Alloc(dst *Location) {
+func (s *BytecodeSnippet) AllocConst(dst *Location, size Size) {
 	*s = append(*s, Alc{
 		Dst:  dst.Operand,
-		Size: resolveType(dst.Type).(*PointerType).Pointee().Size(),
+		Size: ImmediateOperand(Int(size)),
+	})
+}
+
+func (s *BytecodeSnippet) Alloc(dst *Location, size *Location) {
+	*s = append(*s, Alc{
+		Dst:  dst.Operand,
+		Size: size.Operand,
 	})
 }
 
@@ -625,7 +632,7 @@ func (s Str) String() string {
 
 type Alc struct {
 	Dst  *Operand
-	Size Size
+	Size *Operand
 }
 
 func (a Alc) Name() string {

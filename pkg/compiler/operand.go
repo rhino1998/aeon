@@ -213,13 +213,13 @@ func (o *Operand) Offset(offset *Operand) *Operand {
 	}
 }
 
-func (o *Operand) Stride(offset *Operand) *Operand {
+func (o *Operand) Stride(size *Operand) *Operand {
 	return &Operand{
 		Kind: OperandKindBinary,
 		Value: BinaryOperand{
 			Left:  o,
 			Op:    "*",
-			Right: offset,
+			Right: size,
 		},
 	}
 }
