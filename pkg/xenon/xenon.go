@@ -89,10 +89,8 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	xeCtx.VTable = make(VTable)
 	xeCtx.Debug = debug
 	xeCtx.OPSep = "\x9B"
-	xeCtx.UOPSep = "\x9C"
 
 	xeCtx.OPSep = "|"
-	xeCtx.UOPSep = ""
 
 	xeCtx.KindNil = int(compiler.KindNil)
 	xeCtx.KindInt = int(compiler.KindInt)
@@ -327,23 +325,19 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 	return nil
 }
 
-const bytecodeSep = "|"
-
-const bytecodeOpStackSep = "/"
-
 func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 	switch op.Kind {
 	case compiler.OperandKindImmediate:
 		switch imm := op.Value.(type) {
 		case Int:
-			fmt.Fprintf(w, "I%s%v", x.UOPSep, int(imm))
+			fmt.Fprintf(w, "I%vI", int(imm))
 		case Float:
-			fmt.Fprintf(w, "I%s%v", x.UOPSep, float64(imm))
+			fmt.Fprintf(w, "I%vI", float64(imm))
 		case Bool:
 			if imm {
-				fmt.Fprintf(w, "I%s1", x.UOPSep)
+				fmt.Fprintf(w, "T")
 			} else {
-				fmt.Fprintf(w, "I%s0", x.UOPSep)
+				fmt.Fprintf(w, "F")
 			}
 		case String:
 			panic("BAD")
@@ -351,7 +345,7 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 
 		return nil
 	case compiler.OperandKindRegister:
-		fmt.Fprintf(w, "I%s%d%sR", x.UOPSep, int(op.Value.(Register)), x.UOPSep)
+		fmt.Fprintf(w, "I%dIR", int(op.Value.(Register)))
 
 		return nil
 	case compiler.OperandKindIndirect:
@@ -360,7 +354,7 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Kind.String())
+		fmt.Fprintf(w, "%s", op.Kind.String())
 
 		return nil
 	case compiler.OperandKindUnary:
@@ -369,7 +363,7 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s%s", x.UOPSep, operatorChar(op.Value.(compiler.UnaryOperand).Op))
+		fmt.Fprintf(w, "%s", operatorChar(op.Value.(compiler.UnaryOperand).Op))
 
 		return nil
 	case compiler.OperandKindBinary:
@@ -378,13 +372,12 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s", x.UOPSep)
 		err = x.marshalOperand(w, op.Value.(compiler.BinaryOperand).Right)
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s%s", x.UOPSep, operatorChar(op.Value.(compiler.BinaryOperand).Op))
+		fmt.Fprintf(w, "%s", operatorChar(op.Value.(compiler.BinaryOperand).Op))
 
 		return nil
 	case compiler.OperandKindVTableLookup:
@@ -393,13 +386,12 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s", x.UOPSep)
 		err = x.marshalOperand(w, op.Value.(compiler.VTableLookup).Method)
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s%s", x.UOPSep, op.Kind.String())
+		fmt.Fprintf(w, "%s", op.Kind.String())
 
 		return nil
 	default:

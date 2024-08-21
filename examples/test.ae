@@ -2,11 +2,14 @@ package main
 
 #init
 func main() {
-  var x []int
-  for i := 0; i < 1000; i++ {
-    x = append(x, i)
-  }
+  var a any = 5
+  a = "hello"
+  a = true
+  a = 3.4
 
-  print(len(x))
-  print(cap(x))
+  a = any(3)
+  a = interface{}(true)
+
+  var y int
+  a = &y
 }

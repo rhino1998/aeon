@@ -142,102 +142,91 @@ var $aeon_numbers = "0123456789"
 
 function @aeon_load_internal($op:text):number
 	var $index = 0
-	var $mode = 0
 	var $arg1 = 0
 	var $arg2 = 0
-	var $sign = 1
+	var $sign = 0
 	while ($index < size($op))
 		var $k = $op.$index
 		$index++
-		if ($mode == 0)
-			if ($k == "I")
-				$mode = 1
-				$aeon_op_arg_stack.append(0)
-			elseif ($k == "R")
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append(@aeon_reg_load($arg1))
-			elseif ($k == "@")
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append(@aeon_mem_load($arg1))
-			elseif ($k == "+")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append($arg1 + $arg2)
-			elseif ($k == "*")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append($arg1 * $arg2)
-			elseif ($k == "=")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append($arg1 == $arg2)
-			elseif ($k == "≠")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append($arg1 != $arg2)
-			elseif ($k == "󰥽")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append($arg1 <= $arg2)
-			elseif ($k == "<")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append($arg1 < $arg2)
-			elseif ($k == "-")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append($arg1 - $arg2)
-			elseif ($k == "!")
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append(!$arg1)
-			elseif ($k == "V")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append(@aeon_vtable($arg1, @aeon_str_load($arg2)))
-			elseif ($k == "#")
-				$arg2 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				if ($arg1 >= $arg2)
-					print(text("index out of bounds: {} {}", $arg1, $arg2))
-					@aeon_fatal()
-			else
-				print(text("bad uop in load {} at index {} in {}", $k, $index-1, $op))
-				$aeon_op_arg_stack.append($arg1)
+		if ($k == "F")
+			$aeon_op_arg_stack.append(0)
+		elseif ($k == "T")
+			$aeon_op_arg_stack.append(1)
+		elseif ($k == "I")
+			var $offset = find(substring($op, $index, -1), "I")
+			$aeon_op_arg_stack.append(substring($op, $index, $offset))
+			$index+=$offset+1
+		elseif ($k == "R")
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append(@aeon_reg_load($arg1))
+		elseif ($k == "@")
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append(@aeon_mem_load($arg1))
+		elseif ($k == "+")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 + $arg2)
+		elseif ($k == "*")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 * $arg2)
+		elseif ($k == "=")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 == $arg2)
+		elseif ($k == "≠")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 != $arg2)
+		elseif ($k == "󰥽")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 <= $arg2)
+		elseif ($k == "<")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 < $arg2)
+		elseif ($k == "-")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 - $arg2)
+		elseif ($k == "!")
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append(!$arg1)
+		elseif ($k == "V")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append(@aeon_vtable($arg1, @aeon_str_load($arg2)))
+		elseif ($k == "#")
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			if ($arg1 >= $arg2)
+				print(text("index out of bounds: {} {}", $arg1, $arg2))
 				@aeon_fatal()
-		elseif ($mode == 1)
-			if (find($aeon_numbers, $k) != -1)
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append((($arg1 * 10) + ($k:number)))
-			elseif ($k == "-")
-				$sign = -1
-			else
-				$arg1 = $aeon_op_arg_stack.last
-				$aeon_op_arg_stack.pop()
-				$aeon_op_arg_stack.append($arg1*$sign)
-				$mode = 0
-				$index--
+		else
+			print(text("bad uop in load {} at index {} in {}", $k, $index-1, $op))
+			$aeon_op_arg_stack.append($arg1)
+			@aeon_fatal()
 
 	var $ret = $aeon_op_arg_stack.0
 	$aeon_op_arg_stack.clear()
@@ -489,7 +478,7 @@ function @aeon_run($pc:number):number
 		var $code = @aeon_code($aeon_reg.0)
 		$aeon_ops.from($code, "{{.OPSep}}")
 		$aeon_reg.0++
-		{{if .Debug}}@debug(text("{} {} {} {} {} {}", delta(), $i, $aeon_reg.0, $aeon_reg.1, $aeon_reg.2, $code)){{end}}
+		{{if .Debug}}@debug(text("{} {} {} {} {}", $i, $aeon_reg.0, $aeon_reg.1, $aeon_reg.2, $code)){{end}}
 
 		if ($aeon_ops.0 == "mov")
 			$size = $aeon_ops.3:number
