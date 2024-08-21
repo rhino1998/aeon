@@ -822,9 +822,9 @@ func (t *SliceType) Elem() Type { return t.elem }
 func (*SliceType) Size() Size   { return 3 }
 
 var sliceHeader = NewTupleType(
-	TypeInt,
-	TypeInt,
 	NewPointerType(TypeVoid),
+	TypeInt,
+	TypeInt,
 )
 
 type ArrayType struct {

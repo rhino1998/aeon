@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 )
 
@@ -532,13 +531,17 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 	case *Literal:
 		switch val := expr.value.(type) {
 		case Int:
-			if bound == nil && IsUnspecified(expr.Type()) {
-				return &Literal{
-					value: expr.value,
-					typ:   TypeInt,
+			if bound == nil {
+				if IsUnspecified(expr.Type()) {
+					return &Literal{
+						value: expr.value,
+						typ:   TypeInt,
 
-					Position: expr.Position,
-				}, nil
+						Position: expr.Position,
+					}, nil
+				} else {
+					return expr, nil
+				}
 			}
 
 			switch bound.Kind() {
@@ -581,13 +584,17 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				return expr, expr.WrapError(fmt.Errorf("cannot coerce int literal into %s", bound))
 			}
 		case Float:
-			if bound == nil && IsUnspecified(expr.Type()) {
-				return &Literal{
-					value: expr.value,
-					typ:   TypeFloat,
+			if bound == nil {
+				if IsUnspecified(expr.Type()) {
+					return &Literal{
+						value: expr.value,
+						typ:   TypeFloat,
 
-					Position: expr.Position,
-				}, nil
+						Position: expr.Position,
+					}, nil
+				} else {
+					return expr, nil
+				}
 			}
 
 			switch bound.Kind() {
@@ -630,13 +637,17 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				return expr, expr.WrapError(fmt.Errorf("cannot coerce float literal into %s", bound))
 			}
 		case String:
-			if bound == nil && IsUnspecified(expr.Type()) {
-				return &Literal{
-					value: expr.value,
-					typ:   TypeString,
+			if bound == nil {
+				if IsUnspecified(expr.Type()) {
+					return &Literal{
+						value: expr.value,
+						typ:   TypeString,
 
-					Position: expr.Position,
-				}, nil
+						Position: expr.Position,
+					}, nil
+				} else {
+					return expr, nil
+				}
 			}
 
 			switch bound.Kind() {
@@ -668,13 +679,17 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				return expr, expr.WrapError(fmt.Errorf("cannot coerce string literal into %s", bound))
 			}
 		case Bool:
-			if bound == nil && IsUnspecified(expr.Type()) {
-				return &Literal{
-					value: expr.value,
-					typ:   TypeString,
+			if bound == nil {
+				if IsUnspecified(expr.Type()) {
+					return &Literal{
+						value: expr.value,
+						typ:   TypeBool,
 
-					Position: expr.Position,
-				}, nil
+						Position: expr.Position,
+					}, nil
+				} else {
+					return expr, nil
+				}
 			}
 
 			switch bound.Kind() {
@@ -758,17 +773,12 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			errs.Add(err)
 		}
 
-		log.Println(expr.Right.Type())
-		log.Println(left.Type())
-
 		expr.Left = left
 
 		right, err := c.resolveExpressionTypes(expr.Right, expr.Left.Type())
 		if err != nil {
 			errs.Add(err)
 		}
-
-		log.Println(right.Type())
 
 		expr.Right = right
 
@@ -937,6 +947,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			expr.Elems[i] = elem
+		}
+
+		return expr, nil
+	case *BuiltinExpression:
+		err := expr.Impl.TypeCheck(c, expr.Position, expr.Args)
+		if err != nil {
+			errs.Add(err)
 		}
 
 		return expr, nil

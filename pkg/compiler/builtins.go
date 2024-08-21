@@ -38,6 +38,7 @@ var (
 		name: "len",
 		impls: []BuiltinImpl{
 			builtinLenArray{},
+			builtinLenSlice{},
 		},
 	}
 	BuiltinAssert = &BuiltinSymbol{
@@ -51,6 +52,12 @@ var (
 		name: "new",
 		impls: []BuiltinImpl{
 			builtinNew{},
+		},
+	}
+	BuiltinMake = &BuiltinSymbol{
+		name: "make",
+		impls: []BuiltinImpl{
+			builtinMakeSlice{},
 		},
 	}
 )
@@ -76,6 +83,7 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(BuiltinAssert)
 	s.put(BuiltinExternAssert)
 	s.put(BuiltinNew)
+	s.put(BuiltinMake)
 
 	return s
 }
@@ -113,7 +121,7 @@ func (s *BuiltinSymbol) CallExpression(c *Compiler, expr *CallExpression) (Expre
 		if impl.Match(expr.Args) {
 			err := impl.TypeCheck(c, expr.Position, expr.Args)
 			if err != nil {
-				return nil, err
+				return expr, err
 			}
 
 			return &BuiltinExpression{
@@ -204,6 +212,60 @@ func (b builtinLenArray) Compile(ctx context.Context, c *Compiler, p *Program, p
 	return nil, scope.newImmediate(Int(resolveType(args[0].Type()).(*ArrayType).Length())), nil
 }
 
+type builtinLenSlice struct{}
+
+func (b builtinLenSlice) Match(args []Expression) bool {
+	return len(args) == 1 && args[0].Type().Kind() == KindSlice
+}
+
+func (b builtinLenSlice) TypeCheck(c *Compiler, pos parser.Position, args []Expression) error {
+	if len(args) != 1 {
+		return pos.WrapError(fmt.Errorf("builtin len expects exactly 1 argument, got %d", len(args)))
+	}
+
+	var err error
+	args[0], err = c.resolveExpressionTypes(args[0], TypeKind(KindSlice))
+	if err != nil {
+		return err
+	}
+
+	if args[0].Type().Kind() != KindSlice {
+		return pos.WrapError(fmt.Errorf("builtin len expects a slice, got %s", args[0].Type()))
+	}
+
+	return nil
+}
+
+func (b builtinLenSlice) Type([]Expression) Type {
+	return TypeInt
+}
+
+func (b builtinLenSlice) Compile(ctx context.Context, c *Compiler, p *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+	err := b.TypeCheck(c, pos, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var bc BytecodeSnippet
+
+	sliceTmp := scope.allocTemp(args[0].Type())
+	defer scope.deallocTemp(sliceTmp)
+
+	sliceBC, sliceDst, err := c.compileBCExpression(ctx, p, args[0], scope, sliceTmp)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bc.Add(sliceBC...)
+
+	lenLoc, err := sliceDst.AsType(sliceHeader).IndexTuple(1)
+	if err != nil {
+		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
+	}
+
+	return bc, lenLoc, nil
+}
+
 type builtinAssert1 struct{}
 
 func (b builtinAssert1) Match(args []Expression) bool {
@@ -213,6 +275,12 @@ func (b builtinAssert1) Match(args []Expression) bool {
 func (b builtinAssert1) TypeCheck(c *Compiler, pos parser.Position, args []Expression) error {
 	if len(args) != 1 {
 		return pos.WrapError(fmt.Errorf("builtin assert expects 1 argument, got %d", len(args)))
+	}
+
+	var err error
+	args[0], err = c.resolveExpressionTypes(args[0], TypeKind(KindBool))
+	if err != nil {
+		return err
 	}
 
 	if args[0].Type().Kind() != KindBool {
@@ -264,8 +332,20 @@ func (b builtinAssert2) TypeCheck(c *Compiler, pos parser.Position, args []Expre
 		return pos.WrapError(fmt.Errorf("builtin assert expects 2 arguments, got %d", len(args)))
 	}
 
+	var err error
+
+	args[0], err = c.resolveExpressionTypes(args[0], TypeKind(KindBool))
+	if err != nil {
+		return err
+	}
+
 	if args[0].Type().Kind() != KindBool {
 		return pos.WrapError(fmt.Errorf("builtin assert expects first argument to be a boolean, got %s", args[0].Type()))
+	}
+
+	args[1], err = c.resolveExpressionTypes(args[1], TypeKind(KindString))
+	if err != nil {
+		return err
 	}
 
 	if args[1].Type().Kind() != KindString {
@@ -394,7 +474,7 @@ func (b builtinMakeSlice) Compile(ctx context.Context, c *Compiler, prog *Progra
 	var bc BytecodeSnippet
 
 	hdrDst := dst.AsType(sliceHeader)
-	hdrLenDst, err := hdrDst.IndexTuple(0)
+	hdrLenDst, err := hdrDst.IndexTuple(1)
 	if err != nil {
 		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
 	}
@@ -410,7 +490,7 @@ func (b builtinMakeSlice) Compile(ctx context.Context, c *Compiler, prog *Progra
 		bc.Mov(hdrLenDst, hdrLenLoc)
 	}
 
-	hdrCapDst, err := hdrDst.IndexTuple(1)
+	hdrCapDst, err := hdrDst.IndexTuple(2)
 	if err != nil {
 		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
 	}
@@ -430,7 +510,7 @@ func (b builtinMakeSlice) Compile(ctx context.Context, c *Compiler, prog *Progra
 		bc.Mov(hdrCapDst, hdrLenDst)
 	}
 
-	hdrPtrDst, err := hdrDst.IndexTuple(2)
+	hdrPtrDst, err := hdrDst.IndexTuple(0)
 	if err != nil {
 		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
 	}

@@ -490,8 +490,12 @@ func (c *Compiler) compileBCLHSIndexExpression(ctx context.Context, prog *Progra
 
 		return nil, elemLoc, nil
 	case *SliceType:
-		// TODO:
-		return nil, nil, expr.WrapError(fmt.Errorf("slice type not yet implemented"))
+		elemLoc, err := receiverLoc.IndexSlice(indexLoc)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		return nil, elemLoc, nil
 	case *MapType:
 		// TODO:
 		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
@@ -1316,11 +1320,15 @@ func (c *Compiler) compileBCIndexExpression(ctx context.Context, prog *Program, 
 
 		return nil, elemLoc, nil
 	case *SliceType:
-		// TODO:
-		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
+		elemLoc, err := receiverLoc.IndexSlice(indexLoc)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		return nil, elemLoc, nil
 	case *MapType:
 		// TODO:
-		return nil, nil, expr.WrapError(fmt.Errorf("slice type not yet implemented"))
+		return nil, nil, expr.WrapError(fmt.Errorf("map type not yet implemented"))
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("cannot index receiver type %s", expr.Receiver.Type()))
 	}

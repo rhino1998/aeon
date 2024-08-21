@@ -395,7 +395,29 @@ func (l *Location) IndexSlice(index *Location) (*Location, error) {
 		Kind:    LocationKindHeap,
 		Name:    fmt.Sprintf("%s[%s]", l.Name, index.Name),
 		Type:    dereferenceType(typ.Elem()),
-		Operand: l.Operand.AddressOf().ConstOffset(2).Dereference().Offset(index.Operand).Dereference(),
+		Operand: l.Operand.Offset(index.Operand.Bound(l.Operand.OffsetReference(1))).Dereference(),
+	}, nil
+}
+
+func (l *Location) LenSlice() (*Location, error) {
+	typ := resolveType(l.Type).(*SliceType)
+
+	return &Location{
+		Kind:    LocationKindHeap,
+		Name:    fmt.Sprintf("len(%s)", l.Name),
+		Type:    dereferenceType(typ.Elem()),
+		Operand: l.Operand.OffsetReference(1),
+	}, nil
+}
+
+func (l *Location) CapSlice() (*Location, error) {
+	typ := resolveType(l.Type).(*SliceType)
+
+	return &Location{
+		Kind:    LocationKindHeap,
+		Name:    fmt.Sprintf("cap(%s)", l.Name),
+		Type:    dereferenceType(typ.Elem()),
+		Operand: l.Operand.OffsetReference(2),
 	}, nil
 }
 

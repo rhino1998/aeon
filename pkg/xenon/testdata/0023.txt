@@ -18,3 +18,4 @@ func main() {
   assert(x[2] == 2)
   x[3]
 }
+---
