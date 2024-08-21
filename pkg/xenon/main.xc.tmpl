@@ -153,9 +153,11 @@ function @aeon_load_internal($op:text):number
 		elseif ($k == "T")
 			$aeon_op_arg_stack.append(1)
 		elseif ($k == "I")
-			var $offset = find(substring($op, $index, -1), "I")
-			$aeon_op_arg_stack.append(substring($op, $index, $offset))
-			$index+=$offset+1
+			var $base = $index
+			while ($op.$index != "I")
+				$index++
+			$aeon_op_arg_stack.append(substring($op, $base, $index-$base))
+			$index++
 		elseif ($k == "R")
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
