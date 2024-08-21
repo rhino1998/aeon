@@ -229,6 +229,23 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 		if err != nil {
 			return err
 		}
+	case compiler.App:
+		err := x.marshalOperand(w, bc.Dst)
+		if err != nil {
+			return err
+		}
+
+		fmt.Fprintf(w, "%s", x.OPSep)
+		err = x.marshalOperand(w, bc.Src)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s", x.OPSep)
+		err = x.marshalOperand(w, bc.Elem)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Size))
 	case compiler.BinOp:
 		err := x.marshalOperand(w, bc.Dst)
 		if err != nil {

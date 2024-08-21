@@ -848,17 +848,74 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			if err != nil {
 				return err
 			}
+		case compiler.App:
+			sliceData, err := r.load(code.Src.OffsetReference(0))()
+			if err != nil {
+				return err
+			}
+			sliceDataAddr := Addr(sliceData)
 
-		// case compiler.LAddr:
-		// 	addr, err := r.load(code.Src)()
-		// 	if err != nil {
-		// 		return err
-		// 	}
-		//
-		// 	err = r.store(code.Dst)(r.fp.Offset(AddrOffset(addr.(Int))), nil)
-		// 	if err != nil {
-		// 		return err
-		// 	}
+			sliceLen, err := r.load(code.Src.OffsetReference(1))()
+			if err != nil {
+				return err
+			}
+
+			sliceCap, err := r.load(code.Src.OffsetReference(2))()
+			if err != nil {
+				return err
+			}
+
+			log.Printf("%v %v %v", sliceLen, sliceCap, sliceDataAddr)
+
+			if sliceCap < sliceLen {
+				return fmt.Errorf("append: slice capacity less than length")
+			}
+
+			if sliceLen == sliceCap {
+				if sliceCap == 0 {
+					sliceCap = 10
+				} else {
+					sliceCap *= 2
+				}
+
+				newDataAddr, err := r.alloc(Size(sliceCap))
+				if err != nil {
+					return err
+				}
+
+				for i := Size(0); i < Size(sliceLen)*code.Size; i++ {
+					val, err := r.loadAddr(sliceDataAddr.Offset(i))
+					if err != nil {
+						return err
+					}
+					r.storeAddr(newDataAddr.Offset(i), val)
+				}
+
+				sliceDataAddr = newDataAddr
+			}
+
+			for i := Size(0); i < code.Size; i++ {
+				val, err := r.load(code.Elem.OffsetReference(i))()
+				if err != nil {
+					return err
+				}
+				r.storeAddr(sliceDataAddr.Offset(Size(sliceLen)*code.Size).Offset(i), val)
+			}
+
+			err = r.store(code.Dst.OffsetReference(0))(float64(sliceDataAddr), nil)
+			if err != nil {
+				return err
+			}
+
+			err = r.store(code.Dst.OffsetReference(1))(float64(sliceLen+1), nil)
+			if err != nil {
+				return err
+			}
+
+			err = r.store(code.Dst.OffsetReference(2))(float64(sliceCap), nil)
+			if err != nil {
+				return err
+			}
 		default:
 			return fmt.Errorf("unrecognized bytecode: %T %v", code, code)
 		}

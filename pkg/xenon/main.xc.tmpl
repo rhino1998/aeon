@@ -1,16 +1,17 @@
 
 ; Utilities
+;
 
 function @aeon_fatal()
 	var $x = "hello"
 	$x = $x:number
 
 function @debug($s:text)
-	print("debug: " & $s)
+	{{if .Debug}}print("debug: " & $s){{end}}
 
 function @__builtin_panic($s:text)
 	var $msg = "panic: " & $s
-	{{if .Debug}}@debug($msg){{end}}
+	@debug($msg)
 	print($msg)
 	@aeon_fatal()
 
@@ -131,6 +132,8 @@ function @aeon_heap_alloc($size:number):number
 	var $addr = $aeon_heap_index
 	$aeon_heap_index += $size
 
+	print(text("heap alloc {} -> {}", $size, $addr))
+
 	; TODO: bounds checking
 	return $addr
 
@@ -227,7 +230,7 @@ function @aeon_load_internal():number
 function @aeon_load($op:text):number
 	$aeon_op_uops.from($op, "{{.UOPSep}}")
 	var $ret = @aeon_load_internal()
-	@debug(text("load {} -> {}", $op, $ret))
+	;{{if .Debug}}@debug(text("load {} -> {}", $op, $ret)){{end}}
 	return $ret
 
 function @aeon_load_addr($op:text):number
@@ -265,7 +268,7 @@ function @aeon_store($op:text, $v:number)
 		@aeon_reg_store(substring($uop, 1, $uop.size-1):number, $v)
 	elseif ($uop == "@")
 		var $addr = @aeon_load_internal()
-		@debug(text("store {} -> {} = {}", $op, $addr, $v))
+		;{{if .Debug}}@debug(text("store {} -> {} = {}", $op, $addr, $v)){{end}}
 		@aeon_mem_store($addr, $v)
 	else
 		print(text("bad operand for store {}", $uop))
@@ -364,11 +367,11 @@ function @aeon_uop($op:text, $a:text):number
 
 ; Advanced Builtins
 
-function @__builtin_append1($data:number, $len:number, $cap:number, $elem:number, $size:number, $ret:number)
+function @aeon_append($data:number, $len:number, $cap:number, $elem:number, $size:number, $ret:number)
 	@__builtin_assert($cap >= $len, "append: cap < len")
-	if ($len + 1 == $cap)
+	if ($len == $cap)
 		if $cap == 0
-			$cap = 10 ; TODO: tune this?
+			$cap = 64 ; TODO: tune this?
 		else
 			$cap *= 2
 
@@ -413,6 +416,9 @@ function @aeon_run($pc:number):number
 	@aeon_reg_init()
 	$aeon_reg.0 = $pc
 	$aeon_reg.1 = {{.GlobalSize}}
+
+	var $size = 0
+
 	repeat {{.NumRegisters}} ($reg)
 		if ($reg == 0)
 			continue
@@ -422,7 +428,7 @@ function @aeon_run($pc:number):number
 
 	var $i = 0
 
-	while ($i < 100000)
+	while ($i < 1000000)
 		$i++
 
 		var $code = @aeon_code($aeon_reg.0)
@@ -431,7 +437,7 @@ function @aeon_run($pc:number):number
 		{{if .Debug}}@debug(text("{} {} {} {} {} {}", delta(), $i, $aeon_reg.0, $aeon_reg.1, $aeon_reg.2, $code)){{end}}
 
 		if ($aeon_ops.0 == "mov")
-			var $size = $aeon_ops.3:number
+			$size = $aeon_ops.3:number
 			if ($size == 1)
 				@aeon_store($aeon_ops.1, @aeon_load($aeon_ops.2))
 			elseif (last($aeon_ops.2) == "@")
@@ -453,9 +459,9 @@ function @aeon_run($pc:number):number
 			elseif ($ftype == 1)
 				var $fname = @aeon_str_load(@aeon_mem_load($fhdr + 3))
 			 	{{if .Debug}}@debug(text("extern {}", $fname)){{end}}
-				var $fsize = @aeon_call_size($fname)
-				@aeon_call_extern($fname, $fsize)
-				$aeon_reg.1 -= $fsize
+				$size = @aeon_call_size($fname)
+				@aeon_call_extern($fname, $size)
+				$aeon_reg.1 -= $size
 			elseif ($ftype == 2)
 				var $faddr = @aeon_mem_load($fhdr + 3)
 				repeat {{.NumRegisters}} ($reg)
@@ -484,6 +490,16 @@ function @aeon_run($pc:number):number
 			@aeon_store($aeon_ops.1, @aeon_str_alloc($str))
 		elseif ($aeon_ops.0 == "alc")
 			@aeon_store($aeon_ops.1, @aeon_heap_alloc(@aeon_load($aeon_ops.2)))
+		elseif ($aeon_ops.0 == "app")
+			var $dstSlice = @aeon_load_addr($aeon_ops.1)
+			var $srcSlice = @aeon_load_addr($aeon_ops.2)
+			$size = $aeon_ops.4:number
+			var $elem = 0
+			if $size == 1
+				$elem = @aeon_load($aeon_ops.3)
+			else
+				$elem = @aeon_load_addr($aeon_ops.3)
+			@aeon_append(@aeon_mem_load($srcSlice), @aeon_mem_load($srcSlice + 1), @aeon_mem_load($srcSlice + 2), $elem, $size, $srcSlice)
 		elseif ($aeon_ops.0 == "nop")
 			continue
 		else

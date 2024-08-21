@@ -1,0 +1,39 @@
+package main
+
+extern func itoa(a int) string
+
+extern func print(a string)
+
+#init
+func main() {
+  x := make([](int,int), 0, 5)
+  for i := 0; i < 10; i++ {
+    x = append(x, (i, i*i))
+    print(itoa(len(x)))
+  }
+
+  for i := 0; i < len(x); i++ {
+    print(itoa(x[i].0) + ": " + itoa(x[i].1))
+  }
+}
+---
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+0: 0
+1: 1
+2: 4
+3: 9
+4: 16
+5: 25
+6: 36
+7: 49
+8: 64
+9: 81

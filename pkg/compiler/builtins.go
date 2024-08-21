@@ -23,19 +23,6 @@ var (
 		},
 		ret: TypeVoid,
 	}
-
-	BuiltinExternAppend1 = &ExternFunction{
-		name: "__builtin_append1",
-		parameters: []Type{
-			TypeKind(KindPointer),
-			TypeKind(KindInt),
-			TypeKind(KindInt),
-			TypeKind(KindPointer),
-			TypeKind(KindInt),
-			TypeKind(KindPointer),
-		},
-		ret: TypeVoid,
-	}
 )
 
 var (
@@ -104,7 +91,6 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(BuiltinNew)
 	s.put(BuiltinMake)
 	s.put(BuiltinAppend)
-	s.put(BuiltinExternAppend1)
 
 	return s
 }
@@ -596,13 +582,13 @@ func (b builtinAppend) Compile(ctx context.Context, c *Compiler, prog *Program, 
 	var bc BytecodeSnippet
 	sliceTmp := scope.allocTemp(args[0].Type())
 	defer scope.deallocTemp(sliceTmp)
-	sliceBC, sliceDst, err := c.compileBCExpression(ctx, prog, args[0], scope, sliceTmp)
+	sliceBC, sliceLoc, err := c.compileBCExpression(ctx, prog, args[0], scope, sliceTmp)
 	if err != nil {
 		return nil, nil, err
 	}
 	bc.Add(sliceBC...)
 
-	elemTmp := scope.allocTemp(resolveType(args[0].Type()).(*SliceType).Elem())
+	elemTmp := scope.allocTemp(args[1].Type())
 	defer scope.deallocTemp(elemTmp)
 	elemBC, elemLoc, err := c.compileBCExpression(ctx, prog, args[1], scope, elemTmp)
 	if err != nil {
@@ -611,59 +597,7 @@ func (b builtinAppend) Compile(ctx context.Context, c *Compiler, prog *Program, 
 
 	bc.Add(elemBC...)
 
-	sliceHdrDst := sliceDst.AsType(sliceHeader)
-
-	callScope := scope.sub(scope.symbols)
-
-	dataLoc, err := sliceHdrDst.IndexTuple(0)
-	if err != nil {
-		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
-	}
-
-	lenLoc, err := sliceHdrDst.IndexTuple(1)
-	if err != nil {
-		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
-	}
-
-	capLoc, err := sliceHdrDst.IndexTuple(2)
-	if err != nil {
-		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
-	}
-
-	elemTyp := resolveType(args[0].Type()).(*SliceType).Elem()
-	if elemTyp.Size() > 1 {
-		elemLoc = elemLoc.AddressOf()
-	}
-	sizeLoc := scope.newImmediate(Int(elemTyp.Size()))
-
-	retPtrLoc := dst.AddressOf()
-
-	dataArg := callScope.newArg("data", 0, TypeKind(KindPointer))
-	bc.Mov(dataArg, dataLoc)
-
-	lenArg := callScope.newArg("len", 1, TypeKind(KindInt))
-	bc.Mov(lenArg, lenLoc)
-
-	capArg := callScope.newArg("cap", 2, TypeKind(KindInt))
-	bc.Mov(capArg, capLoc)
-
-	elemArg := callScope.newArg("elem", 3, TypeKind(KindPointer))
-	bc.Mov(elemArg, elemLoc)
-
-	sizeArg := callScope.newArg("size", 4, TypeKind(KindInt))
-	bc.Mov(sizeArg, sizeLoc)
-
-	retPtrArg := callScope.newArg("retPtr", 5, TypeKind(KindInt))
-	bc.Mov(retPtrArg, retPtrLoc)
-
-	bc.Mov(callScope.SP(), callScope.SP().Add(callScope.newImmediate(Int(6))))
-
-	callLoc, ok := scope.Get(BuiltinExternAppend1.Name())
-	if !ok {
-		return nil, nil, pos.WrapError(fmt.Errorf("failed to find builtin append function %q", BuiltinExternAppend1.Name()))
-	}
-
-	bc.Add(Cal{Func: callLoc.Operand})
+	bc.App(dst, sliceLoc, elemLoc, args[1].Type().Size())
 
 	return bc, dst, nil
 }

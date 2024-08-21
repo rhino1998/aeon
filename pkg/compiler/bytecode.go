@@ -48,6 +48,15 @@ func (s *BytecodeSnippet) Alloc(dst *Location, size *Location) {
 	})
 }
 
+func (s *BytecodeSnippet) App(dst *Location, src *Location, elem *Location, size Size) {
+	*s = append(*s, App{
+		Dst:  dst.Operand,
+		Src:  src.Operand,
+		Elem: elem.Operand,
+		Size: size,
+	})
+}
+
 func (s *BytecodeSnippet) Str(dst *Location, str String) {
 	*s = append(*s, Str{
 		Dst: dst.Operand,
@@ -128,13 +137,15 @@ func (s BytecodeSnippet) ResolveStrings(strings []String) error {
 }
 
 type bytecodeWalker struct {
-	Mov    func(int, Mov) (Bytecode, error)
-	Jmp    func(int, Jmp) (Bytecode, error)
-	BinOp  func(int, BinOp) (Bytecode, error)
-	UnOp   func(int, UnOp) (Bytecode, error)
-	Str    func(int, Str) (Bytecode, error)
-	Call   func(int, Cal) (Bytecode, error)
-	Return func(int, Ret) (Bytecode, error)
+	Mov   func(int, Mov) (Bytecode, error)
+	Jmp   func(int, Jmp) (Bytecode, error)
+	BinOp func(int, BinOp) (Bytecode, error)
+	UnOp  func(int, UnOp) (Bytecode, error)
+	Str   func(int, Str) (Bytecode, error)
+	Cal   func(int, Cal) (Bytecode, error)
+	Ret   func(int, Ret) (Bytecode, error)
+	Alc   func(int, Alc) (Bytecode, error)
+	App   func(int, App) (Bytecode, error)
 }
 
 func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalker {
@@ -215,7 +226,7 @@ func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalk
 
 			return bc, nil
 		},
-		Call: func(index int, bc Cal) (Bytecode, error) {
+		Cal: func(index int, bc Cal) (Bytecode, error) {
 			var err error
 			bc.Func, err = bc.Func.walk(wi(index))
 			if err != nil {
@@ -224,7 +235,35 @@ func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalk
 
 			return bc, nil
 		},
-		Return: func(index int, bc Ret) (Bytecode, error) {
+		Ret: func(index int, bc Ret) (Bytecode, error) {
+			return bc, nil
+		},
+		Alc: func(index int, bc Alc) (Bytecode, error) {
+			var err error
+			bc.Dst, err = bc.Dst.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			return bc, nil
+		},
+		App: func(index int, bc App) (Bytecode, error) {
+			var err error
+			bc.Dst, err = bc.Dst.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Src, err = bc.Src.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Elem, err = bc.Elem.walk(wi(index))
+			if err != nil {
+				return nil, err
+			}
+
 			return bc, nil
 		},
 	}
@@ -263,13 +302,22 @@ func (s BytecodeSnippet) walk(w bytecodeWalker) error {
 			if w.Str == nil {
 				continue
 			}
-			s[i], err = w.Call(i, bc)
+			s[i], err = w.Cal(i, bc)
 		case Ret:
-			if w.Str == nil {
+			if w.Ret == nil {
 				continue
 			}
-			s[i], err = w.Return(i, bc)
+			s[i], err = w.Ret(i, bc)
 		case Alc:
+			if w.Alc == nil {
+				continue
+			}
+			s[i], err = w.Alc(i, bc)
+		case App:
+			if w.App == nil {
+				continue
+			}
+			s[i], err = w.App(i, bc)
 		default:
 			return fmt.Errorf("unhandled bytecode type %T", bc)
 		}
@@ -641,4 +689,19 @@ func (a Alc) Name() string {
 
 func (a Alc) String() string {
 	return fmt.Sprintf("ALC(%v) %v", a.Size, a.Dst)
+}
+
+type App struct {
+	Dst  *Operand
+	Src  *Operand
+	Elem *Operand
+	Size Size
+}
+
+func (a App) Name() string {
+	return "app"
+}
+
+func (a App) String() string {
+	return fmt.Sprintf("APP(%v) %v = %v + [%v]", a.Size, a.Dst, a.Src, a.Elem)
 }

@@ -6,10 +6,12 @@ extern func print(a string)
 
 #init
 func main() {
-  var x []int
+  x := make([](int,int), 0, 5)
   for i := 0; i < 100000; i++ {
-    x = append(x, i)
+    x = append(x, (i, i*i))
   }
 
   print(itoa(len(x)))
 }
+---
+100000
