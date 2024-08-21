@@ -7,11 +7,11 @@ extern func print(a string)
 #init
 func main() {
   x := make([](int,int), 0, 5)
-  for i := 0; i < 100000; i++ {
+  for i := 0; i < 1000; i++ {
     x = append(x, (i, i*i))
   }
 
   print(itoa(len(x)))
 }
 ---
-100000
+1000

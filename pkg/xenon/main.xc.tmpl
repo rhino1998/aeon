@@ -132,7 +132,7 @@ function @aeon_heap_alloc($size:number):number
 	var $addr = $aeon_heap_index
 	$aeon_heap_index += $size
 
-	print(text("heap alloc {} -> {}", $size, $addr))
+	{{if .Debug}}@debug(text("heap alloc {} -> {}", $size, $addr)){{end}}
 
 	; TODO: bounds checking
 	return $addr

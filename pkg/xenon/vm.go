@@ -92,72 +92,6 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				return opAdd[Int](s[0], s[1])
 			},
 		},
-		"__builtin_append1": {
-			ArgSize:    6,
-			ReturnSize: 0,
-			Func: func(r *Runtime, s []float64) float64 {
-				sliceData := Addr(s[0])
-				sliceLen := int(s[1])
-				sliceCap := int(s[2])
-				elemPtr := s[3]
-				size := int(s[4])
-				retPtr := Addr(s[5])
-
-				log.Printf("append: %v %v %v %v %v %v", sliceData, sliceLen, sliceCap, elemPtr, size, retPtr)
-
-				if sliceCap < sliceLen {
-					panic("append: slice capacity less than length")
-				}
-
-				if sliceLen == sliceCap {
-					log.Println("realloc")
-					if sliceCap == 0 {
-						sliceCap = 10
-					} else {
-						sliceCap *= 2
-					}
-
-					newData, err := r.alloc(Size(sliceCap * size))
-					if err != nil {
-						panic(fmt.Errorf("append: failed to allocate new slice data: %w", err))
-					}
-					for i := 0; i < sliceLen*size; i++ {
-						val, err := r.loadAddr(sliceData + Addr(i))
-						if err != nil {
-							panic(fmt.Errorf("append: failed to load slice data: %w", err))
-						}
-						r.storeAddr(newData+Addr(i), val)
-					}
-					sliceData = newData
-				}
-
-				if size == 1 {
-					r.storeAddr(sliceData+Addr(sliceLen*size), elemPtr)
-				} else {
-					for i := 0; i < size; i++ {
-						val, err := r.loadAddr(Addr(elemPtr) + Addr(i))
-						if err != nil {
-							panic(fmt.Errorf("append: failed to load elem data"))
-						}
-						r.storeAddr(sliceData+Addr((sliceLen*size)+i), val)
-					}
-				}
-
-				err := r.storeAddr(retPtr, float64(sliceData))
-				if err != nil {
-					panic(fmt.Errorf("append: failed to store slice data: %w", err))
-				}
-				err = r.storeAddr(retPtr+1, float64(sliceLen+1))
-				if err != nil {
-					panic(fmt.Errorf("append: failed to store slice len: %w", err))
-				}
-				err = r.storeAddr(retPtr+2, float64(sliceCap))
-				if err != nil {
-					panic(fmt.Errorf("append: failed to store slice cap: %w", err))
-				}
-				return 0
-			},
-		},
 	}
 }
 
@@ -873,7 +807,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 			if sliceLen == sliceCap {
 				if sliceCap == 0 {
-					sliceCap = 10
+					sliceCap = 64
 				} else {
 					sliceCap *= 2
 				}

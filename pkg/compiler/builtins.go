@@ -41,6 +41,12 @@ var (
 			builtinLenSlice{},
 		},
 	}
+	BuiltinCap = &BuiltinSymbol{
+		name: "cap",
+		impls: []BuiltinImpl{
+			builtinCapSlice{},
+		},
+	}
 	BuiltinAssert = &BuiltinSymbol{
 		name: "assert",
 		impls: []BuiltinImpl{
@@ -86,6 +92,7 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(TypeError)
 	s.put(Nil)
 	s.put(BuiltinLen)
+	s.put(BuiltinCap)
 	s.put(BuiltinAssert)
 	s.put(BuiltinExternAssert)
 	s.put(BuiltinNew)
@@ -271,6 +278,60 @@ func (b builtinLenSlice) Compile(ctx context.Context, c *Compiler, p *Program, p
 	}
 
 	return bc, lenLoc, nil
+}
+
+type builtinCapSlice struct{}
+
+func (b builtinCapSlice) Match(args []Expression) bool {
+	return cap(args) == 1 && args[0].Type().Kind() == KindSlice
+}
+
+func (b builtinCapSlice) TypeCheck(c *Compiler, pos parser.Position, args []Expression) error {
+	if cap(args) != 1 {
+		return pos.WrapError(fmt.Errorf("builtin cap expects exactly 1 argument, got %d", cap(args)))
+	}
+
+	var err error
+	args[0], err = c.resolveExpressionTypes(args[0], TypeKind(KindSlice))
+	if err != nil {
+		return err
+	}
+
+	if args[0].Type().Kind() != KindSlice {
+		return pos.WrapError(fmt.Errorf("builtin cap expects a slice, got %s", args[0].Type()))
+	}
+
+	return nil
+}
+
+func (b builtinCapSlice) Type([]Expression) Type {
+	return TypeInt
+}
+
+func (b builtinCapSlice) Compile(ctx context.Context, c *Compiler, p *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
+	err := b.TypeCheck(c, pos, args)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var bc BytecodeSnippet
+
+	sliceTmp := scope.allocTemp(args[0].Type())
+	defer scope.deallocTemp(sliceTmp)
+
+	sliceBC, sliceDst, err := c.compileBCExpression(ctx, p, args[0], scope, sliceTmp)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	bc.Add(sliceBC...)
+
+	capLoc, err := sliceDst.AsType(sliceHeader).IndexTuple(2)
+	if err != nil {
+		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
+	}
+
+	return bc, capLoc, nil
 }
 
 type builtinAssert1 struct{}
