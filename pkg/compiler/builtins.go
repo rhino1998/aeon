@@ -160,7 +160,7 @@ func (s *BuiltinSymbol) CallExpression(c *Compiler, expr *CallExpression) (Expre
 		argTypeStrs = append(argTypeStrs, arg.Type().String())
 	}
 
-	return expr, fmt.Errorf("cannot use builtin %s with arguments of type %s", s.name, strings.Join(argTypeStrs, ", "))
+	return expr, expr.WrapError(fmt.Errorf("cannot use builtin %s with arguments of type %s", s.name, strings.Join(argTypeStrs, ", ")))
 }
 
 type BuiltinType struct {

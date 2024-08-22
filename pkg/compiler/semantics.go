@@ -124,13 +124,20 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 		name: string(decl.Name.Str),
 	}
 
+	last := true
 	for _, param := range decl.Parameters {
 		typ, err := c.compileTypeReference(scope, param.Type)
 		if err != nil {
 			return nil, err
 		}
 
+		_, isVariadic := resolveType(typ).(*VariadicType)
+		if !last && isVariadic {
+			return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+		}
+
 		f.parameters = append(f.parameters, typ)
+		last = false
 	}
 
 	if decl.Return != nil {
@@ -441,6 +448,17 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 
 			Position: typ.Position,
 		}, nil
+	case parser.VariadicType:
+		inner, err := c.compileTypeReference(scope, typ.Type)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		return &VariadicType{
+			Type: inner,
+
+			Position: typ.Position,
+		}, nil
 	default:
 		return UnknownType, typ.WrapError(fmt.Errorf("unhandled type reference %q", typ))
 	}
@@ -461,6 +479,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 
 	var lastParamType parser.Type
 	f.parameters = make([]*Variable, len(decl.Parameters))
+	last := true
 	for i := len(decl.Parameters) - 1; i >= 0; i-- {
 		param := decl.Parameters[i]
 		var paramName string
@@ -483,6 +502,11 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 			errs.Add(err)
 		}
 
+		_, isVariadic := resolveType(typ).(*VariadicType)
+		if !last && isVariadic {
+			return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+		}
+
 		variable := &Variable{
 			name: paramName,
 			typ:  typ,
@@ -491,6 +515,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 		}
 
 		f.parameters[i] = variable
+		last = false
 	}
 
 	for _, v := range f.parameters {
@@ -587,6 +612,7 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 
 	var lastParamType parser.Type
 	f.parameters = make([]*Variable, len(decl.Parameters))
+	last := true
 	for i := len(decl.Parameters) - 1; i >= 0; i-- {
 		param := decl.Parameters[i]
 		var paramName string
@@ -609,12 +635,18 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 			errs.Add(err)
 		}
 
+		_, isVariadic := resolveType(typ).(*VariadicType)
+		if !last && isVariadic {
+			return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+		}
+
 		variable := &Variable{
 			name: paramName,
 			typ:  typ,
 		}
 
 		f.parameters[i] = variable
+		last = false
 	}
 
 	for _, v := range f.parameters {

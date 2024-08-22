@@ -1135,3 +1135,21 @@ type ParenthesizedType struct {
 func (t *ParenthesizedType) String() string {
 	return t.Type.String()
 }
+
+type VariadicType struct {
+	Type
+
+	parser.Position
+}
+
+func (t *VariadicType) String() string {
+	return fmt.Sprintf("...%s", t.Type.String())
+}
+
+func (t *VariadicType) GlobalName() TypeName {
+	return TypeName(fmt.Sprintf("...%s", string(t.Type.GlobalName())))
+}
+
+func (t *VariadicType) Kind() Kind {
+	return t.Type.Kind()
+}

@@ -524,3 +524,11 @@ type TypeExpr struct {
 
 	Position
 }
+
+type VariadicType struct {
+	baseType
+
+	Type Type
+
+	Position
+}

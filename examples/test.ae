@@ -1,5 +1,10 @@
 package main
 
+func f(vs ...int) {
+  print(len(vs))
+  print(cap(vs))
+}
+
 #init
 func main() {
   var x []int

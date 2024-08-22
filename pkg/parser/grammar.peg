@@ -430,9 +430,36 @@ StatementList <- __ stmt:Statement __ rest:StatementList? __ {
   ), nil
 }
 
-Receiver <- ParameterNamed / ParameterUnnamed
+Receiver <- ReceiverNamed / ReceiverUnnamed
 
-ParameterUnnamed <- typ:Type {
+ReceiverNamed <- name:Identifier _ typ:Type {
+  return Parameter{
+    Name: maybePtr[Identifier](name),
+    Type: typ.(Type),
+
+		Position: pos(c),
+  }, nil
+}
+
+ReceiverUnnamed <- typ:Type {
+  return Parameter{
+    Type: typ.(Type),
+
+		Position: pos(c),
+  }, nil
+}
+
+ParameterType <- VariadicType / Type
+
+VariadicType <- "..." typ:Type {
+  return VariadicType{
+    Type: typ.(Type),
+
+    Position: pos(c),
+  }, nil
+}
+
+ParameterUnnamed <- typ:ParameterType {
   return Parameter{
     Type: typ.(Type),
 
@@ -448,7 +475,7 @@ ParameterUntyped <- name:Identifier {
   }, nil
 }
 
-ParameterNamed <- name:Identifier _ typ:Type {
+ParameterNamed <- name:Identifier _ typ:ParameterType {
   return Parameter{
     Name: maybePtr[Identifier](name),
     Type: typ.(Type),

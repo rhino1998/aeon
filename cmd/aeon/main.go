@@ -78,7 +78,8 @@ func main() {
 
 					prog, err := compiler.Compile(ctx)
 					if err != nil {
-						return err
+						fmt.Fprintf(os.Stderr, "%v", err)
+						os.Exit(1)
 					}
 
 					out, err := os.Create("main.xc")
