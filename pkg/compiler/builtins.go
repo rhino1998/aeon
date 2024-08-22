@@ -17,16 +17,23 @@ var (
 	TypeError           = NewDerivedType("error", nil, NewInterfaceType().With("Error", nil, TypeString))
 	BuiltinExternAssert = &ExternFunction{
 		name: "__builtin_assert",
-		parameters: []Type{
-			TypeKind(KindBool),
-			TypeKind(KindString),
+		parameters: []*Variable{
+			&Variable{
+				typ: TypeKind(KindBool),
+			},
+			&Variable{
+				typ: TypeKind(KindString),
+			},
 		},
 		ret: TypeVoid,
 	}
 	ExternPrint = &ExternFunction{
 		name: "print",
-		parameters: []Type{
-			TypeAny,
+		parameters: []*Variable{
+			&Variable{
+				typ:      &SliceType{elem: TypeAny},
+				variadic: true,
+			},
 		},
 		ret: TypeVoid,
 	}

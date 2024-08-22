@@ -401,6 +401,7 @@ const (
 	KindInterface
 	KindType
 	KindBuiltin
+	KindVariadic
 )
 
 func (k Kind) IsOperand() bool {
@@ -442,6 +443,8 @@ func (k Kind) String() string {
 		return "type"
 	case KindNil:
 		return "<nil>"
+	case KindVariadic:
+		return "<...>"
 	default:
 		return "<unknown>"
 	}
@@ -827,7 +830,11 @@ func (t *SliceType) GlobalName() TypeName {
 }
 
 func (t *SliceType) Elem() Type { return t.elem }
-func (*SliceType) Size() Size   { return 3 }
+func (*SliceType) Size() Size   { return sliceHeader.Size() }
+
+func (t *SliceType) AsVariadic() *VariadicType {
+	return &VariadicType{elem: t.elem, Position: t.Position}
+}
 
 var sliceHeader = NewTupleType(
 	NewPointerType(TypeVoid),
@@ -1137,19 +1144,31 @@ func (t *ParenthesizedType) String() string {
 }
 
 type VariadicType struct {
-	Type
+	elem Type
 
 	parser.Position
 }
 
 func (t *VariadicType) String() string {
-	return fmt.Sprintf("...%s", t.Type.String())
+	return fmt.Sprintf("...%s", t.elem.String())
 }
 
 func (t *VariadicType) GlobalName() TypeName {
-	return TypeName(fmt.Sprintf("...%s", string(t.Type.GlobalName())))
+	return TypeName(fmt.Sprintf("...%s", string(t.elem.GlobalName())))
+}
+
+func (t *VariadicType) Size() Size {
+	return sliceHeader.Size()
 }
 
 func (t *VariadicType) Kind() Kind {
-	return t.Type.Kind()
+	return KindVariadic
+}
+
+func (t *VariadicType) Elem() Type {
+	return t.elem
+}
+
+func (t *VariadicType) AsSlice() *SliceType {
+	return &SliceType{elem: t.elem, Position: t.Position}
 }

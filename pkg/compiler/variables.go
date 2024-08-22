@@ -13,6 +13,7 @@ type Variable struct {
 
 	global   bool
 	escaping bool
+	variadic bool
 
 	parser.Position
 }

@@ -1034,7 +1034,12 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 			bc.Add(callBC...)
 
+			variadicParam, hasVariadic := ftype.Parameters[len(ftype.Parameters)-1].(*VariadicType)
 			for i, arg := range expr.Args {
+				if i >= len(ftype.Parameters)-1 && hasVariadic {
+					break
+				}
+
 				argVar := callScope.newArg(fmt.Sprintf("%d", i), 0, ftype.Parameters[i])
 				argTmp := callScope.allocTemp(arg.Type())
 
@@ -1050,6 +1055,40 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 				bc.Mov(argVar, argLoc)
 
 				bc.Mov(scope.SP(), scope.SP().AddConst(arg.Type().Size()))
+			}
+
+			// TODO: handle spread operator
+
+			// TODO: fix mixed concrete and variadic parameters
+			if hasVariadic {
+				varTmp := callScope.allocTemp(variadicParam)
+				defer callScope.deallocTemp(varTmp)
+
+				varArg := callScope.newArg("...", 0, variadicParam)
+
+				varBC, varLoc, err := c.compileBCZeroValue(ctx, prog, expr.Position, sliceHeader, scope, varTmp.AsType(sliceHeader))
+				if err != nil {
+					return nil, nil, err
+				}
+
+				bc.Add(varBC...)
+
+				for _, arg := range expr.Args[len(ftype.Parameters)-1:] {
+					argTmp := callScope.allocTemp(arg.Type())
+					argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmp)
+					if err != nil {
+						return nil, nil, err
+					}
+
+					callScope.deallocTemp(argTmp)
+
+					bc.Add(argBC...)
+
+					bc.App(varLoc, varLoc, argLoc, variadicParam.Elem().Size())
+				}
+
+				bc.Mov(varArg, varLoc)
+				bc.Mov(scope.SP(), scope.SP().AddConst(variadicParam.Size()))
 			}
 
 			bc.Add(Cal{

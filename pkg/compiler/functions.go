@@ -131,7 +131,11 @@ func (f *Function) QualifiedName() string {
 func (f *Function) Type() Type {
 	var paramTypes []Type
 	for _, param := range f.parameters {
-		paramTypes = append(paramTypes, param.Type())
+		if param.variadic {
+			paramTypes = append(paramTypes, param.Type().(*SliceType).AsVariadic())
+		} else {
+			paramTypes = append(paramTypes, param.Type())
+		}
 	}
 
 	var receiverTyp Type = TypeVoid
@@ -216,11 +220,11 @@ type ReturnStatement struct {
 type ExternFunction struct {
 	name string
 
-	parameters []Type
+	parameters []*Variable
 	ret        Type
 }
 
-func NewExternFunction(name string, params []Type, ret Type) *ExternFunction {
+func NewExternFunction(name string, params []*Variable, ret Type) *ExternFunction {
 	return &ExternFunction{
 		name:       name,
 		parameters: params,
@@ -231,7 +235,7 @@ func NewExternFunction(name string, params []Type, ret Type) *ExternFunction {
 func (f *ExternFunction) FlatParameterKinds() ([]Kind, error) {
 	var ret []Kind
 	for _, param := range f.parameters {
-		flatParam, err := f.flattenParameters(param)
+		flatParam, err := f.flattenParameters(param.Type())
 		if err != nil {
 			return nil, err
 		}
@@ -297,7 +301,7 @@ func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
 	case KindMap:
 		return nil, fmt.Errorf("cannot pass map type %s to extern function (because it is unimplemented)", param)
 	case KindSlice:
-		return nil, fmt.Errorf("cannot pass slice type %s to extern function (because it is unimplemented)", param)
+		return []Kind{KindPointer, KindInt, KindInt}, nil
 	default:
 		return nil, fmt.Errorf("cannot pass unhandled type %s to extern function", param)
 	}
@@ -310,7 +314,11 @@ func (f *ExternFunction) Name() string {
 func (f *ExternFunction) Type() Type {
 	var paramTypes []Type
 	for _, param := range f.parameters {
-		paramTypes = append(paramTypes, param)
+		if param.variadic {
+			paramTypes = append(paramTypes, param.Type().(*SliceType).AsVariadic())
+		} else {
+			paramTypes = append(paramTypes, param.Type())
+		}
 	}
 
 	return &FunctionType{

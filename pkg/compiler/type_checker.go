@@ -843,11 +843,23 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		switch ftype := resolveType(expr.Function.Type()).(type) {
 		case *FunctionType:
-			if len(ftype.Parameters) != len(expr.Args) {
-				errs.Add(expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(ftype.Parameters), len(expr.Args))))
+			var concreteParams []Type
+			var variadicParam *VariadicType
+			for _, param := range ftype.Parameters {
+				if varType, ok := param.(*VariadicType); ok {
+					variadicParam = varType
+				} else {
+					concreteParams = append(concreteParams, param)
+				}
 			}
 
-			for i := range min(len(expr.Args), len(ftype.Parameters)) {
+			if variadicParam == nil && len(ftype.Parameters) != len(concreteParams) {
+				errs.Add(expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(ftype.Parameters), len(expr.Args))))
+			} else if len(ftype.Parameters) < len(concreteParams) {
+				errs.Add(expr.WrapError(fmt.Errorf("function call expects at least %d parameters, got %d", len(ftype.Parameters), len(expr.Args))))
+			}
+
+			for i := range min(len(expr.Args), len(concreteParams)) {
 				arg, err := c.resolveExpressionTypes(expr.Args[i], ftype.Parameters[i])
 				if err != nil {
 					errs.Add(err)
@@ -860,6 +872,26 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				if ftype.Parameters[i].Kind() == KindInterface && arg.Type().Kind() != KindInterface {
 					expr.Args[i] = &InterfaceTypeCoercionExpression{
 						Interface:  resolveType(ftype.Parameters[i]).(*InterfaceType),
+						Expression: arg,
+					}
+				} else {
+					expr.Args[i] = arg
+				}
+			}
+
+			for i := len(concreteParams); i < len(expr.Args); i++ {
+				arg, err := c.resolveExpressionTypes(expr.Args[i], variadicParam.Elem())
+				if err != nil {
+					errs.Add(err)
+				}
+
+				if !IsAssignableTo(arg.Type(), variadicParam.Elem()) {
+					errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in argument %d in function call", arg.Type(), variadicParam.Elem(), i)))
+				}
+
+				if variadicParam.Elem().Kind() == KindInterface && arg.Type().Kind() != KindInterface {
+					expr.Args[i] = &InterfaceTypeCoercionExpression{
+						Interface:  resolveType(variadicParam.Elem()).(*InterfaceType),
 						Expression: arg,
 					}
 				} else {

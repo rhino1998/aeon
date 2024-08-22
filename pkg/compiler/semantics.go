@@ -119,31 +119,66 @@ func (c *Compiler) compileDirective(p *Package, scope *SymbolScope, dir parser.D
 	return sym, nil
 }
 
-func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolScope, decl parser.ExternFunctionDeclaration) (*ExternFunction, error) {
+func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolScope, decl parser.ExternFunctionDeclaration) (_ *ExternFunction, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	f := &ExternFunction{
 		name: string(decl.Name.Str),
 	}
 
+	var lastParamType parser.Type
+	f.parameters = make([]*Variable, len(decl.Parameters))
 	last := true
-	for _, param := range decl.Parameters {
+	for i := len(decl.Parameters) - 1; i >= 0; i-- {
+		param := decl.Parameters[i]
+		var paramName string
+		if param.Name != nil {
+			paramName = string(param.Name.Str)
+		}
+
+		if param.Type == nil {
+			if lastParamType == nil {
+				errs.Add(param.WrapError(fmt.Errorf("missing type for parameter %q", param.Name.Str)))
+			}
+
+			param.Type = lastParamType
+		} else {
+			lastParamType = param.Type
+		}
+
 		typ, err := c.compileTypeReference(scope, param.Type)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
-		_, isVariadic := resolveType(typ).(*VariadicType)
-		if !last && isVariadic {
-			return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+		varType, isVariadic := resolveType(typ).(*VariadicType)
+		if isVariadic {
+			if !last {
+				return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+			}
+
+			typ = varType.AsSlice()
 		}
 
-		f.parameters = append(f.parameters, typ)
+		variable := &Variable{
+			name:     paramName,
+			typ:      typ,
+			variadic: isVariadic,
+
+			Position: param.Position,
+		}
+
+		f.parameters[i] = variable
 		last = false
 	}
 
 	if decl.Return != nil {
 		typ, err := c.compileTypeReference(scope, decl.Return)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		f.ret = typ
@@ -151,9 +186,9 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 		f.ret = TypeVoid
 	}
 
-	err := scope.put(f)
+	err = scope.put(f)
 	if err != nil {
-		return nil, decl.WrapError(err)
+		errs.Add(decl.WrapError(err))
 	}
 
 	return f, nil
@@ -449,13 +484,13 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 			Position: typ.Position,
 		}, nil
 	case parser.VariadicType:
-		inner, err := c.compileTypeReference(scope, typ.Type)
+		elem, err := c.compileTypeReference(scope, typ.Type)
 		if err != nil {
 			errs.Add(err)
 		}
 
 		return &VariadicType{
-			Type: inner,
+			elem: elem,
 
 			Position: typ.Position,
 		}, nil
@@ -502,14 +537,19 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 			errs.Add(err)
 		}
 
-		_, isVariadic := resolveType(typ).(*VariadicType)
-		if !last && isVariadic {
-			return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+		varType, isVariadic := resolveType(typ).(*VariadicType)
+		if isVariadic {
+			if !last {
+				return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+			}
+
+			typ = varType.AsSlice()
 		}
 
 		variable := &Variable{
-			name: paramName,
-			typ:  typ,
+			name:     paramName,
+			typ:      typ,
+			variadic: isVariadic,
 
 			Position: param.Position,
 		}
@@ -635,14 +675,21 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 			errs.Add(err)
 		}
 
-		_, isVariadic := resolveType(typ).(*VariadicType)
-		if !last && isVariadic {
-			return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+		varType, isVariadic := resolveType(typ).(*VariadicType)
+		if isVariadic {
+			if !last {
+				return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+			}
+
+			typ = varType.AsSlice()
 		}
 
 		variable := &Variable{
-			name: paramName,
-			typ:  typ,
+			name:     paramName,
+			typ:      typ,
+			variadic: isVariadic,
+
+			Position: param.Position,
 		}
 
 		f.parameters[i] = variable

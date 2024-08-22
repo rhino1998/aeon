@@ -1,17 +1,13 @@
 package main
 
-func f(vs ...int) {
-  print(len(vs))
-  print(cap(vs))
+func x(c int, b int, vs ...int) {
+  for i := 0; i < len(vs); i++ {
+    print(c, b, "A", vs[i])
+  }
 }
 
 #init
 func main() {
-  var x []int
-  for i := 0; i < 1000; i++ {
-    x = append(x, i)
-  }
-
-  print(len(x))
-  print(cap(x))
+  print(5, 10, 15, 20, 25, 30)
+  x(1,2,3)
 }

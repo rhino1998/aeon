@@ -43,34 +43,57 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 			},
 		},
 		"print": {
-			ArgSize:    2,
+			ArgSize:    3,
 			ReturnSize: 0,
 			Func: func(r *Runtime, s []float64) float64 {
-				kind, ok := r.vtables[int(s[0])]["#kind"]
-				if !ok {
-					panic("runtime: could not resolve kind")
-				}
-				switch compiler.Kind(kind) {
-				case compiler.KindNil:
-					fmt.Fprintln(r.stdout, "<nil>")
-				case compiler.KindBool:
-					if s[1] == 0 {
-						fmt.Fprintln(r.stdout, "false")
-					} else {
-						fmt.Fprintln(r.stdout, "true")
+				print1 := func(r *Runtime, typ float64, value float64) {
+					kind, ok := r.vtables[int(typ)]["#kind"]
+					if !ok {
+						panic("runtime: could not resolve kind")
 					}
-				case compiler.KindInt:
-					fmt.Fprintf(r.stdout, "%d\n", int(s[1]))
-				case compiler.KindFloat:
-					fmt.Fprintf(r.stdout, "%f\n", s[1])
-				case compiler.KindString:
-					str, err := r.LoadString(Addr(s[1]))
+					switch compiler.Kind(kind) {
+					case compiler.KindNil:
+						fmt.Fprintln(r.stdout, "<nil>")
+					case compiler.KindBool:
+						if value == 0 {
+							fmt.Fprintln(r.stdout, "false")
+						} else {
+							fmt.Fprintln(r.stdout, "true")
+						}
+					case compiler.KindInt:
+						fmt.Fprintf(r.stdout, "%d\n", int(value))
+					case compiler.KindFloat:
+						fmt.Fprintf(r.stdout, "%f\n", value)
+					case compiler.KindString:
+						str, err := r.LoadString(Addr(value))
+						if err != nil {
+							panic(err)
+						}
+						fmt.Fprintln(r.stdout, string(str))
+					default:
+						panic(fmt.Sprintf("unhandled kind %v", compiler.Kind(kind)))
+					}
+				}
+
+				sliceData := Addr(s[0])
+				sliceLen := int(s[1])
+
+				log.Printf("%v %v", sliceData, sliceLen)
+
+				elemSize := Size(2)
+
+				for i := Size(0); i < Size(sliceLen); i += 1 {
+					typ, err := r.loadAddr(sliceData.Offset(i * elemSize))
 					if err != nil {
 						panic(err)
 					}
-					fmt.Fprintln(r.stdout, string(str))
-				default:
-					panic(fmt.Sprintf("unhandled kind %v", compiler.Kind(kind)))
+
+					val, err := r.loadAddr(sliceData.Offset(i*elemSize) + 1)
+					if err != nil {
+						panic(err)
+					}
+
+					print1(r, typ, val)
 				}
 
 				return 0
@@ -866,12 +889,20 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				sliceDataAddr = newDataAddr
 			}
 
-			for i := Size(0); i < code.Size; i++ {
-				val, err := r.load(code.Elem.OffsetReference(i))()
+			if code.Size == 1 {
+				val, err := r.load(code.Elem)()
 				if err != nil {
 					return err
 				}
-				r.storeAddr(sliceDataAddr.Offset(Size(sliceLen)*code.Size).Offset(i), val)
+				r.storeAddr(sliceDataAddr.Offset(Size(sliceLen)*code.Size), val)
+			} else {
+				for i := Size(0); i < code.Size; i++ {
+					val, err := r.load(code.Elem.OffsetReference(i))()
+					if err != nil {
+						return err
+					}
+					r.storeAddr(sliceDataAddr.Offset(Size(sliceLen)*code.Size).Offset(i), val)
+				}
 			}
 
 			err = r.store(code.Dst.OffsetReference(0))(float64(sliceDataAddr), nil)
