@@ -218,7 +218,19 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 		}
 
 		stmt.Expression = expr
-		stmt.Variable.SetType(expr.Type())
+
+		if len(stmt.Variables) > 1 {
+			tupleType, ok := resolveType(expr.Type()).(*TupleType)
+			if !ok {
+				errs.Add(stmt.WrapError(fmt.Errorf("cannot destructure non-tuple type %s", expr.Type())))
+			} else {
+				for i := range stmt.Variables {
+					stmt.Variables[i].SetType(tupleType.Elems()[i])
+				}
+			}
+		} else {
+			stmt.Variables[0].SetType(expr.Type())
+		}
 
 		return nil
 	case *AssignmentOperatorStatement:
@@ -742,6 +754,15 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		switch sym := sym.(type) {
 		case nil:
 			return expr, expr.WrapError(fmt.Errorf("undefined name %s", expr.Name()))
+		case Nil:
+			if bound == nil {
+				bound = Nil{}
+			}
+			return &NilExpression{
+				typ: bound,
+
+				Position: expr.Position,
+			}, nil
 		case *Variable:
 			return expr, nil
 		case Type:
@@ -879,23 +900,42 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				}
 			}
 
-			for i := len(concreteParams); i < len(expr.Args); i++ {
-				arg, err := c.resolveExpressionTypes(expr.Args[i], variadicParam.Elem())
-				if err != nil {
-					errs.Add(err)
-				}
-
-				if !IsAssignableTo(arg.Type(), variadicParam.Elem()) {
-					errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in argument %d in function call", arg.Type(), variadicParam.Elem(), i)))
-				}
-
-				if variadicParam.Elem().Kind() == KindInterface && arg.Type().Kind() != KindInterface {
-					expr.Args[i] = &InterfaceTypeCoercionExpression{
-						Interface:  resolveType(variadicParam.Elem()).(*InterfaceType),
-						Expression: arg,
+			if variadicParam != nil {
+				if len(expr.Args) > len(concreteParams) && expr.Args[len(concreteParams)].Type().Kind() == KindVariadic {
+					arg, err := c.resolveExpressionTypes(expr.Args[len(concreteParams)], variadicParam)
+					if err != nil {
+						errs.Add(err)
 					}
+
+					if !IsAssignableTo(arg.Type().(*VariadicType).AsSlice(), variadicParam.AsSlice()) {
+						errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in variadic spread argument in function call", arg.Type().(*VariadicType).AsSlice(), variadicParam.AsSlice())))
+					}
+
+					expr.Args[len(concreteParams)] = arg
 				} else {
-					expr.Args[i] = arg
+					for i := len(concreteParams); i < len(expr.Args); i++ {
+						if expr.Args[i].Type().Kind() == KindVariadic {
+							errs.Add(expr.Args[i].WrapError(fmt.Errorf("cannot use variadic spread argument %s as invidiual variadic argument %d in function call", expr.Args[i], i)))
+						}
+
+						arg, err := c.resolveExpressionTypes(expr.Args[i], variadicParam.Elem())
+						if err != nil {
+							errs.Add(err)
+						}
+
+						if !IsAssignableTo(arg.Type(), variadicParam.Elem()) {
+							errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in argument %d in function call", arg.Type(), variadicParam.Elem(), i)))
+						}
+
+						if variadicParam.Elem().Kind() == KindInterface && arg.Type().Kind() != KindInterface {
+							expr.Args[i] = &InterfaceTypeCoercionExpression{
+								Interface:  resolveType(variadicParam.Elem()).(*InterfaceType),
+								Expression: arg,
+							}
+						} else {
+							expr.Args[i] = arg
+						}
+					}
 				}
 			}
 
@@ -964,7 +1004,18 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				errs.Add(err)
 			}
 
-			expr.Elems[i] = elem
+			if !IsAssignableTo(elem.Type(), elemBound) {
+				errs.Add(elem.WrapError(fmt.Errorf("cannot use element of type %s at index %d in tuple literal as %s", elem.Type(), i, elemBound)))
+			}
+
+			if elemBound.Kind() == KindInterface && elem.Type().Kind() != KindInterface {
+				expr.Elems[i] = &InterfaceTypeCoercionExpression{
+					Interface:  resolveType(elemBound).(*InterfaceType),
+					Expression: elem,
+				}
+			} else {
+				expr.Elems[i] = elem
+			}
 		}
 
 		return expr, nil
@@ -1005,8 +1056,30 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		}
 
 		return expr, nil
+	case *SpreadExpression:
+		var subBound Type
+		if bound != nil {
+			if bound.Kind() == KindVariadic {
+				subBound = bound.(*VariadicType).AsSlice()
+			} else {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot spread into non-variadic type %s", bound)))
+			}
+		}
+
+		subExpr, err := c.resolveExpressionTypes(expr.Expr, subBound)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		if !IsAssignableTo(subExpr.Type(), subBound) {
+			errs.Add(expr.WrapError(fmt.Errorf("cannot spread non-slice type %s", subExpr.Type())))
+		}
+
+		expr.Expr = subExpr
+
+		return expr, nil
 	default:
-		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %T", expr))
+		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %s", expr))
 	}
 }
 

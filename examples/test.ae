@@ -1,13 +1,20 @@
 package main
 
-func x(c int, b int, vs ...int) {
-  for i := 0; i < len(vs); i++ {
-    print(c, b, "A", vs[i])
-  }
+extern func itoa(i int) string
+
+type E int
+
+func (e E) Error() string {
+  return "error message" + itoa(int(e))
+}
+
+func f(i int) (int, error) {
+  return 1, E(5)
 }
 
 #init
 func main() {
-  print(5, 10, 15, 20, 25, 30)
-  x(1,2,3)
+  a, err := f(1)
+  print(a)
+  print(err.Error())
 }

@@ -37,13 +37,18 @@ var (
 		},
 		ret: TypeVoid,
 	}
-)
-
-var (
-	Nil = &Constant{
-		name:               "nil",
-		typ:                NilType,
-		ConstantExpression: NewLiteral(NilValue),
+	ExternPrintf = &ExternFunction{
+		name: "printf",
+		parameters: []*Variable{
+			&Variable{
+				typ: TypeString,
+			},
+			&Variable{
+				typ:      &SliceType{elem: TypeAny},
+				variadic: true,
+			},
+		},
+		ret: TypeVoid,
 	}
 )
 
@@ -104,7 +109,7 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(TypeFloat)
 	s.put(TypeAny)
 	s.put(TypeError)
-	s.put(Nil)
+	s.put(Nil{})
 	s.put(BuiltinLen)
 	s.put(BuiltinCap)
 	s.put(BuiltinAssert)
@@ -113,6 +118,7 @@ func BuiltinsSymbols() *SymbolScope {
 	s.put(BuiltinMake)
 	s.put(BuiltinAppend)
 	s.put(ExternPrint)
+	s.put(ExternPrintf)
 
 	return s
 }
@@ -120,7 +126,7 @@ func BuiltinsSymbols() *SymbolScope {
 func BuiltinValues(regs int, symbols *SymbolScope) *ValueScope {
 	s := NewValueScope(regs, symbols)
 
-	s.registerType(NilType)
+	s.registerType(Nil{})
 
 	return s
 }

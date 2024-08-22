@@ -1,0 +1,21 @@
+package main
+
+#init
+func main() {
+  printf("Hello, World!")
+  printf("Hello * %d", 5)
+  printf("Hello %s", "there")
+  printf("Hello %03.1f", 0.2)
+  printf("Hello %v", true)
+
+  printf("%v %v %v %v %v", true, 1, 0.3, "hello", nil)
+  printf("%v %v %v %v %v", false, -1, -0.3, "", nil)
+}
+---
+Hello, World!
+Hello * 5
+Hello there
+Hello 0.2
+Hello true
+true 1 0.3 hello <nil>
+false -1 -0.3  <nil>

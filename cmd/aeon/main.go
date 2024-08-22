@@ -45,6 +45,9 @@ func main() {
 					}
 
 					logger := slog.Default()
+					if c.Bool("debug") {
+						slog.SetLogLoggerLevel(slog.LevelDebug)
+					}
 
 					config := compiler.Config{}
 
@@ -88,7 +91,7 @@ func main() {
 					}
 					defer out.Close()
 
-					err = xenon.EmitXenonCode(out, prog, c.Bool("debug"))
+					err = xenon.EmitXenonCode(ctx, logger, out, prog)
 					if err != nil {
 						return err
 					}

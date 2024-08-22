@@ -29,114 +29,115 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 		"__builtin_assert": {
 			ArgSize:    2,
 			ReturnSize: 0,
-			Func: func(r *Runtime, s []float64) float64 {
+			Func: func(r *Runtime, s ...float64) error {
 				str, err := r.LoadString(Addr(s[1]))
 				if err != nil {
-					panic(err)
+					return err
 				}
 
 				if s[0] == 0 {
-					panic(fmt.Sprintf("assertion failed: %s", string(str)))
+					return fmt.Errorf("assertion failed: %s", string(str))
 				}
 
-				return 0
+				return nil
 			},
 		},
 		"print": {
 			ArgSize:    3,
 			ReturnSize: 0,
-			Func: func(r *Runtime, s []float64) float64 {
-				print1 := func(r *Runtime, typ float64, value float64) {
-					kind, ok := r.vtables[int(typ)]["#kind"]
-					if !ok {
-						panic("runtime: could not resolve kind")
-					}
-					switch compiler.Kind(kind) {
-					case compiler.KindNil:
-						fmt.Fprintln(r.stdout, "<nil>")
-					case compiler.KindBool:
-						if value == 0 {
-							fmt.Fprintln(r.stdout, "false")
-						} else {
-							fmt.Fprintln(r.stdout, "true")
-						}
-					case compiler.KindInt:
-						fmt.Fprintf(r.stdout, "%d\n", int(value))
-					case compiler.KindFloat:
-						fmt.Fprintf(r.stdout, "%f\n", value)
-					case compiler.KindString:
-						str, err := r.LoadString(Addr(value))
-						if err != nil {
-							panic(err)
-						}
-						fmt.Fprintln(r.stdout, string(str))
-					default:
-						panic(fmt.Sprintf("unhandled kind %v", compiler.Kind(kind)))
-					}
-				}
-
+			Func: func(r *Runtime, s ...float64) error {
 				sliceData := Addr(s[0])
 				sliceLen := int(s[1])
 
-				log.Printf("%v %v", sliceData, sliceLen)
+				elemSize := Size(2)
+
+				for i := Size(0); i < Size(sliceLen); i++ {
+					typ, err := r.loadAddr(sliceData.Offset(i * elemSize))
+					if err != nil {
+						return err
+					}
+
+					val, err := r.loadAddr(sliceData.Offset(i*elemSize + 1))
+					if err != nil {
+						return err
+					}
+
+					valStr, err := r.toString(typ, val)
+					if err != nil {
+						return err
+					}
+
+					fmt.Fprintf(r.stdout, "%s", valStr)
+					if i < Size(sliceLen)-1 {
+						fmt.Fprintf(r.stdout, " ")
+					}
+				}
+
+				fmt.Fprintf(r.stdout, "\n")
+
+				return nil
+			},
+		},
+		"printf": {
+			ArgSize:    4,
+			ReturnSize: 0,
+			Func: func(r *Runtime, s ...float64) error {
+
+				fmtStr, err := r.LoadString(Addr(s[0]))
+				if err != nil {
+					return err
+				}
+
+				var _ = fmtStr
+
+				sliceData := Addr(s[1])
+				sliceLen := int(s[2])
 
 				elemSize := Size(2)
 
-				for i := Size(0); i < Size(sliceLen); i += 1 {
+				var args []any
+
+				for i := Size(0); i < Size(sliceLen); i++ {
 					typ, err := r.loadAddr(sliceData.Offset(i * elemSize))
 					if err != nil {
-						panic(err)
+						return err
 					}
 
-					val, err := r.loadAddr(sliceData.Offset(i*elemSize) + 1)
+					val, err := r.loadAddr(sliceData.Offset(i*elemSize + 1))
 					if err != nil {
-						panic(err)
+						return err
 					}
 
-					print1(r, typ, val)
+					valNative, err := r.toNative(typ, val)
+					if err != nil {
+						return err
+					}
+
+					args = append(args, valNative)
 				}
 
-				return 0
+				fmt.Fprintf(r.stdout, string(fmtStr), args...)
+				fmt.Fprintf(r.stdout, "\n")
+
+				return nil
 			},
 		},
 		"itoa": {
 			ArgSize:    1,
 			ReturnSize: 1,
-			Func: func(r *Runtime, s []float64) float64 {
-				addr, err := r.allocStr(String(fmt.Sprintf("%d", int(s[0]))))
+			Func: func(r *Runtime, s ...float64) error {
+				addr, err := r.allocStr(String(fmt.Sprintf("%d", int(s[1]))))
 				if err != nil {
-					panic(err)
+					return err
 				}
-				return float64(addr)
-			},
-		},
-		"print3": {
-			ArgSize:    3,
-			ReturnSize: 0,
-			Func: func(_ *Runtime, s []float64) float64 {
-				fmt.Println(s)
-				return 0
-			},
-		},
-		"printInt": {
-			ArgSize:    1,
-			ReturnSize: 0,
-			Func: func(_ *Runtime, s []float64) float64 {
-				fmt.Println(s[0])
-				return 0
+				s[0] = float64(addr)
+				return nil
 			},
 		},
 		"panic": {
 			ArgSize: 1,
-			Func: func(_ *Runtime, s []float64) float64 {
-				panic(s[0])
-			},
-		},
-		"add": {
-			ArgSize:    2,
-			ReturnSize: 1,
-			Func: func(r *Runtime, s []float64) float64 {
-				return opAdd[Int](s[0], s[1])
+			Func: func(r *Runtime, s ...float64) error {
+				return fmt.Errorf("panic: %v", s[0])
 			},
 		},
 	}
@@ -146,7 +147,7 @@ const PageSize = 65535 // annoyingly not a power of 2
 
 type RuntimeExternFuncs map[String]RuntimeExternFuncEntry
 
-type RuntimeExternFunc func(*Runtime, []float64) float64
+type RuntimeExternFunc func(*Runtime, ...float64) error
 
 type Runtime struct {
 	prog        *compiler.Program
@@ -218,7 +219,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 				if fun == nil {
 					return nil, fmt.Errorf("failed to resolve method %s on type %s", method.Name, typ)
 				}
-				r.vtables[typeID][method.Name] = float64(fun.InfoAddr())
+				r.vtables[typeID][method.String()] = float64(fun.InfoAddr())
 			}
 		case *compiler.PointerType:
 			switch typ := typ.Pointee().(type) {
@@ -228,13 +229,74 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 					if fun == nil {
 						return nil, fmt.Errorf("failed to resolve method %s on type %s", method.Name, typ)
 					}
-					r.vtables[typeID][method.Name] = float64(fun.InfoAddr())
+					r.vtables[typeID][method.String()] = float64(fun.InfoAddr())
 				}
 			}
 		}
 	}
 
 	return r, nil
+}
+
+func (r *Runtime) toNative(typ float64, value float64) (any, error) {
+	kind, ok := r.vtables[int(typ)]["#kind"]
+	if !ok {
+		panic(fmt.Sprintf("runtime: could not resolve kind %d", int(typ)))
+	}
+	switch compiler.Kind(kind) {
+	case compiler.KindNil:
+		return nil, nil
+	case compiler.KindBool:
+		if value == 0 {
+			return false, nil
+		} else {
+			return true, nil
+		}
+	case compiler.KindInt:
+		return int(value), nil
+	case compiler.KindFloat:
+		return value, nil
+	case compiler.KindString:
+		str, err := r.LoadString(Addr(value))
+		if err != nil {
+			return "", err
+		}
+
+		return string(str), nil
+	default:
+		return fmt.Sprintf("<unhandled type: %d>", int(typ)), nil
+	}
+}
+
+func (r *Runtime) toString(typ float64, value float64) (string, error) {
+	kind, ok := r.vtables[int(typ)]["#kind"]
+	if !ok {
+		panic(fmt.Sprintf("runtime: could not resolve kind for type %d", int(typ)))
+	}
+
+	switch compiler.Kind(kind) {
+	case compiler.KindNil:
+		return "<nil>", nil
+	case compiler.KindBool:
+		if value == 0 {
+			return "false", nil
+		} else {
+			return "true", nil
+		}
+	case compiler.KindInt:
+		return fmt.Sprintf("%d", int(value)), nil
+	case compiler.KindFloat:
+		return fmt.Sprintf("%f", value), nil
+	case compiler.KindString:
+		str, err := r.LoadString(Addr(value))
+		if err != nil {
+			return "", err
+		}
+
+		return string(str), nil
+	default:
+		return fmt.Sprintf("<unhandled type: %d>", int(typ)), nil
+	}
 }
 
 func (r *Runtime) pc() compiler.Addr {
@@ -263,6 +325,17 @@ func (r *Runtime) setSP(addr compiler.Addr) {
 
 func (r *Runtime) splitAddr(addr compiler.Addr) (uint64, uint64) {
 	return uint64(addr / PageSize), uint64(addr % PageSize)
+}
+
+func (r *Runtime) CallExtern(name string, ret []float64, args ...float64) error {
+	extern, ok := r.externFuncs[String(name)]
+	if !ok {
+		return fmt.Errorf("no such extern function %q", name)
+	}
+
+	ret = append(append([]float64{}, ret...), args...)
+
+	return extern.Func(r, ret...)
 }
 
 func (r *Runtime) fetch(addr compiler.Addr) (compiler.Bytecode, error) {
@@ -371,7 +444,6 @@ func (r *Runtime) allocStr(val String) (Addr, error) {
 }
 
 func (r *Runtime) alloc(size Size) (Addr, error) {
-	log.Printf("alloc %d", size)
 	addr := r.heapIndex
 	r.heapIndex += Addr(size)
 	if r.heapIndex > Addr(len(r.memPages)*PageSize) {
@@ -723,18 +795,31 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				if err != nil {
 					return fmt.Errorf("failed to load %d args for extern %q", entry.ArgSize, code.Func)
 				}
-				ret := entry.Func(r, args)
+
+				retArgs := make([]float64, 0, entry.ReturnSize+entry.ArgSize)
+				retArgs = append(retArgs, make([]float64, entry.ReturnSize)...)
+				retArgs = append(retArgs, args...)
+
+				err = entry.Func(r, retArgs...)
+				if err != nil {
+					return fmt.Errorf("failed to call extern %q: %w", string(externNameStr), err)
+				}
 				for i := range entry.ReturnSize {
-					r.storeAddr(r.sp().Offset(-(entry.ArgSize + entry.ReturnSize)).Offset(-i), ret)
+					r.storeAddr(r.sp().Offset(-(entry.ArgSize + entry.ReturnSize)).Offset(-i), retArgs[i])
 				}
 
 				if r.debug {
 					var argStrs []string
-					for _, arg := range args {
+					for _, arg := range retArgs[entry.ReturnSize:] {
 						argStrs = append(argStrs, fmt.Sprintf("%v", arg))
-
 					}
-					log.Printf("extern call %s(%s) = %v", string(externNameStr), strings.Join(argStrs, ", "), ret)
+
+					var retStrs []string
+					for _, ret := range retArgs[:entry.ReturnSize] {
+						retStrs = append(retStrs, fmt.Sprintf("%v", ret))
+					}
+
+					log.Printf("extern call %s(%s) = %v", string(externNameStr), strings.Join(argStrs, ", "), strings.Join(retStrs, ", "))
 				}
 
 				r.setSP(r.sp() - compiler.Addr(entry.ArgSize+entry.ReturnSize))
@@ -860,8 +945,6 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				return err
 			}
 
-			log.Printf("%v %v %v", sliceLen, sliceCap, sliceDataAddr)
-
 			if sliceCap < sliceLen {
 				return fmt.Errorf("append: slice capacity less than length")
 			}
@@ -873,7 +956,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 					sliceCap *= 2
 				}
 
-				newDataAddr, err := r.alloc(Size(sliceCap))
+				newDataAddr, err := r.alloc(Size(sliceCap) * code.Size)
 				if err != nil {
 					return err
 				}
@@ -971,6 +1054,7 @@ func unaryOp(r *Runtime, op unaryOperatorFunc, loadA loadFunc) (float64, error) 
 type Float = compiler.Float
 type Int = compiler.Int
 type String = compiler.String
+type Nil = compiler.Nil
 type Bool = compiler.Bool
 type Addr = compiler.Addr
 type Size = compiler.Size

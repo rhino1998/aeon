@@ -3,6 +3,7 @@ package compiler
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/parser"
@@ -528,20 +529,42 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 
 		return bc, nil
 	case *DeclarationStatement:
-		local := scope.newLocal(stmt.Variable.Name(), stmt.Expression.Type())
+		if len(stmt.Variables) == 1 {
+			local := scope.newLocal(stmt.Variables[0].Name(), stmt.Expression.Type())
 
-		initBC, rhsOp, err := c.compileBCExpression(ctx, prog, stmt.Expression, scope, local)
-		if err != nil {
-			return nil, err
+			initBC, rhsOp, err := c.compileBCExpression(ctx, prog, stmt.Expression, scope, local)
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Add(initBC...)
+
+			if rhsOp != local {
+				bc.Add(scope.Mov(rhsOp, local))
+			}
+
+			return bc, nil
+		} else {
+			locals := make([]*Location, len(stmt.Variables))
+			for i := range stmt.Variables {
+				locals[i] = scope.newLocal(stmt.Variables[i].Name(), stmt.Variables[i].Type())
+			}
+
+			tupleLoc := locals[0].AsType(stmt.Expression.Type())
+
+			initBC, rhsOp, err := c.compileBCExpression(ctx, prog, stmt.Expression, scope, tupleLoc)
+			if err != nil {
+				return nil, err
+			}
+
+			bc.Add(initBC...)
+
+			if rhsOp != tupleLoc {
+				bc.Add(scope.Mov(rhsOp, tupleLoc))
+			}
+
+			return bc, nil
 		}
-
-		bc.Add(initBC...)
-
-		if rhsOp != local {
-			bc.Add(scope.Mov(rhsOp, local))
-		}
-
-		return bc, nil
 	case *AssignmentStatement:
 		lhsBC, lhsOp, err := c.compileBCLHS(ctx, prog, stmt.Left, scope)
 		if err != nil {
@@ -868,8 +891,8 @@ func (c *Compiler) compileBCZeroValue(ctx context.Context, prog *Program, pos pa
 		return bc, dst, nil
 	case *InterfaceType:
 		valBC, err := c.compileBCValuesLiteral(ctx, prog, []Expression{
-			NewLiteral(NilType.GlobalName()),
-			NewLiteral(NilValue),
+			NewLiteral(Nil{}.GlobalName()),
+			NewLiteral(Int(0)),
 		}, scope, dst.AsType(interfaceTuple))
 		if err != nil {
 			return nil, nil, err
@@ -901,13 +924,10 @@ func (c *Compiler) compileBCZeroValue(ctx context.Context, prog *Program, pos pa
 func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr Expression, scope *ValueScope, dst *Location) ([]Bytecode, *Location, error) {
 	var bc BytecodeSnippet
 	switch expr := expr.(type) {
+	case *NilExpression:
+		return c.compileBCZeroValue(ctx, prog, expr.Position, expr.Type(), scope, dst)
 	case *Literal:
-		switch expr.Type().Kind() {
-		case KindNil:
-			return c.compileBCZeroValue(ctx, prog, expr.Position, dst.Type, scope, dst)
-		default:
-			return nil, expr.Value().Location(scope), nil
-		}
+		return nil, expr.Value().Location(scope), nil
 	case *CompilerFunctionReferenceExpression:
 		return nil, scope.newFunctionRef(expr.Function), nil
 	case *SymbolReferenceExpression:
@@ -1034,7 +1054,12 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 			bc.Add(callBC...)
 
-			variadicParam, hasVariadic := ftype.Parameters[len(ftype.Parameters)-1].(*VariadicType)
+			var hasVariadic bool
+			var variadicParam *VariadicType
+			if len(ftype.Parameters) > 0 {
+				variadicParam, hasVariadic = ftype.Parameters[len(ftype.Parameters)-1].(*VariadicType)
+			}
+
 			for i, arg := range expr.Args {
 				if i >= len(ftype.Parameters)-1 && hasVariadic {
 					break
@@ -1059,36 +1084,48 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 			// TODO: handle spread operator
 
-			// TODO: fix mixed concrete and variadic parameters
 			if hasVariadic {
 				varTmp := callScope.allocTemp(variadicParam)
 				defer callScope.deallocTemp(varTmp)
 
 				varArg := callScope.newArg("...", 0, variadicParam)
 
-				varBC, varLoc, err := c.compileBCZeroValue(ctx, prog, expr.Position, sliceHeader, scope, varTmp.AsType(sliceHeader))
-				if err != nil {
-					return nil, nil, err
-				}
-
-				bc.Add(varBC...)
-
-				for _, arg := range expr.Args[len(ftype.Parameters)-1:] {
-					argTmp := callScope.allocTemp(arg.Type())
-					argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmp)
+				if len(expr.Args) > len(ftype.Parameters)-1 && expr.Args[len(ftype.Parameters)-1].Type().Kind() == KindVariadic {
+					varBC, varLoc, err := c.compileBCExpression(ctx, prog, expr.Args[len(ftype.Parameters)-1], callScope, varTmp)
 					if err != nil {
 						return nil, nil, err
 					}
 
-					callScope.deallocTemp(argTmp)
+					bc.Add(varBC...)
 
-					bc.Add(argBC...)
+					bc.Mov(varArg, varLoc)
+					bc.Mov(scope.SP(), scope.SP().AddConst(variadicParam.Size()))
+				} else {
+					varBC, varLoc, err := c.compileBCZeroValue(ctx, prog, expr.Position, sliceHeader, scope, varTmp.AsType(sliceHeader))
+					if err != nil {
+						return nil, nil, err
+					}
 
-					bc.App(varLoc, varLoc, argLoc, variadicParam.Elem().Size())
+					bc.Add(varBC...)
+
+					for _, arg := range expr.Args[len(ftype.Parameters)-1:] {
+						argTmp := callScope.allocTemp(arg.Type())
+						argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmp)
+						if err != nil {
+							return nil, nil, err
+						}
+
+						callScope.deallocTemp(argTmp)
+
+						bc.Add(argBC...)
+
+						bc.App(varLoc, varLoc, argLoc, variadicParam.Elem().Size())
+					}
+
+					bc.Mov(varArg, varLoc)
+					bc.Mov(scope.SP(), scope.SP().AddConst(variadicParam.Size()))
 				}
 
-				bc.Mov(varArg, varLoc)
-				bc.Mov(scope.SP(), scope.SP().AddConst(variadicParam.Size()))
 			}
 
 			bc.Add(Cal{
@@ -1154,6 +1191,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 		return c.compileBCIndexExpression(ctx, prog, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
 	case *TupleExpression:
+		log.Println(expr.Elems)
 		for i, elem := range expr.Elems {
 			dst, err := dst.IndexTuple(i)
 			if err != nil {
@@ -1229,6 +1267,14 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		return bc, scope.typeName(expr.typ), nil
 	case *BuiltinExpression:
 		return expr.Impl.Compile(ctx, c, prog, expr.Position, expr.Args, scope, dst)
+	case *SpreadExpression:
+		sliceBC, sliceLoc, err := c.compileBCExpression(ctx, prog, expr.Expr, scope, dst.AsType(expr.Expr.Type()))
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(sliceBC...)
+		return bc, sliceLoc.AsType(expr.Type()), nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}

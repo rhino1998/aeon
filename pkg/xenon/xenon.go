@@ -2,10 +2,11 @@ package xenon
 
 import (
 	"bytes"
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"text/template"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
@@ -57,11 +58,12 @@ type xenonContext struct {
 	OPSep  string
 	UOPSep string
 
-	KindNil    int
-	KindInt    int
-	KindFloat  int
-	KindBool   int
-	KindString int
+	KindNil     int
+	KindInt     int
+	KindFloat   int
+	KindBool    int
+	KindString  int
+	KindPointer int
 }
 
 func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Function, error) {
@@ -77,7 +79,7 @@ func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Functi
 	return f, nil
 }
 
-func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
+func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *compiler.Program) error {
 	var xeCtx xenonContext
 	xeCtx.PageSize = 65535
 	xeCtx.NumCodePages = (len(prog.Bytecode()) + xeCtx.PageSize) / xeCtx.PageSize
@@ -87,7 +89,7 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	xeCtx.MaxLoadDepth = 5
 	xeCtx.GlobalSize = int(prog.GlobalSize())
 	xeCtx.VTable = make(VTable)
-	xeCtx.Debug = debug
+	xeCtx.Debug = logger.Handler().Enabled(ctx, slog.LevelDebug)
 	xeCtx.OPSep = "\x9B"
 
 	xeCtx.OPSep = "|"
@@ -97,6 +99,7 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 	xeCtx.KindFloat = int(compiler.KindFloat)
 	xeCtx.KindBool = int(compiler.KindBool)
 	xeCtx.KindString = int(compiler.KindString)
+	xeCtx.KindPointer = int(compiler.KindPointer)
 
 	var err error
 
@@ -124,14 +127,14 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 		case *compiler.DerivedType:
 			for _, method := range typ.Methods(false) {
 				methodFunc := typ.Method(method.Name, false)
-				xeCtx.VTable[i][method.Name] = int(methodFunc.InfoAddr())
+				xeCtx.VTable[i][method.String()] = int(methodFunc.InfoAddr())
 			}
 		case *compiler.PointerType:
 			switch typ := typ.Pointee().(type) {
 			case *compiler.DerivedType:
 				for _, method := range typ.Methods(true) {
 					methodFunc := typ.Method(method.Name, true)
-					xeCtx.VTable[i][method.Name] = int(methodFunc.InfoAddr())
+					xeCtx.VTable[i][method.String()] = int(methodFunc.InfoAddr())
 				}
 			}
 		}
@@ -139,9 +142,13 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 
 	xeCtx.Code = make(map[PageAddr]string)
 
-	if debug {
-		log.Printf("Program BC:%d PageSize:%d", len(prog.Bytecode()), xeCtx.PageSize)
-	}
+	logger.Debug("Program",
+		slog.Int("page_size", xeCtx.PageSize),
+		slog.Int("code_pages", xeCtx.NumCodePages),
+		slog.Int("mem_pages", xeCtx.NumMemPages),
+		slog.Int("str_pages", xeCtx.NumStrPages),
+		slog.Int("instructions", len(prog.Bytecode())),
+	)
 
 	for _, extern := range prog.ExternFuncs() {
 		ftype := extern.Type().(*compiler.FunctionType)
@@ -185,9 +192,7 @@ func EmitXenonCode(w io.Writer, prog *compiler.Program, debug bool) error {
 		page := i / xeCtx.PageSize
 		pageAddr := i % xeCtx.PageSize
 
-		if debug {
-			log.Printf("%d:%d:%s", page, pageAddr, bc)
-		}
+		logger.Debug("debug: %d:%d:%s", slog.Int("page", page), slog.Int("pageAddr", pageAddr), slog.Any("bc", bc))
 		xeCtx.Code[PageAddr{
 			Page: page,
 			Addr: pageAddr}] = string(bcBytes)
@@ -341,6 +346,8 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 			}
 		case String:
 			panic("BAD")
+		case Nil:
+			fmt.Fprintf(w, "I0I")
 		}
 
 		return nil

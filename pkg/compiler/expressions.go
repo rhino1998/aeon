@@ -156,3 +156,28 @@ func (e *ArrayExpression) Type() Type {
 		elem:   e.ElemType,
 	}
 }
+
+type UnknownExpression struct {
+	parser.Expr
+}
+
+func (e *UnknownExpression) Type() Type {
+	return UnknownType
+}
+
+type SpreadExpression struct {
+	Expr Expression
+
+	parser.Position
+}
+
+func (e *SpreadExpression) Type() Type {
+	if e.Expr.Type().Kind() != KindSlice {
+		return &VariadicType{
+			elem: UnknownType,
+
+			Position: e.Position,
+		}
+	}
+	return resolveType(e.Expr.Type()).(*SliceType).AsVariadic()
+}

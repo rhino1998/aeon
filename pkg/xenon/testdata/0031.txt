@@ -1,0 +1,23 @@
+package main
+
+func x(c int, b int, vs ...any) {
+  print(c, b)
+  print(vs...)
+}
+
+#init
+func main() {
+  print(nil)
+  print(nil...)
+  print(5, 10, 15, 20, 25, 30)
+  x(1,2, nil...)
+  x(1,2,3,4,5)
+}
+---
+<nil>
+
+5 10 15 20 25 30
+1 2
+
+1 2
+3 4 5

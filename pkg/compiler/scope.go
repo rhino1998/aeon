@@ -465,7 +465,7 @@ func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
 	for _, typ := range symbols.DerivedTypes() {
 		types[typ.GlobalName()] = typ
 	}
-	types[NilType.GlobalName()] = NilType
+	types[Nil{}.GlobalName()] = Nil{}
 
 	strings := make(map[String]struct{})
 	strings[""] = struct{}{}
@@ -719,6 +719,6 @@ func (vs *ValueScope) vtableLookup(typ *Location, method Method) *Location {
 		Kind:    LocationKindGlobal,
 		Name:    fmt.Sprintf("vtable %s", method.Name),
 		Type:    method.BoundFunctionType(),
-		Operand: NewVTableLookup(typ.Operand, vs.getString(String(method.Name)).Operand),
+		Operand: NewVTableLookup(typ.Operand, vs.getString(String(method.String())).Operand),
 	}
 }

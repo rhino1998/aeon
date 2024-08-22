@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -61,7 +62,12 @@ func TestXenonCode(t *testing.T) {
 		name := strings.Split(testFile, ".")[0]
 		t.Run(name, func(t *testing.T) {
 			r := require.New(t)
-			logger := slogt.New(t)
+			logger := slogt.New(t, slogt.Factory(func(w io.Writer) slog.Handler {
+				return slog.NewTextHandler(w, &slog.HandlerOptions{
+					AddSource: false,
+					Level:     slog.LevelInfo,
+				})
+			}))
 			c, err := compiler.New(logger, compiler.Config{})
 			r.NoError(err)
 
@@ -84,7 +90,7 @@ func TestXenonCode(t *testing.T) {
 			tmpFile, err := os.Create(tmpFilename)
 			r.NoError(err)
 
-			err = xenon.EmitXenonCode(tmpFile, prog, true)
+			err = xenon.EmitXenonCode(ctx, logger, tmpFile, prog)
 			r.NoError(err)
 
 			err = tmpFile.Close()

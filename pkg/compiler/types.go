@@ -46,24 +46,27 @@ func (voidType) GlobalName() TypeName { return "<void>" }
 func (voidType) Kind() Kind           { return KindVoid }
 func (voidType) Size() Size           { return 0 }
 
-var NilType = nilType{}
+func (Nil) String() string       { return "<nil>" }
+func (Nil) GlobalName() TypeName { return "<nil>" }
+func (Nil) Kind() Kind           { return KindNil }
+func (Nil) Size() Size           { return 0 }
 
-type nilType struct{}
+var NilValue = Nil{}
 
-func (nilType) String() string       { return "<nil>" }
-func (nilType) GlobalName() TypeName { return "<nil>" }
-func (nilType) Kind() Kind           { return KindNil }
-func (nilType) Size() Size           { return 0 }
+type Nil struct{}
 
-var NilValue = nilValue{}
+func (Nil) Name() string {
+	return "nil"
+}
 
-type nilValue struct{}
+type NilExpression struct {
+	typ Type
 
-func (nilValue) immediate() {}
+	parser.Position
+}
 
-func (nilValue) Kind() Kind { return KindNil }
-func (v nilValue) Location(vs *ValueScope) *Location {
-	panic("bug: evaluated nil location")
+func (e *NilExpression) Type() Type {
+	return e.typ
 }
 
 func IsValidMethodReceiverType(t Type) bool {
@@ -196,7 +199,7 @@ func typesEqual(t1, t2 Type) bool {
 	}
 
 	switch t1 := t1.(type) {
-	case nilType:
+	case Nil:
 		return t1 == t2
 	case voidType:
 		return t1 == t2
@@ -286,7 +289,7 @@ func IsTypeResolvable(typ Type) bool {
 		return true
 	case voidType:
 		return true
-	case nilType:
+	case Nil:
 		return true
 	case *PointerType:
 		return IsTypeResolvable(typ.Pointee())

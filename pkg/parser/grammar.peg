@@ -271,16 +271,25 @@ VarDeclarationExpr <- '=' _ exp:Expr _ {
   return exp.(Expr), nil
 }
 
-DeclarationStatement <- ident:Identifier _ ":=" _ exp:Expr {
+DeclarationStatement <- idents:IdentifierList _ ":=" _ exp:Expr {
   return DeclarationStatement{
-    Name:ident.(Identifier),
-    Expr:exp.(Expr),
+    Names: maybeSlice[Identifier](idents),
+    Expr: exp.(Expr),
 
     Position: pos(c),
   }, nil
 } / Expr _ ":=" _ Expr {
   return nil, pos(c).WrapError(fmt.Errorf("cannot use expression as lhs of declaration"))
 }
+
+IdentifierList <- _ ident:Identifier _ rest:IdentifierListComma? {
+  return append([]Identifier{ident.(Identifier)}, maybeSlice[Identifier](rest)...), nil
+}
+
+IdentifierListComma <- ',' __ rest:IdentifierList {
+  return rest, nil
+}
+
 
 AssignmentStatement <- left:Expr _ '=' _ right:Expr {
   return AssignmentStatement{
@@ -370,7 +379,7 @@ ForStatementStatements <- init:SimpleStatement? _ ';' _ cond:Expr? _ ';' _ step:
   }, nil
 }
 
-ReturnStatement <- "return" _ expr:Expr? {
+ReturnStatement <- "return" _ expr:MaybeBareTupleExpr? {
   return ReturnStatement{
     Expr: maybe[Expr](expr),
 
@@ -637,7 +646,7 @@ Expr <- MaybeOrExpr
 
 ParenExpr <- Expr / Type
 
-TermExpr <- CallExpr / UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / TupleExpr / ArrayExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / IdentifierExpr / TypeExpr
+TermExpr <- CallExpr / SpreadExpr / UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / TupleExpr / ArrayExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / IdentifierExpr / TypeExpr
 
 TypeExpr <- typ:Type {
   return TypeExpr{
@@ -728,6 +737,28 @@ UnaryExpr <- op:("-" / "+" / "!" / "^" / "*" / "&") exp:Expr {
   }, nil
 }
 
+MaybeBareTupleExpr <- expr:Expr _ !',' {
+  return expr, nil
+}/ BareTupleExpr
+
+BareTupleExpr <- __ args:BareTupleArgumentList _ {
+  tuple := TupleExpr{
+		Elems: maybeSlice[Expr](args),
+
+    Position: pos(c),
+  }
+
+  return tuple, nil
+}
+
+BareTupleArgumentList <- _ exp:Expr _ rest:BareTupleArgumentListComma? {
+  return append([]Expr{exp.(Expr)}, maybeSlice[Expr](rest)...), nil
+}
+
+BareTupleArgumentListComma <- ',' __ rest:BareTupleArgumentList {
+  return rest, nil
+}
+
 TupleExpr <- '(' __ args:TupleArgumentList? ce_ ')' {
   tuple := TupleExpr{
 		Elems: maybeSlice[Expr](args),
@@ -772,6 +803,13 @@ ArrayArgumentList <- _ exp:Expr _ rest:ArrayArgumentListComma? {
 
 ArrayArgumentListComma <- ',' __ rest:ArrayArgumentList {
   return rest, nil
+}
+
+SpreadExpr <- exp:Expr _ "..." {
+  return SpreadExpr{
+    Expr: exp.(Expr),
+    Position: pos(c),
+  }, nil
 }
 
 EscapedChar <- [\x00-\x1f"\\]

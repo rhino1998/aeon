@@ -125,7 +125,7 @@ func (s *State) executeStatement(scope *Scope, stmt compiler.Statement, ret *Val
 			}
 		}
 
-		scope.Put(stmt.Variable.Name(), NewVariable(stmt.Variable.Type(), val))
+		scope.Put(stmt.Variables[0].Name(), NewVariable(stmt.Variables[0].Type(), val))
 		return nil
 	case *compiler.AssignmentOperatorStatement:
 		lhs, err := s.executeExpression(scope, stmt.Left)

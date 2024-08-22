@@ -241,8 +241,8 @@ type VarStatement struct {
 type DeclarationStatement struct {
 	baseStatement
 
-	Name Identifier
-	Expr Expr
+	Names []Identifier
+	Expr  Expr
 
 	Position
 }
@@ -529,6 +529,14 @@ type VariadicType struct {
 	baseType
 
 	Type Type
+
+	Position
+}
+
+type SpreadExpr struct {
+	baseExpr
+
+	Expr Expr
 
 	Position
 }

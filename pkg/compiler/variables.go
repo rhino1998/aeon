@@ -111,7 +111,7 @@ type VarStatement struct {
 }
 
 type DeclarationStatement struct {
-	Variable   *Variable
+	Variables  []*Variable
 	Expression Expression
 
 	parser.Position

@@ -792,17 +792,40 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			errs.Add(err)
 		}
 
-		v := &Variable{
-			name: string(stmt.Name.Str),
-			typ:  expr.Type(),
+		if expr.Type().Kind() != KindTuple && len(stmt.Names) > 1 {
+			return nil, nil, stmt.WrapError(fmt.Errorf("cannot destructure non-tuple type %s into %d variables", expr.Type(), len(stmt.Names)))
+		}
+
+		var variables []*Variable
+
+		if len(stmt.Names) > 1 {
+			tupleTyp := resolveType(expr.Type()).(*TupleType)
+			for i, name := range stmt.Names {
+				v := &Variable{
+					name: string(name.Str),
+					typ:  tupleTyp.Elems()[i],
+				}
+
+				variables = append(variables, v)
+
+				scope.put(v)
+			}
+
+		} else {
+			v := &Variable{
+				name: string(stmt.Names[0].Str),
+				typ:  expr.Type(),
+			}
+
+			variables = append(variables, v)
+
+			scope.put(v)
 		}
 
 		scope := scope.next()
 
-		scope.put(v)
-
 		return &DeclarationStatement{
-			Variable:   v,
+			Variables:  variables,
 			Expression: expr,
 
 			Position: stmt.Position,
@@ -1233,7 +1256,19 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 
 			Position: expr.Position,
 		}, nil
+	case parser.SpreadExpr:
+		subExpr, err := c.compileExpression(scope, expr.Expr)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		return &SpreadExpression{
+			Expr:     subExpr,
+			Position: expr.Position,
+		}, nil
 	default:
-		return nil, expr.WrapError(fmt.Errorf("unhandled expression %T", expr))
+		return &UnknownExpression{
+			Expr: expr,
+		}, expr.WrapError(fmt.Errorf("unhandled expression %s", expr))
 	}
 }
