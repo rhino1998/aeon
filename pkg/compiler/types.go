@@ -69,6 +69,35 @@ func (e *NilExpression) Type() Type {
 	return e.typ
 }
 
+func TypeConversionBound(t Type) Type {
+	switch t := t.(type) {
+	case *DerivedType:
+		return t.Underlying()
+	case *ReferencedType:
+		return t.Dereference()
+	case *PointerType:
+		return NewPointerType(TypeConversionBound(t.Pointee()))
+	case *SliceType:
+		return NewSliceType(TypeConversionBound(t.Elem()))
+	case *ArrayType:
+		return NewArrayType(t.Length(), TypeConversionBound(t.Elem()))
+	case *TupleType:
+		elems := make([]Type, len(t.Elems()))
+		for i, elem := range t.Elems() {
+			elems[i] = TypeConversionBound(elem)
+		}
+
+		return NewTupleType(elems...)
+	case *InterfaceType:
+		return t
+	case *MapType:
+		// TODO: maybe redo this
+		return t
+	default:
+		return t
+	}
+}
+
 func IsValidMethodReceiverType(t Type) bool {
 	switch t.Kind() {
 	case KindInterface, KindVoid, KindNil, KindUnknown:
@@ -825,6 +854,10 @@ type SliceType struct {
 	parser.Position
 }
 
+func NewSliceType(elem Type) *SliceType {
+	return &SliceType{elem: elem}
+}
+
 func (t *SliceType) Kind() Kind { return KindSlice }
 
 func (t *SliceType) String() string { return fmt.Sprintf("[]%s", t.elem.String()) }
@@ -850,6 +883,10 @@ type ArrayType struct {
 	elem   Type
 
 	parser.Position
+}
+
+func NewArrayType(length int, elem Type) *ArrayType {
+	return &ArrayType{length: length, elem: elem}
 }
 
 func (t *ArrayType) Kind() Kind { return KindArray }

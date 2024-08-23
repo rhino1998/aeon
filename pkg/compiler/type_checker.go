@@ -950,7 +950,8 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				errs.Add(expr.WrapError(fmt.Errorf("type conversion expects 1 parameter, got %d", len(expr.Args))))
 			}
 
-			if ftype.Type.Kind() == KindInterface {
+			switch ftype.Type.Kind() {
+			case KindInterface:
 				arg, err := c.resolveExpressionTypes(expr.Args[0], nil)
 				if err != nil {
 					errs.Add(err)
@@ -961,17 +962,17 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 					Expression: arg,
 					Position:   expr.Position,
 				}, nil
-			} else {
-				arg, err := c.resolveExpressionTypes(expr.Args[0], TypeKind(ftype.Type.Kind()))
+			default:
+				arg, err := c.resolveExpressionTypes(expr.Args[0], TypeConversionBound(ftype.Type))
 				if err != nil {
 					errs.Add(err)
 				}
 
-				expr.Args[0] = arg
-
-				if len(expr.Args) > 0 && !IsConvertibleTo(expr.Args[0].Type(), ftype.Type) {
-					errs.Add(expr.WrapError(fmt.Errorf("cannot convert type %v to %v", expr.Args[0].Type(), ftype.Type)))
+				if !IsConvertibleTo(arg.Type(), ftype.Type) {
+					errs.Add(arg.WrapError(fmt.Errorf("cannot convert type %v to %v", arg.Type(), ftype.Type)))
 				}
+
+				expr.Args[0] = arg
 
 				return expr, nil
 			}
@@ -997,7 +998,11 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		return c.resolveIndexExpressionReceiverTypes(expr, expr.Receiver.Type(), bound)
 	case *TupleExpression:
-		tupleBound, _ := resolveType(bound).(*TupleType)
+		tupleBound, ok := resolveType(bound).(*TupleType)
+		if !ok {
+			return expr, expr.WrapError(fmt.Errorf("cannot use tuple literal as %s", bound))
+		}
+
 		for i, elem := range expr.Elems {
 			var elemBound Type
 			if tupleBound != nil {
@@ -1268,8 +1273,38 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 
 		return expr, nil
 	case *PointerType:
-		// TODO: field magic
-		return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", expr.Receiver.Type()))
+		switch typ := resolveType(typ.Pointee()).(type) {
+		case *TupleType:
+			if isNumeric {
+				if !IsAssignableTo(typ.Elems()[numericKey], bound) {
+					errs.Add(expr.WrapError(fmt.Errorf("cannot use tuple element of type %v at index %d as type %v", typ.Elems()[numericKey], numericKey, bound)))
+				}
+
+				if numericKey >= len(typ.Elems()) {
+					errs.Add(fmt.Errorf("tuple index %d out bounds on tuple with %d elements", numericKey, len(typ.Elems())))
+				}
+			} else {
+				if hasMethods {
+					errs.Add(expr.WrapError(fmt.Errorf("type %s has no such method %s", expr.Type(), expr.Key)))
+				} else {
+					errs.Add(expr.WrapError(fmt.Errorf("cannot index tuple type %s with %q", expr.Type(), expr.Key)))
+				}
+			}
+
+			return expr, nil
+		case *StructType:
+			if !typ.HasField(expr.Key) {
+				if hasMethods {
+					errs.Add(expr.WrapError(fmt.Errorf("type %s no such field or method %q", expr.Type(), expr.Key)))
+				} else {
+					errs.Add(expr.WrapError(fmt.Errorf("type %s has no such field %q", expr.Type(), expr.Key)))
+				}
+			}
+
+			return expr, nil
+		default:
+			return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", expr.Receiver.Type()))
+		}
 	case *TypeType:
 		_, ok := TypeMethod(typ.Type, expr.Key)
 		if !ok {
