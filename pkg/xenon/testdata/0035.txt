@@ -29,3 +29,5 @@ func run() error {
 func main() {
   print(run())
 }
+---
+HELLO
