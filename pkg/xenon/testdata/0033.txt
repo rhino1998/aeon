@@ -22,10 +22,22 @@ func (t *T) Do() (*T, error) {
 
 func run() error {
   var t T
-  t.Do()?.Do()
+  t.Do()?
+  t.Do()?
+  t.Do()?
+  t.Do()?
+  t.Do()?
+  t.Do()?
+  t.Do()?
+  t.Do()?
+  t.Do()?
+  t.Do()?
+  t.Do()?
 }
 
 #init
 func main() {
   print(run())
 }
+---
+x==6

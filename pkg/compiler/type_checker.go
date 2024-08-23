@@ -1241,6 +1241,23 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 				Position: expr.Position,
 			}, nil
 		}
+	} else if typ, ok := dereferenceType(expr.Receiver.Type()).(*PointerType); ok {
+		if typ, ok := dereferenceType(typ.Pointee()).(*DerivedType); ok && typ.Methods(true).Has(expr.Key) {
+			method, _ := typ.Methods(true).Get(expr.Key)
+			targetReceiverType := method.Receiver
+			receiver := expr.Receiver
+
+			if !TypesEqual(receiver.Type(), targetReceiverType) {
+				errs.Add(expr.WrapError(fmt.Errorf("cannot call method %q on type %s", expr.Key, typ)))
+			}
+
+			return &BoundMethodExpression{
+				Receiver: receiver,
+				Method:   method,
+
+				Position: expr.Position,
+			}, nil
+		}
 	}
 
 	switch typ := resolveType(expr.Receiver.Type()).(type) {
