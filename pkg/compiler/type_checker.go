@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"fmt"
-	"log"
 	"strconv"
 )
 
@@ -1130,8 +1129,6 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			errs.Add(expr.WrapError(fmt.Errorf("error return expression expects error type or tuple ending in error type, got %s", subExpr.Type())))
 		}
 
-		log.Println(expr, expr.Type())
-
 		return expr, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %s", expr))
@@ -1150,8 +1147,6 @@ func (c *Compiler) resolveCallExpressionReceiverTypes(expr Expression, bound Typ
 		if err != nil {
 			errs.Add(err)
 		}
-
-		log.Println("dot", expr.Receiver, expr.Receiver.Type())
 
 		// optimization to not allocate a closure for most method calls
 		if boundMethod, ok := dotExpr.(*BoundMethodExpression); ok {

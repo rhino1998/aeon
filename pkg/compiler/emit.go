@@ -3,7 +3,6 @@ package compiler
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/parser"
@@ -1184,7 +1183,6 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 		return c.compileBCIndexExpression(ctx, prog, expr, expr.Receiver.Type(), scope, receiverLoc, indexLoc)
 	case *TupleExpression:
-		log.Println(expr.Elems)
 		for i, elem := range expr.Elems {
 			dst, err := dst.IndexTuple(i)
 			if err != nil {
