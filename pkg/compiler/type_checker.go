@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 )
 
@@ -225,7 +226,11 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 				errs.Add(stmt.WrapError(fmt.Errorf("cannot destructure non-tuple type %s", expr.Type())))
 			} else {
 				for i := range stmt.Variables {
-					stmt.Variables[i].SetType(tupleType.Elems()[i])
+					var varType Type = UnknownType
+					if i < len(tupleType.Elems()) {
+						varType = tupleType.Elems()[i]
+					}
+					stmt.Variables[i].SetType(varType)
 				}
 			}
 		} else {
@@ -876,7 +881,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 			if variadicParam == nil && len(ftype.Parameters) != len(concreteParams) {
 				errs.Add(expr.WrapError(fmt.Errorf("function call expects %d parameters, got %d", len(ftype.Parameters), len(expr.Args))))
-			} else if len(ftype.Parameters) < len(concreteParams) {
+			} else if len(expr.Args) < len(concreteParams) {
 				errs.Add(expr.WrapError(fmt.Errorf("function call expects at least %d parameters, got %d", len(ftype.Parameters), len(expr.Args))))
 			}
 
@@ -982,7 +987,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		}
 		expr.Receiver = receiver
 
-		return c.resolveDotExpressionReceiverTypes(expr, expr.Receiver.Type(), false, bound)
+		return c.resolveDotExpressionReceiverTypes(expr, bound)
 	case *IndexExpression:
 		receiver, err := c.resolveExpressionTypes(expr.Receiver, nil)
 		if err != nil {
@@ -1078,6 +1083,51 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		expr.Expr = subExpr
 
 		return expr, nil
+	case *ErrorReturnExpression:
+		switch expr.Function.Return().Kind() {
+		case KindInterface:
+			if !TypeErrorInterface.ImplementedBy(expr.Function.Return()) {
+				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects function with error compatible return type, got %s", expr.Function.Return())))
+			}
+		case KindTuple:
+			tupleTyp := resolveType(expr.Function.Return()).(*TupleType)
+			if len(tupleTyp.Elems()) < 1 {
+				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects function with error compatible return type, got %s", expr.Function.Return())))
+			} else if tupleTyp.Elems()[len(tupleTyp.Elems())-1].Kind() != KindInterface || !TypeErrorInterface.ImplementedBy(tupleTyp.Elems()[len(tupleTyp.Elems())-1]) {
+				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects error-compatible interface type as last element, got %s", tupleTyp.Elems()[1])))
+			}
+		default:
+			errs.Add(expr.WrapError(fmt.Errorf("error return expression expects function with error compatible return type, got %s", expr.Function.Return())))
+		}
+
+		subExpr, err := c.resolveExpressionTypes(expr.Expr, nil)
+		if err != nil {
+			return expr, err
+		}
+
+		expr.Expr = subExpr
+
+		switch subExpr.Type().Kind() {
+		case KindInterface:
+			if !TypeErrorInterface.ImplementedBy(subExpr.Type()) {
+				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects error type, got %s", subExpr.Type())))
+			}
+		case KindTuple:
+			tupleType, ok := subExpr.Type().(*TupleType)
+			if !ok {
+				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects tuple type, got %s", subExpr.Type())))
+			}
+
+			if tupleType.Elems()[len(tupleType.Elems())-1].Kind() != KindInterface || !TypeErrorInterface.ImplementedBy(tupleType.Elems()[len(tupleType.Elems())-1]) {
+				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects error-compatible interface type as last element, got %s", tupleType.Elems()[1])))
+			}
+		default:
+			errs.Add(expr.WrapError(fmt.Errorf("error return expression expects error type or tuple ending in error type, got %s", subExpr.Type())))
+		}
+
+		log.Println(expr, expr.Type())
+
+		return expr, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %s", expr))
 	}
@@ -1091,10 +1141,12 @@ func (c *Compiler) resolveCallExpressionReceiverTypes(expr Expression, bound Typ
 
 	switch expr := expr.(type) {
 	case *DotExpression:
-		dotExpr, err := c.resolveDotExpressionReceiverTypes(expr, expr.Receiver.Type(), false, bound)
+		dotExpr, err := c.resolveDotExpressionReceiverTypes(expr, bound)
 		if err != nil {
 			errs.Add(err)
 		}
+
+		log.Println("dot", expr.Receiver, expr.Receiver.Type())
 
 		// optimization to not allocate a closure for most method calls
 		if boundMethod, ok := dotExpr.(*BoundMethodExpression); ok {
@@ -1115,7 +1167,7 @@ func (c *Compiler) resolveCallExpressionReceiverTypes(expr Expression, bound Typ
 	}
 }
 
-func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Type, ptr bool, bound Type) (_ Expression, err error) {
+func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -1127,14 +1179,18 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 		isNumeric = true
 	}
 
+	expr.Receiver, err = c.resolveExpressionTypes(expr.Receiver, nil)
+	if err != nil {
+		errs.Add(err)
+	}
+
 	var hasMethods bool
-	if typ, ok := dereferenceType(typ).(*DerivedType); ok && !isNumeric {
+	if typ, ok := dereferenceType(expr.Receiver.Type()).(*DerivedType); ok && !isNumeric {
 		hasMethods = true
 
-		methods := typ.Methods(ptr)
-		// TODO: auto address of
+		methods := typ.Methods(false)
 		if methods.Has(expr.Key) {
-			method, _ := typ.Methods(ptr).Get(expr.Key)
+			method, _ := typ.Methods(false).Get(expr.Key)
 			targetReceiverType := method.Receiver
 			receiver := expr.Receiver
 
@@ -1160,7 +1216,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 
 				Position: expr.Position,
 			}, nil
-		} else if !ptr && typ.Methods(true).Has(expr.Key) {
+		} else if typ.Methods(true).Has(expr.Key) {
 			method, _ := typ.Methods(true).Get(expr.Key)
 			targetReceiverType := method.Receiver
 			receiver := expr.Receiver
@@ -1182,7 +1238,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 		}
 	}
 
-	switch typ := resolveType(typ).(type) {
+	switch typ := resolveType(expr.Receiver.Type()).(type) {
 	case *TupleType:
 		if isNumeric {
 			if !IsAssignableTo(typ.Elems()[numericKey], bound) {
@@ -1212,7 +1268,8 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 
 		return expr, nil
 	case *PointerType:
-		return c.resolveDotExpressionReceiverTypes(expr, typ.Pointee(), true, bound)
+		// TODO: field magic
+		return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", expr.Receiver.Type()))
 	case *TypeType:
 		_, ok := TypeMethod(typ.Type, expr.Key)
 		if !ok {
@@ -1233,7 +1290,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, typ Ty
 			Position: expr.Position,
 		}, nil
 	default:
-		return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ, expr.Key))
+		return expr, expr.WrapError(fmt.Errorf("type %s has no field or method %s", typ, expr.Key))
 	}
 }
 

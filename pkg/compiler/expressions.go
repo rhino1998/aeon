@@ -181,3 +181,44 @@ func (e *SpreadExpression) Type() Type {
 	}
 	return resolveType(e.Expr.Type()).(*SliceType).AsVariadic()
 }
+
+type ErrorReturnExpression struct {
+	Function *Function
+	Expr     Expression
+
+	parser.Position
+}
+
+func (e *ErrorReturnExpression) Type() Type {
+	switch e.Expr.Type().Kind() {
+	case KindInterface:
+		iface := e.Expr.Type().(*InterfaceType)
+		if !TypeError.Underlying().(*InterfaceType).ImplementedBy(iface) {
+			return UnknownType
+		}
+
+		return TypeVoid
+	case KindTuple:
+		tupleType := e.Expr.Type().(*TupleType)
+		iface, ok := resolveType(tupleType.Elems()[len(tupleType.Elems())-1]).(*InterfaceType)
+		if !ok {
+			return UnknownType
+		}
+
+		if !TypeError.Underlying().(*InterfaceType).ImplementedBy(iface) {
+			return UnknownType
+		}
+
+		if len(tupleType.Elems()) == 1 {
+			return TypeVoid
+		}
+
+		if len(tupleType.Elems()) == 2 {
+			return tupleType.Elems()[0]
+		}
+
+		return NewTupleType(tupleType.Elems()[:len(tupleType.Elems())-1]...)
+	default:
+		return UnknownType
+	}
+}

@@ -625,13 +625,6 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 
 		return bc, nil
 	case *ReturnStatement:
-		var offset Size
-		offset += stmt.Function.Return().Size()
-		offset += stmt.Function.Receiver().Type().Size()
-		for _, param := range stmt.Function.Parameters() {
-			offset += param.Type().Size()
-		}
-
 		if stmt.Expression != nil {
 			var exprBC []Bytecode
 			var err error
@@ -650,7 +643,7 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 		}
 
 		bc.Add(Ret{
-			Args: offset,
+			Args: stmt.Function.ReturnArgSize(),
 		})
 
 		return bc, nil
@@ -1275,6 +1268,69 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 		bc.Add(sliceBC...)
 		return bc, sliceLoc.AsType(expr.Type()), nil
+	case *ErrorReturnExpression:
+		tmp := scope.allocTemp(expr.Expr.Type())
+		defer scope.deallocTemp(tmp)
+
+		subExprBC, subExprLoc, err := c.compileBCExpression(ctx, prog, expr.Expr, scope, tmp)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(subExprBC...)
+
+		ret, ok := scope.Get("__return")
+		if !ok {
+			return nil, nil, expr.WrapError(fmt.Errorf("could not find return value"))
+		}
+		var errRetLoc *Location
+		switch expr.Function.Return().Kind() {
+		case KindInterface:
+			errRetLoc = ret.AsType(interfaceTuple)
+		case KindTuple:
+			tupleTyp := resolveType(scope.function.Return()).(*TupleType)
+			errRetLoc, err = ret.IndexTuple(len(tupleTyp.Elems()) - 1)
+			if err != nil {
+				return nil, nil, expr.WrapError(err)
+			}
+
+			errRetLoc = errRetLoc.AsType(interfaceTuple)
+		default:
+			return nil, nil, expr.WrapError(fmt.Errorf("cannot return error from function with return type %s", expr.Function.Return()))
+		}
+
+		var errLoc *Location
+		switch expr.Expr.Type().Kind() {
+		case KindInterface:
+			errLoc = subExprLoc.AsType(interfaceTuple)
+		case KindTuple:
+			errLoc, err = subExprLoc.IndexTuple(len(expr.Expr.Type().(*TupleType).Elems()) - 1)
+			if err != nil {
+				return nil, nil, expr.WrapError(err)
+			}
+			errLoc = errLoc.AsType(interfaceTuple)
+		default:
+			return nil, nil, expr.WrapError(fmt.Errorf("cannot return error from expression of type %s", expr.Expr.Type()))
+		}
+
+		skipRet := newLabel()
+		bc.JumpAfter(skipRet, &Operand{
+			Kind: OperandKindBinary,
+			Value: BinaryOperand{
+				Left:  errLoc.Operand,
+				Op:    OperatorEqual,
+				Right: scope.typeName(Nil{}).Operand,
+			},
+		})
+		bc.Mov(errRetLoc, errLoc)
+		bc.Add(Ret{
+			Args: scope.function.ReturnArgSize(),
+		})
+		bc.LabelLast(skipRet)
+
+		bc.Mov(dst, tmp.AsType(dst.Type))
+
+		return bc, dst, nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}

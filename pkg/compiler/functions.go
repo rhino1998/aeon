@@ -191,6 +191,17 @@ func (f *Function) Bytecode() BytecodeSnippet {
 	return f.bytecode
 }
 
+func (f *Function) ReturnArgSize() Size {
+	var offset Size
+	offset += f.Return().Size()
+	offset += f.Receiver().Type().Size()
+	for _, param := range f.Parameters() {
+		offset += param.Type().Size()
+	}
+
+	return offset
+}
+
 type CallExpression struct {
 	Function Expression
 	Args     []Expression

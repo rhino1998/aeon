@@ -540,3 +540,10 @@ type SpreadExpr struct {
 
 	Position
 }
+
+type ErrorReturnExpr struct {
+	baseExpr
+	Expr Expr
+
+	Position
+}

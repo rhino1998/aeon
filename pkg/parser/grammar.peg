@@ -646,12 +646,19 @@ Expr <- MaybeOrExpr
 
 ParenExpr <- Expr / Type
 
-TermExpr <- CallExpr / SpreadExpr / UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / TupleExpr / ArrayExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / IdentifierExpr / TypeExpr
+TermExpr <- ErrorReturnExpr / CallExpr / SpreadExpr / UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / TupleExpr / ArrayExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / IdentifierExpr / TypeExpr
 
 TypeExpr <- typ:Type {
   return TypeExpr{
     Type: typ.(Type),
 
+    Position: pos(c),
+  }, nil
+}
+
+ErrorReturnExpr = exp:Expr _ '?' {
+  return ErrorReturnExpr{
+    Expr: exp.(Expr),
     Position: pos(c),
   }, nil
 }

@@ -8,13 +8,28 @@ func (e E) Error() string {
   return "error message" + itoa(int(e))
 }
 
+type T int
+
+func (a T) A(b bool) (T, error) {
+  if b {
+    return nil, E(9)
+  }
+
+  return a+1, nil
+}
+
 func f(i int) (int, error) {
   return 1, E(5)
 }
 
+func f2() error {
+  t := T(1)
+  print(t.A(false)?.A(false)?)
+
+  return nil
+}
+
 #init
 func main() {
-  a, err := f(1)
-  print(a)
-  print(err.Error())
+  print(f2())
 }

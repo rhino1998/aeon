@@ -157,7 +157,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 		varType, isVariadic := resolveType(typ).(*VariadicType)
 		if isVariadic {
 			if !last {
-				return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
+				errs.Add(decl.WrapError(fmt.Errorf("only the last paramater may be variadic")))
 			}
 
 			typ = varType.AsSlice()
@@ -222,7 +222,12 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 	return t, nil
 }
 
-func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl parser.VarDeclaration) (*Variable, error) {
+func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl parser.VarDeclaration) (_ *Variable, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
 	v := &Variable{
 		name:   string(decl.Name.Str),
 		global: true,
@@ -232,7 +237,7 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 	if decl.Type != nil {
 		typ, err := c.compileTypeReference(scope, *decl.Type)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		v.typ = typ
@@ -241,7 +246,7 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 	if decl.Expr != nil {
 		expr, err := c.compileExpression(scope, *decl.Expr)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		v.expr = expr
@@ -252,12 +257,13 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 	}
 
 	if v.typ == nil {
-		return nil, decl.WrapError(fmt.Errorf("variable declaration must have a type or an expression"))
+		v.typ = UnknownType
+		errs.Add(decl.WrapError(fmt.Errorf("variable declaration must have a type or an expression")))
 	}
 
-	err := scope.put(v)
+	err = scope.put(v)
 	if err != nil {
-		return nil, decl.WrapError(err)
+		errs.Add(err)
 	}
 
 	return v, nil
@@ -277,7 +283,7 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 	if decl.Type != nil {
 		typ, err := c.compileTypeReference(scope, *decl.Type)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		v.typ = typ
@@ -286,7 +292,7 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 	if decl.Expr != nil {
 		expr, err := c.compileExpression(scope, *decl.Expr)
 		if err != nil {
-			return nil, err
+			errs.Add(err)
 		}
 
 		v.ConstantExpression = expr.(ConstantExpression)
@@ -297,6 +303,7 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 	}
 
 	if v.typ == nil {
+		v.typ = UnknownType
 		errs.Add(decl.WrapError(fmt.Errorf("const declaration must have a type or an expression")))
 	}
 
@@ -793,24 +800,28 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		}
 
 		if expr.Type().Kind() != KindTuple && len(stmt.Names) > 1 {
-			return nil, nil, stmt.WrapError(fmt.Errorf("cannot destructure non-tuple type %s into %d variables", expr.Type(), len(stmt.Names)))
+			errs.Add(stmt.WrapError(fmt.Errorf("cannot destructure non-tuple type %s into %d variables", expr.Type(), len(stmt.Names))))
 		}
 
 		var variables []*Variable
+		tupleTyp, isTuple := resolveType(expr.Type()).(*TupleType)
 
-		if len(stmt.Names) > 1 {
-			tupleTyp := resolveType(expr.Type()).(*TupleType)
+		if isTuple && len(stmt.Names) > 1 {
 			for i, name := range stmt.Names {
+				var varType Type = UnknownType
+				if i < len(tupleTyp.Elems()) {
+					varType = tupleTyp.Elems()[i]
+				}
+
 				v := &Variable{
 					name: string(name.Str),
-					typ:  tupleTyp.Elems()[i],
+					typ:  varType,
 				}
 
 				variables = append(variables, v)
 
 				scope.put(v)
 			}
-
 		} else {
 			v := &Variable{
 				name: string(stmt.Names[0].Str),
@@ -1264,6 +1275,23 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 
 		return &SpreadExpression{
 			Expr:     subExpr,
+			Position: expr.Position,
+		}, nil
+	case parser.ErrorReturnExpr:
+		if scope.Function() == nil {
+			errs.Add(expr.WrapError(fmt.Errorf("error return expression is invalid outside function")))
+		}
+
+		subExpr, err := c.compileExpression(scope, expr.Expr)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		return &ErrorReturnExpression{
+			Expr: subExpr,
+
+			Function: scope.Function(),
+
 			Position: expr.Position,
 		}, nil
 	default:

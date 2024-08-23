@@ -1083,6 +1083,9 @@ var interfaceTuple = NewTupleType(
 func (t *InterfaceType) ImplementedBy(i Type) bool {
 	switch i := dereferenceType(i).(type) {
 	case *DerivedType:
+		if i.Underlying().Kind() == KindInterface {
+			return t.ImplementedBy(i.Underlying())
+		}
 		return t.Methods().Subset(i.Methods(false))
 	case *PointerType:
 		switch pointee := i.Pointee().(type) {
@@ -1091,6 +1094,8 @@ func (t *InterfaceType) ImplementedBy(i Type) bool {
 		default:
 			return len(t.Methods()) == 0
 		}
+	case *InterfaceType:
+		return t.Methods().Subset(i.Methods())
 	default:
 		return len(t.Methods()) == 0
 	}

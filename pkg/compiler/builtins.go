@@ -14,7 +14,8 @@ var (
 	TypeBool            = NewDerivedType("bool", nil, TypeKind(KindBool))
 	TypeFloat           = NewDerivedType("float", nil, TypeKind(KindFloat))
 	TypeAny             = NewDerivedType("any", nil, NewInterfaceType())
-	TypeError           = NewDerivedType("error", nil, NewInterfaceType().With("Error", nil, TypeString))
+	TypeError           = NewDerivedType("error", nil, TypeErrorInterface)
+	TypeErrorInterface  = NewInterfaceType().With("Error", nil, TypeString)
 	BuiltinExternAssert = &ExternFunction{
 		name: "__builtin_assert",
 		parameters: []*Variable{
