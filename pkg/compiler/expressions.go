@@ -222,3 +222,15 @@ func (e *ErrorReturnExpression) Type() Type {
 		return UnknownType
 	}
 }
+
+type ErrorHandlerExpression struct {
+	Function *Function
+
+	Expr    Expression
+	Handler Expression
+	parser.Position
+}
+
+func (e *ErrorHandlerExpression) Type() Type {
+	return e.Expr.Type()
+}

@@ -1294,6 +1294,28 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 
 			Position: expr.Position,
 		}, nil
+	case parser.ErrorHandlerExpr:
+		if scope.Function() == nil {
+			errs.Add(expr.WrapError(fmt.Errorf("error handler expression is invalid outside function")))
+		}
+
+		subExpr, err := c.compileExpression(scope, expr.Expr)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		handlerExpr, err := c.compileExpression(scope, expr.Handler)
+		if err != nil {
+			errs.Add(err)
+		}
+
+		return &ErrorHandlerExpression{
+			Function: scope.Function(),
+			Expr:     subExpr,
+			Handler:  handlerExpr,
+
+			Position: expr.Position,
+		}, nil
 	default:
 		return &UnknownExpression{
 			Expr: expr,

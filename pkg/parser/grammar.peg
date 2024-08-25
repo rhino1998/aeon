@@ -642,7 +642,7 @@ IndexExpr <- expr:Expr _ '[' _ index:Expr _ ']' {
 	}, nil
 }
 
-Expr <- MaybeOrExpr
+Expr <- MaybeErrorHandlerExpr
 
 ParenExpr <- Expr / Type
 
@@ -731,6 +731,16 @@ OrExpr <- left:MaybeAndExpr _ op:("||") __ right:MaybeAndExpr {
     Operator: Operator(op.([]byte)),
     Right: right.(Expr),
 
+    Position: pos(c),
+  }, nil
+}
+
+MaybeErrorHandlerExpr <- ErrorHandlerExpr / MaybeOrExpr
+
+ErrorHandlerExpr <- expr:MaybeOrExpr _ op:("->") __ handler:MaybeErrorHandlerExpr {
+  return ErrorHandlerExpr{
+    Expr: expr.(Expr),
+    Handler: handler.(Expr),
     Position: pos(c),
   }, nil
 }

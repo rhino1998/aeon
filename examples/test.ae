@@ -12,17 +12,25 @@ type T struct {
   x int
 }
 
-func (t *T) Do() (*T, error, error, error, error, error, error) {
+func (t *T) Do() (*T, error) {
   if t.x == 6 {
-    return nil, nil, nil, nil, nil, nil, Err("x=="+itoa(t.x))
+    return nil, nil
   }
   t.x++
-  return t, nil, nil, Err("HELLO"), nil, nil, nil
+  return t, nil
+}
+
+func handler(err error) error {
+  if err != nil {
+    print(err.Error())
+  }
+
+  return nil
 }
 
 func run() error {
   var t T
-  t.Do()??????
+  t.Do()? -> handler
 }
 
 #init

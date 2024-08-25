@@ -1002,9 +1002,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			return expr, expr.WrapError(fmt.Errorf("cannot use tuple literal as %s", bound))
 		}
 
+		if len(expr.Elems) != len(tupleBound.Elems()) {
+			return expr, expr.WrapError(fmt.Errorf("tuple literal expects %d elements, got %d", len(tupleBound.Elems()), len(expr.Elems)))
+		}
+
 		for i, elem := range expr.Elems {
-			var elemBound Type
-			if tupleBound != nil {
+			var elemBound Type = UnknownType
+			if tupleBound != nil && i < len(tupleBound.Elems()) {
 				elemBound = tupleBound.Elems()[i]
 			}
 

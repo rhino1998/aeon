@@ -547,3 +547,10 @@ type ErrorReturnExpr struct {
 
 	Position
 }
+
+type ErrorHandlerExpr struct {
+	baseExpr
+	Expr    Expr
+	Handler Expr
+	Position
+}
