@@ -482,6 +482,9 @@ function @printf($fmt:text, $data:number, $len:number, $cap:number)
 		var $c = $fmt.$index
 		$index++
 		if $mode == 0
+			$trail = 0
+			$lead = 0
+			$signSpace = 0
 			if $c == "%"
 				$mode = 1
 			else

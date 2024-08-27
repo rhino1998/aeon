@@ -1095,7 +1095,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		var elemBound Type
 		if arrayBound, ok := resolveType(bound).(*ArrayType); ok {
 			elemBound = arrayBound.Elem()
-		} else if arrayExprType, ok := exprType.(*ArrayType); ok {
+		} else if arrayExprType, ok := resolveType(exprType).(*ArrayType); ok {
 			elemBound = arrayExprType.Elem()
 		} else {
 			elemBound = UnknownType

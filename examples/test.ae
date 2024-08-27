@@ -39,7 +39,7 @@ func run() error {
 type vec3 [3]float
 
 func (v vec3) print() {
-  printf("(%f, %f, %f)", v[0], v[1], v[2])
+  printf("(%0.2f, %0.2f, %0.2f)", v[0], v[1], v[2])
 }
 
 #init
@@ -48,8 +48,11 @@ func main() {
   var be error
   a := vec3([...]float{1,2,3})
   b := vec3([3]float{1,2,4})
+  c := vec3{1,2,4}
   a.print()
   b.print()
+  c.print()
   (a+b).print()
   (a*b).print()
+  (a**c).print()
 }
