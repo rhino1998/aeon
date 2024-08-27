@@ -80,7 +80,11 @@ func TypeConversionBound(t Type) Type {
 	case *SliceType:
 		return NewSliceType(TypeConversionBound(t.Elem()))
 	case *ArrayType:
-		return NewArrayType(t.Length(), TypeConversionBound(t.Elem()))
+		length := t.Length()
+		if length == nil {
+			return UnknownType
+		}
+		return NewArrayType(*length, TypeConversionBound(t.Elem()))
 	case *TupleType:
 		elems := make([]Type, len(t.Elems()))
 		for i, elem := range t.Elems() {
@@ -146,7 +150,7 @@ func IsAssignableTo(v, to Type) bool {
 		return true
 	}
 
-	if to, ok := BaseType(to).(*InterfaceType); ok {
+	if to, ok := baseType(to).(*InterfaceType); ok {
 		return to.ImplementedBy(v)
 	}
 
@@ -166,22 +170,22 @@ func IsConvertibleTo(v, to Type) bool {
 		return true
 	}
 
-	return TypesEqual(BaseType(v), BaseType(to))
+	return TypesEqual(baseType(v), baseType(to))
 }
 
-func BaseType(typ Type) Type {
+func baseType(typ Type) Type {
 	switch typ := dereferenceType(typ).(type) {
 	case *ReferencedType:
-		return BaseType(typ.Dereference())
+		return baseType(typ.Dereference())
 	case *DerivedType:
-		return BaseType(typ.underlying)
+		return baseType(typ.underlying)
 	case *PointerType:
-		return NewPointerType(BaseType(typ.pointee))
+		return NewPointerType(baseType(typ.pointee))
 	case *ArrayType:
 		return &ArrayType{
 			length: typ.length,
 
-			elem: BaseType(typ.elem),
+			elem: baseType(typ.elem),
 		}
 	default:
 		return typ
@@ -260,7 +264,12 @@ func typesEqual(t1, t2 Type) bool {
 	case *ArrayType:
 		switch t2 := t2.(type) {
 		case *ArrayType:
-			return t1.Length() == t2.Length() && TypesEqual(t1.Elem(), t2.Elem())
+			t1Length := t1.Length()
+			t2Length := t2.Length()
+			if t1Length == nil || t2Length == nil {
+				return false
+			}
+			return *t1Length == *t2Length && TypesEqual(t1.Elem(), t2.Elem())
 		default:
 			return false
 		}
@@ -291,6 +300,13 @@ func typesEqual(t1, t2 Type) bool {
 			}
 
 			return true
+		default:
+			return false
+		}
+	case *InterfaceType:
+		switch t2 := t2.(type) {
+		case *InterfaceType:
+			return t1.methods.Equal(t2.methods)
 		default:
 			return false
 		}
@@ -699,6 +715,8 @@ type DerivedType struct {
 
 	methodFuncs    map[string]*Function
 	ptrMethodFuncs map[string]*Function
+
+	parser.Position
 }
 
 func NewDerivedType(name string, pkg *Package, underlying Type) *DerivedType {
@@ -879,26 +897,81 @@ var sliceHeader = NewTupleType(
 )
 
 type ArrayType struct {
-	length int
-	elem   Type
+	length     *int
+	lengthExpr ConstantExpression
+	elem       Type
 
 	parser.Position
 }
 
 func NewArrayType(length int, elem Type) *ArrayType {
-	return &ArrayType{length: length, elem: elem}
+	return &ArrayType{length: &length, elem: elem}
 }
 
 func (t *ArrayType) Kind() Kind { return KindArray }
 
-func (t *ArrayType) String() string { return fmt.Sprintf("[%d]%s", t.length, t.elem.String()) }
+func (t *ArrayType) String() string {
+	if t.length == nil {
+		return fmt.Sprintf("[???]%s", t.elem.String())
+	}
+	return fmt.Sprintf("[%d]%s", *t.length, t.elem.String())
+}
 func (t *ArrayType) GlobalName() TypeName {
-	return TypeName(fmt.Sprintf("[%d]%s", t.length, string(t.elem.GlobalName())))
+	if t.length == nil {
+		return TypeName(fmt.Sprintf("[???]%s", string(t.elem.GlobalName())))
+	}
+
+	return TypeName(fmt.Sprintf("[%d]%s", *t.length, string(t.elem.GlobalName())))
 }
 
-func (t *ArrayType) Elem() Type  { return t.elem }
-func (t *ArrayType) Length() int { return t.length }
-func (t *ArrayType) Size() Size  { return t.elem.Size() * Size(t.length) }
+func (t *ArrayType) computeAndValidateLength(elems *int) error {
+	if t.length != nil {
+		if elems != nil && *elems != *t.length {
+			return fmt.Errorf("array length mismatch: expected %d, got %d", *t.length, elems)
+		}
+		return nil
+	}
+
+	if t.lengthExpr == nil {
+		if elems != nil {
+			t.length = elems
+			return nil
+		}
+
+		return fmt.Errorf("array length must be specified")
+	}
+
+	val, err := t.lengthExpr.Evaluate()
+	if err != nil {
+		return err
+	}
+	num, ok := val.(Int)
+	if !ok {
+		return fmt.Errorf("array length must be an integer")
+	}
+
+	numInt := int(num)
+	if numInt < 0 {
+		return fmt.Errorf("array length must be non-negative")
+	}
+
+	if elems != nil && *elems != numInt {
+		return fmt.Errorf("array length mismatch: expected %d, got %d", numInt, elems)
+	}
+
+	t.length = &numInt
+	return nil
+}
+
+func (t *ArrayType) Elem() Type   { return t.elem }
+func (t *ArrayType) Length() *int { return t.length }
+func (t *ArrayType) Size() Size {
+	if t.length == nil {
+		return 0
+		panic("bug: array type has nil length")
+	}
+	return t.elem.Size() * Size(*t.length)
+}
 
 type TupleType struct {
 	elems []Type

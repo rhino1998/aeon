@@ -358,7 +358,12 @@ func (l *Location) IndexTuple(index int) (*Location, error) {
 func (l *Location) IndexArrayConst(index int) (*Location, error) {
 	typ := resolveType(l.Type).(*ArrayType)
 
-	if index >= typ.Length() {
+	length := typ.Length()
+	if length == nil {
+		return nil, fmt.Errorf("cannot index array type %s of unknown length", l.Type)
+	}
+
+	if index >= *length {
 		return nil, fmt.Errorf("compile-time array index %d out of bounds", index)
 	}
 
@@ -373,13 +378,18 @@ func (l *Location) IndexArrayConst(index int) (*Location, error) {
 func (l *Location) IndexArray(index *Location) (*Location, error) {
 	typ := resolveType(l.Type).(*ArrayType)
 
+	length := typ.Length()
+	if length == nil {
+		return nil, fmt.Errorf("cannot index array type %s of unknown length", l.Type)
+	}
+
 	return &Location{
 		Kind: l.Kind,
 		Name: fmt.Sprintf("%s[%s]", l.Name, index),
 		Type: dereferenceType(typ.Elem()),
 		Operand: l.Operand.AddressOf().Offset(
 			index.Operand.
-				Bound(ImmediateOperand(Int(typ.Length()))).
+				Bound(ImmediateOperand(Int(*length))).
 				Stride(ImmediateOperand(Int(typ.Elem().Size())))).Dereference(),
 	}, nil
 }

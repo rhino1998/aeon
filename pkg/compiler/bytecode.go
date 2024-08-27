@@ -644,13 +644,15 @@ func shortKind(k Kind) string {
 	case KindPointer:
 		return "P"
 	case KindTuple:
-		return "T"
+		return "("
 	case KindSlice:
 		return "["
 	case KindMap:
 		return "M"
 	case KindStruct:
 		return "X"
+	case KindType:
+		return "T"
 	default:
 		return "U"
 	}

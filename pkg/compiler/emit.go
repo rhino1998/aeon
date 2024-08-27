@@ -836,8 +836,13 @@ func (c *Compiler) compileBCZeroValue(ctx context.Context, prog *Program, pos pa
 	case *ArrayType:
 		elem := typ.Elem()
 
+		length := typ.Length()
+		if length == nil {
+			return nil, nil, pos.WrapError(fmt.Errorf("unknown array length for array type %s", typ))
+		}
+
 		var offset Size
-		for i := range typ.Length() {
+		for i := range *length {
 			elemDst, err := dst.IndexArrayConst(i)
 			if err != nil {
 				return nil, nil, pos.WrapError(err)
@@ -934,48 +939,49 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 	case *BuiltinSymbol:
 		return nil, nil, expr.WrapError(fmt.Errorf("builtin %q used as value", expr.Name()))
 	case *BinaryExpression:
-		var lhsTmp *Location
+		var leftTmp *Location
 		if expr.Left.Type().Size() == dst.Type.Size() {
-			lhsTmp = dst.AsType(expr.Left.Type())
+			leftTmp = dst.AsType(expr.Left.Type())
 		} else {
-			lhsTmp := scope.allocTemp(expr.Left.Type())
-			defer scope.deallocTemp(lhsTmp)
+			leftTmp = scope.allocTemp(expr.Left.Type())
+			defer scope.deallocTemp(leftTmp)
 		}
 
-		lhsBC, lhsLoc, err := c.compileBCExpression(ctx, prog, expr.Left, scope, lhsTmp)
+		leftBC, leftLoc, err := c.compileBCExpression(ctx, prog, expr.Left, scope, leftTmp)
 		if err != nil {
 			return nil, nil, err
 		}
 
-		bc.Add(lhsBC...)
+		bc.Add(leftBC...)
 
-		rhsTmp := scope.allocTemp(expr.Right.Type())
-		rhsBC, rhsLoc, err := c.compileBCExpression(ctx, prog, expr.Right, scope, rhsTmp)
+		rightTmp := scope.allocTemp(expr.Right.Type())
+		rightBC, rightLoc, err := c.compileBCExpression(ctx, prog, expr.Right, scope, rightTmp)
 		if err != nil {
 			return nil, nil, err
 		}
-		defer scope.deallocTemp(rhsTmp)
+		defer scope.deallocTemp(rightTmp)
 
-		bc.Add(rhsBC...)
+		bc.Add(rightBC...)
 
-		if expr.Operator.CanOperand() && expr.Type().Kind().IsPrimitive() && expr.Left.Type().Kind().IsPrimitive() && expr.Right.Type().Kind().IsPrimitive() {
-			return bc, &Location{
-				Kind: LocationKindLocal,
-				Type: dst.Type,
-				Operand: &Operand{
-					Kind: OperandKindBinary,
-					Value: BinaryOperand{
-						Left:  lhsLoc.Operand,
-						Op:    expr.Operator,
-						Right: rhsLoc.Operand,
-					},
-				},
-			}, nil
+		if expr.Operator.IsComparison() {
+			binOpBC, binOpLoc, err := c.compileBCBinaryComparison(ctx, prog, scope, expr.Position, expr.Operator, dst, leftLoc, rightLoc)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			bc.Add(binOpBC...)
+
+			return bc, binOpLoc, nil
+		} else {
+			binOpBC, binOpLoc, err := c.compileBCBinaryElementwiseOperator(ctx, prog, scope, expr.Position, expr.Operator, dst, leftLoc, rightLoc)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			bc.Add(binOpBC...)
+
+			return bc, binOpLoc, nil
 		}
-
-		bc.BinOp(dst, lhsLoc, expr.Operator, rhsLoc)
-
-		return bc, dst, nil
 	case *UnaryExpression:
 		switch expr.Operator {
 		case OperatorAddress:
@@ -1202,22 +1208,22 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		}
 
 		return bc, dst, nil
-	case *ArrayExpression:
+	case *TypeLiteralExpression:
 		for i, elem := range expr.Elems {
-			dst, err := dst.IndexArrayConst(i)
+			elemDst, err := dst.IndexArrayConst(i)
 			if err != nil {
 				return nil, nil, err
 			}
 
-			elemBC, elemLoc, err := c.compileBCExpression(ctx, prog, elem, scope, dst)
+			elemBC, elemLoc, err := c.compileBCExpression(ctx, prog, elem, scope, elemDst)
 			if err != nil {
 				return nil, nil, err
 			}
 
 			bc.Add(elemBC...)
 
-			if dst != elemLoc {
-				bc.Mov(dst, elemLoc)
+			if elemDst != elemLoc {
+				bc.Mov(elemDst, elemLoc)
 			}
 		}
 
@@ -1491,4 +1497,275 @@ func (c *Compiler) compileBCValuesLiteral(ctx context.Context, prog *Program, ex
 	}
 
 	return bc, nil
+}
+
+func (c *Compiler) compileBCBinaryElementwiseOperator(ctx context.Context, prog *Program, scope *ValueScope, pos parser.Position, op Operator, dst, left, right *Location) (BytecodeSnippet, *Location, error) {
+	var bc BytecodeSnippet
+	if !TypesEqual(baseType(left.Type), baseType(right.Type)) {
+		return nil, nil, pos.WrapError(fmt.Errorf("invalid binary operator %s on types %s and %s", op, left.Type, right.Type))
+	}
+
+	if left.Type.Kind().IsPrimitive() && op.CanOperand() {
+		return bc, &Location{
+			Kind: LocationKindLocal,
+			Type: dst.Type,
+			Operand: &Operand{
+				Kind: OperandKindBinary,
+				Value: BinaryOperand{
+					Left:  left.Operand,
+					Op:    op,
+					Right: right.Operand,
+				},
+			},
+		}, nil
+	}
+
+	switch left.Type.Kind() {
+	case KindInt, KindString, KindBool, KindPointer, KindFloat, KindType, KindFunction:
+		bc.BinOp(dst, left, op, right)
+		return bc, dst, nil
+	case KindSlice:
+		if op.IsComparison() {
+			return c.compileBCBinaryElementwiseOperator(ctx, prog, scope, pos, op, dst, left.AsType(sliceHeader), right.AsType(sliceHeader))
+		} else {
+			return c.compileBCBinaryElementwiseOperator(ctx, prog, scope, pos, op, dst.AsType(sliceHeader), left.AsType(sliceHeader), right.AsType(sliceHeader))
+		}
+	case KindInterface:
+		// TODO: handle wide interfaces
+		if op.IsComparison() {
+			return c.compileBCBinaryElementwiseOperator(ctx, prog, scope, pos, op, dst, left.AsType(interfaceTuple), right.AsType(interfaceTuple))
+		} else {
+			return c.compileBCBinaryElementwiseOperator(ctx, prog, scope, pos, op, dst.AsType(interfaceTuple), left.AsType(interfaceTuple), right.AsType(interfaceTuple))
+		}
+	case KindTuple:
+		opDst := dst
+		if op.IsComparison() {
+			opDst = scope.allocTemp(left.Type)
+			defer scope.deallocTemp(opDst)
+		}
+
+		for i := range resolveType(left.Type).(*TupleType).Elems() {
+			elemDst, err := opDst.IndexTuple(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemLeft, err := left.IndexTuple(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemRight, err := right.IndexTuple(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemBC, elemLoc, err := c.compileBCBinaryElementwiseOperator(ctx, prog, scope, pos, op, elemDst, elemLeft, elemRight)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			bc.Add(elemBC...)
+			if elemLoc != elemDst {
+				bc.Mov(elemDst, elemLoc)
+			}
+		}
+
+		return bc, dst, nil
+	case KindArray:
+		length := resolveType(left.Type).(*ArrayType).Length()
+		if length == nil {
+			return nil, nil, pos.WrapError(fmt.Errorf("unknown array length for array type %s", left.Type))
+		}
+
+		for i := range *length {
+			elemDst, err := dst.IndexArrayConst(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemLeft, err := left.IndexArrayConst(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemRight, err := right.IndexArrayConst(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemBC, elemLoc, err := c.compileBCBinaryElementwiseOperator(ctx, prog, scope, pos, op, elemDst, elemLeft, elemRight)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			bc.Add(elemBC...)
+			if elemLoc != elemDst {
+				bc.Mov(elemDst, elemLoc)
+			}
+		}
+
+		return bc, dst, nil
+	case KindStruct:
+		for _, field := range resolveType(left.Type).(*StructType).Fields() {
+			elemDst, err := dst.IndexFieldConst(field.Name)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemLeft, err := left.IndexFieldConst(field.Name)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemRight, err := right.IndexFieldConst(field.Name)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemBC, elemLoc, err := c.compileBCBinaryElementwiseOperator(ctx, prog, scope, pos, op, elemDst, elemLeft, elemRight)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			bc.Add(elemBC...)
+			if elemLoc != elemDst {
+				bc.Mov(elemDst, elemLoc)
+			}
+		}
+
+		return bc, dst, nil
+	case KindMap:
+		// TODO:
+		return nil, nil, pos.WrapError(fmt.Errorf("map type not yet implemented"))
+	default:
+		return nil, nil, pos.WrapError(fmt.Errorf("cannot binary operator %s on type %s", op, left.Type))
+	}
+}
+
+func (c *Compiler) compileBCBinaryComparison(ctx context.Context, prog *Program, scope *ValueScope, pos parser.Position, op Operator, dst, left, right *Location) (BytecodeSnippet, *Location, error) {
+	var bc BytecodeSnippet
+	if !TypesEqual(baseType(left.Type), baseType(right.Type)) {
+		return nil, nil, pos.WrapError(fmt.Errorf("invalid binary operator %s on types %s and %s", op, left.Type, right.Type))
+	}
+
+	if left.Type.Kind().IsPrimitive() && op.CanOperand() {
+		return bc, &Location{
+			Kind: LocationKindLocal,
+			Type: dst.Type,
+			Operand: &Operand{
+				Kind: OperandKindBinary,
+				Value: BinaryOperand{
+					Left:  left.Operand,
+					Op:    op,
+					Right: right.Operand,
+				},
+			},
+		}, nil
+	}
+
+	switch left.Type.Kind() {
+	case KindInt, KindString, KindBool, KindPointer, KindFloat, KindType, KindFunction:
+		bc.BinOp(dst, left, op, right)
+		return bc, dst, nil
+	case KindSlice:
+		if op.IsComparison() {
+			return c.compileBCBinaryComparison(ctx, prog, scope, pos, op, dst, left.AsType(sliceHeader), right.AsType(sliceHeader))
+		} else {
+			return c.compileBCBinaryComparison(ctx, prog, scope, pos, op, dst.AsType(sliceHeader), left.AsType(sliceHeader), right.AsType(sliceHeader))
+		}
+	case KindInterface:
+		// TODO: handle wide interfaces
+		if op.IsComparison() {
+			return c.compileBCBinaryComparison(ctx, prog, scope, pos, op, dst, left.AsType(interfaceTuple), right.AsType(interfaceTuple))
+		} else {
+			return c.compileBCBinaryComparison(ctx, prog, scope, pos, op, dst.AsType(interfaceTuple), left.AsType(interfaceTuple), right.AsType(interfaceTuple))
+		}
+	case KindTuple:
+		if op != OperatorEqual && op != OperatorNotEqual {
+			return nil, nil, pos.WrapError(fmt.Errorf("cannot use operator %s on type %s", op, left.Type))
+		}
+
+		tmp := scope.allocTemp(TypeKind(KindBool))
+		defer scope.deallocTemp(tmp)
+
+		bc.Mov(dst, scope.newImmediate(Bool(op == OperatorEqual)))
+
+		for i := range resolveType(left.Type).(*TupleType).Elems() {
+			elemLeft, err := left.IndexTuple(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemRight, err := right.IndexTuple(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemBC, elemLoc, err := c.compileBCBinaryComparison(ctx, prog, scope, pos, op, tmp, elemLeft, elemRight)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			bc.Add(elemBC...)
+
+			bc.BinOp(dst, dst, OperatorLogicalAnd, elemLoc)
+		}
+
+		return bc, dst, nil
+	case KindArray:
+		if op != OperatorEqual && op != OperatorNotEqual {
+			return nil, nil, pos.WrapError(fmt.Errorf("cannot use operator %s on type %s", op, left.Type))
+		}
+
+		tmp := scope.allocTemp(TypeKind(KindBool))
+		defer scope.deallocTemp(tmp)
+
+		bc.Mov(dst, scope.newImmediate(Bool(op == OperatorEqual)))
+
+		length := resolveType(left.Type).(*ArrayType).Length()
+		if length == nil {
+			return nil, nil, pos.WrapError(fmt.Errorf("unknown array length for array type %s", left.Type))
+		}
+
+		for i := range *length {
+			elemLeft, err := left.IndexArrayConst(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemRight, err := right.IndexArrayConst(i)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemBC, elemLoc, err := c.compileBCBinaryComparison(ctx, prog, scope, pos, op, tmp, elemLeft, elemRight)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			bc.Add(elemBC...)
+
+			bc.BinOp(dst, dst, OperatorLogicalAnd, elemLoc)
+		}
+
+		return bc, dst, nil
+	case KindStruct:
+		if op != OperatorEqual && op != OperatorNotEqual {
+			return nil, nil, pos.WrapError(fmt.Errorf("cannot use operator %s on type %s", op, left.Type))
+		}
+
+		tmp := scope.allocTemp(TypeKind(KindBool))
+		defer scope.deallocTemp(tmp)
+
+		bc.Mov(dst, scope.newImmediate(Bool(op == OperatorEqual)))
+
+		for _, field := range resolveType(left.Type).(*StructType).Fields() {
+			elemLeft, err := left.IndexFieldConst(field.Name)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemRight, err := right.IndexFieldConst(field.Name)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			elemBC, elemLoc, err := c.compileBCBinaryComparison(ctx, prog, scope, pos, op, tmp, elemLeft, elemRight)
+			if err != nil {
+				return nil, nil, pos.WrapError(err)
+			}
+			bc.Add(elemBC...)
+
+			// TODO: short-circuit
+			bc.BinOp(dst, dst, OperatorLogicalAnd, elemLoc)
+		}
+
+		return bc, dst, nil
+	case KindMap:
+		// TODO:
+		return nil, nil, pos.WrapError(fmt.Errorf("map type not yet implemented"))
+	default:
+		return nil, nil, pos.WrapError(fmt.Errorf("cannot binary operator %s on type %s", op, left.Type))
+	}
 }

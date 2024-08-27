@@ -5,7 +5,7 @@ extern func itoa(int) string
 type Err string
 
 func (e Err) Error() string {
-  return string(e)
+  return "error: " + string(e)
 }
 
 type T struct {
@@ -14,7 +14,7 @@ type T struct {
 
 func (t *T) Do() (*T, error) {
   if t.x == 6 {
-    return nil, nil
+    return nil, Err("hello")
   }
   t.x++
   return t, nil
@@ -30,10 +30,26 @@ func handler(err error) error {
 
 func run() error {
   var t T
-  t.Do()? -> handler
+  t.x=6
+  t.Do()?
+
+  return nil
+}
+
+type vec3 [3]float
+
+func (v vec3) print() {
+  printf("(%f, %f, %f)", v[0], v[1], v[2])
 }
 
 #init
 func main() {
-  print(run())
+  var ae error
+  var be error
+  a := vec3([...]float{1,2,3})
+  b := vec3([3]float{1,2,4})
+  a.print()
+  b.print()
+  (a+b).print()
+  (a*b).print()
 }

@@ -135,9 +135,13 @@ SliceType <- '[' _ ']' element:Type {
 	}, nil
 }
 
-ArrayType <- '[' _ length:(IntLiteral) _ ']' element:Type {
+ArrayTypeLength <- "..." {
+  return nil, nil
+} / IntLiteral
+
+ArrayType <- '[' _ length:ArrayTypeLength _ ']' element:Type {
   return ArrayType{
-		Length: length.(IntLiteral),
+		Length: maybe[Expr](length),
 		Element: element.(Type),
 
     Position: pos(c),
@@ -646,7 +650,7 @@ Expr <- MaybeErrorHandlerExpr
 
 ParenExpr <- Expr / Type
 
-TermExpr <- ErrorReturnExpr / CallExpr / SpreadExpr / UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / TupleExpr / ArrayExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / IdentifierExpr / TypeExpr
+TermExpr <- ErrorReturnExpr / CallExpr / SpreadExpr / UnaryExpr / IndexExpr / DotExpr / ParenthesizedExpr / TupleExpr / TypeLiteralExpr / FloatLiteral / IntLiteral / StringLiteral / BoolLiteral / IdentifierExpr / TypeExpr
 
 TypeExpr <- typ:Type {
   return TypeExpr{
@@ -794,24 +798,17 @@ TupleArgumentListComma <- c_ rest:TupleArgumentList {
   return rest, nil
 }
 
-ArrayExpr <- '[' __ length:(IntLiteral / "...") __ ']' typ:Type '{' __ args:ArrayArgumentList? ce_ '}' {
+TypeLiteralExpr <- typ:Type '{' __ args:ArrayArgumentList? ce_ '}' {
 	argsSlice := maybeSlice[Expr](args)
 
-	lengthLiteral, ok := length.(IntLiteral)
-	if !ok {
-		lengthLiteral = IntLiteral{
-			Value: int64(len(argsSlice)),
-		}
-	}
-  arr := ArrayExpr{
-		Length: lengthLiteral,
+  lit := TypeLiteralExpr{
 		Type: typ.(Type),
 		Elems: argsSlice,
 
     Position: pos(c),
   }
 
-  return arr, nil
+  return lit, nil
 }
 
 ArrayArgumentList <- _ exp:Expr _ rest:ArrayArgumentListComma? {

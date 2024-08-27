@@ -1088,6 +1088,8 @@ var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{
 	"I>I": mathBinOp(opGT[Int]),
 	"F>F": mathBinOp(opGT[Float]),
 
+	"B&&B": mathBinOp(opLAnd[Bool]),
+
 	"I>=I": mathBinOp(opGTE[Int]),
 	"F>=F": mathBinOp(opGTE[Float]),
 
@@ -1095,11 +1097,15 @@ var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{
 	"F==F": mathBinOp(opEQ[Float]),
 	"S==S": opEQStr,
 	"B==B": mathBinOp(opEQ[Bool]),
+	"T==T": mathBinOp(opEQ[Int]),
+	"P==P": mathBinOp(opEQ[Int]),
 
 	"I!=I": mathBinOp(opNE[Int]),
 	"F!=F": mathBinOp(opNE[Float]),
 	"S!=S": opNEStr,
 	"B!=B": mathBinOp(opNE[Bool]),
+	"T!=T": mathBinOp(opNE[Int]),
+	"P!=P": mathBinOp(opNE[Int]),
 }
 
 func mathBinOp(f func(a, b float64) float64) binaryOperatorFunc {
@@ -1129,6 +1135,13 @@ func opExp[T Int | Float](a, b float64) float64 {
 
 func opAdd[T Int | Float](a, b float64) float64 {
 	return float64(T(a) + T(b))
+}
+
+func opLAnd[T Bool](a float64, b float64) float64 {
+	if a != 0 && b != 0 {
+		return 1
+	}
+	return 0
 }
 
 func opAddStr(r *Runtime, a, b float64) (float64, error) {

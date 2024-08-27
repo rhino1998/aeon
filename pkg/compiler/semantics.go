@@ -212,6 +212,8 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 
 		methodFuncs:    make(map[string]*Function),
 		ptrMethodFuncs: make(map[string]*Function),
+
+		Position: decl.Position,
 	}
 
 	err = scope.put(t)
@@ -387,9 +389,22 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 			errs.Add(err)
 		}
 
+		var lengthExpr ConstantExpression
+		if typ.Length != nil {
+			maybeLengthExpr, err := c.compileExpression(scope, typ.Length)
+			if err != nil {
+				errs.Add(err)
+			}
+			var ok bool
+			lengthExpr, ok = maybeLengthExpr.(ConstantExpression)
+			if !ok {
+				return nil, typ.Length.WrapError(fmt.Errorf("array length must be a constant expression"))
+			}
+		}
+
 		return &ArrayType{
-			length: int(typ.Length.Value),
-			elem:   elem,
+			lengthExpr: lengthExpr,
+			elem:       elem,
 
 			Position: typ.Position,
 		}, nil
@@ -1218,25 +1233,10 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 
 			Position: expr.Position,
 		}, nil
-	case parser.ArrayExpr:
-		lengthExpr, err := c.compileExpression(scope, expr.Length)
-		if err != nil {
-			errs.Add(err)
-		}
-
-		lengthLiteral, ok := lengthExpr.(*Literal)
-		if !ok {
-			errs.Add(expr.WrapError(fmt.Errorf("array size must be an integer literal")))
-		}
-
+	case parser.TypeLiteralExpr:
 		typeRef, err := c.compileTypeReference(scope, expr.Type)
 		if err != nil {
 			errs.Add(err)
-		}
-
-		lengthInt := int(lengthLiteral.Value().(Int))
-		if len(expr.Elems) < lengthInt {
-			errs.Add(expr.WrapError(fmt.Errorf("expected %d elements in array literal, got %d", len(expr.Elems), lengthInt)))
 		}
 
 		var elems []Expression
@@ -1249,10 +1249,9 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 			elems = append(elems, elemExpr)
 		}
 
-		return &ArrayExpression{
-			Length:   lengthLiteral,
-			ElemType: typeRef,
-			Elems:    elems,
+		return &TypeLiteralExpression{
+			typ:   typeRef,
+			Elems: elems,
 
 			Position: expr.Position,
 		}, nil

@@ -29,6 +29,20 @@ func (o Operator) CanOperand() bool {
 	}
 }
 
+func (o Operator) IsComparison() bool {
+	switch o {
+	case OperatorEqual,
+		OperatorNotEqual,
+		OperatorLessThan,
+		OperatorGreaterThan,
+		OperatorLessThanOrEqual,
+		OperatorGreaterThanOrEqual:
+		return true
+	default:
+		return false
+	}
+}
+
 func (o Operator) IsVectorizable() bool {
 	switch o {
 	case OperatorAddition,
@@ -139,20 +153,67 @@ const (
 )
 
 func validateBinaryExpression(left Type, operator Operator, right Type) (Type, error) {
-	kind := binaryOperatorKinds[BinaryOperatorKinds{operator, left.Kind(), right.Kind()}]
-	if kind == KindUnknown {
+	if !TypesEqual(left, right) {
 		return UnknownType, fmt.Errorf("invalid binary operator %q for types %q and %q", operator, left, right)
 	}
 
-	if !TypesEqual(left, right) {
-		return TypeKind(kind), fmt.Errorf("invalid binary operator %q for types %q and %q", operator, left, right)
-	}
+	switch left.Kind() {
+	case KindInt, KindFloat, KindString, KindPointer, KindBool:
+		kind := binaryOperatorKinds[BinaryOperatorKinds{operator, left.Kind(), right.Kind()}]
+		if kind == KindUnknown {
+			return UnknownType, fmt.Errorf("invalid binary operator %q for types %q and %q", operator, left, right)
+		}
 
-	if left.Kind() != kind {
-		return TypeKind(kind), nil
-	}
+		if operator.IsComparison() {
+			return TypeKind(KindBool), nil
+		}
 
-	return left, nil
+		return left, nil
+	case KindInterface:
+		if operator == OperatorEqual || operator == OperatorNotEqual {
+			return TypeKind(KindBool), nil
+		}
+
+		return UnknownType, fmt.Errorf("invalid binary operator %q for type %q", operator, left)
+	case KindSlice:
+		if operator == OperatorEqual || operator == OperatorNotEqual {
+			return TypeKind(KindBool), nil
+		}
+
+		return UnknownType, fmt.Errorf("invalid binary operator %q for type %q", operator, left)
+	case KindTuple:
+		leftTuple := resolveType(left).(*TupleType)
+		rightTuple := resolveType(right).(*TupleType)
+		for i := range leftTuple.Elems() {
+			leftElem := leftTuple.Elems()[i]
+			rightElem := rightTuple.Elems()[i]
+			_, err := validateBinaryExpression(leftElem, operator, rightElem)
+			if err != nil {
+				return UnknownType, err
+			}
+		}
+
+		if operator.IsComparison() {
+			return TypeKind(KindBool), nil
+		}
+
+		return left, nil
+	case KindArray:
+		leftElem := resolveType(left).(*ArrayType).Elem()
+		rightElem := resolveType(right).(*ArrayType).Elem()
+		_, err := validateBinaryExpression(leftElem, operator, rightElem)
+		if err != nil {
+			return UnknownType, err
+		}
+
+		if operator.IsComparison() {
+			return TypeKind(KindBool), nil
+		}
+
+		return left, nil
+	default:
+		return UnknownType, fmt.Errorf("invalid binary operator %q for type %q", operator, left)
+	}
 }
 
 var binaryOperatorKinds = map[BinaryOperatorKinds]Kind{
@@ -181,11 +242,14 @@ var binaryOperatorKinds = map[BinaryOperatorKinds]Kind{
 	{OperatorModulo, KindInt, KindInt}: KindInt,
 
 	// ==
-	{OperatorEqual, KindInt, KindInt}:         KindBool,
-	{OperatorEqual, KindFloat, KindFloat}:     KindBool,
-	{OperatorEqual, KindString, KindString}:   KindBool,
-	{OperatorEqual, KindBool, KindBool}:       KindBool,
-	{OperatorEqual, KindPointer, KindPointer}: KindBool,
+	{OperatorEqual, KindInt, KindInt}:             KindBool,
+	{OperatorEqual, KindFloat, KindFloat}:         KindBool,
+	{OperatorEqual, KindString, KindString}:       KindBool,
+	{OperatorEqual, KindBool, KindBool}:           KindBool,
+	{OperatorEqual, KindPointer, KindPointer}:     KindBool,
+	{OperatorEqual, KindInterface, KindInterface}: KindBool,
+	{OperatorEqual, KindArray, KindArray}:         KindBool,
+	{OperatorEqual, KindTuple, KindTuple}:         KindBool,
 
 	// !=
 	{OperatorNotEqual, KindInt, KindInt}:         KindBool,
@@ -275,7 +339,7 @@ func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
 			return nil, fmt.Errorf("cannot dereference non-pointer type: %v", expr)
 		}
 
-		return dereferenceType(expr).(*PointerType).Pointee(), nil
+		return resolveType(expr).(*PointerType).Pointee(), nil
 	} else if operator == OperatorAddress {
 		return NewPointerType(expr), nil
 	}

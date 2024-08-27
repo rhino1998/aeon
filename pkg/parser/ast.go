@@ -128,7 +128,7 @@ type SliceType struct {
 type ArrayType struct {
 	baseType
 
-	Length  IntLiteral
+	Length  Expr
 	Element Type
 
 	Position
@@ -476,7 +476,7 @@ type TupleExpr struct {
 	Position
 }
 
-type ArrayExpr struct {
+type TypeLiteralExpr struct {
 	baseExpr
 
 	Length IntLiteral

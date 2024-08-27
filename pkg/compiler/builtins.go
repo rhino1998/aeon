@@ -245,7 +245,7 @@ func (b builtinLenArray) Compile(ctx context.Context, c *Compiler, p *Program, p
 		return nil, nil, err
 	}
 
-	return nil, scope.newImmediate(Int(resolveType(args[0].Type()).(*ArrayType).Length())), nil
+	return nil, scope.newImmediate(Int(*resolveType(args[0].Type()).(*ArrayType).Length())), nil
 }
 
 type builtinLenSlice struct{}

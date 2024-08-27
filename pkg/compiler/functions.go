@@ -258,7 +258,7 @@ func (f *ExternFunction) FlatParameterKinds() ([]Kind, error) {
 }
 
 func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
-	param = BaseType(param)
+	param = baseType(param)
 	kind := param.Kind()
 	switch kind {
 	case KindUnknown:
@@ -272,7 +272,12 @@ func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
 	case KindArray:
 		var ret []Kind
 		array := param.(*ArrayType)
-		for range array.Length() {
+		length := array.Length()
+		if length == nil {
+			return nil, fmt.Errorf("cannot pass array of unknown length to extern function")
+		}
+
+		for range *length {
 			flatElem, err := f.flattenParameters(array.Elem())
 			if err != nil {
 				return nil, err

@@ -3,6 +3,8 @@ package compiler
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/rhino1998/aeon/pkg/parser"
 )
 
 func (c *Compiler) resolveProgramTypes(prog *Program) (err error) {
@@ -25,6 +27,15 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 	defer func() {
 		err = errs.Defer(err)
 	}()
+
+	for _, typ := range pkg.DerivedTypes() {
+		newTyp, err := c.resolveTypes(typ.Position, typ.Underlying())
+		if err != nil {
+			errs.Add(err)
+		}
+
+		typ.underlying = newTyp
+	}
 
 	for _, g := range pkg.Globals() {
 		err := c.resolveGlobalTypes(pkg, g)
@@ -76,14 +87,31 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 		err = errs.Defer(err)
 	}()
 
-	if f.Receiver() != nil && f.Receiver().Type().Kind() == KindUnknown {
-		errs.Add(f.WrapError(fmt.Errorf("function %q has unknown receiver %q of type %s", f.Name(), f.Receiver().Name(), f.Receiver().Type())))
+	if f.Receiver() != nil {
+		f.receiver.typ, err = c.resolveTypes(f.Position, f.Receiver().Type())
+		if err != nil {
+			errs.Add(err)
+		}
+
+		if f.Receiver().Type().Kind() == KindUnknown {
+			errs.Add(f.WrapError(fmt.Errorf("function %q has unknown receiver %q of type %s", f.Name(), f.Receiver().Name(), f.Receiver().Type())))
+		}
 	}
 
 	for _, param := range f.Parameters() {
+		param.typ, err = c.resolveTypes(f.Position, param.Type())
+		if err != nil {
+			errs.Add(err)
+		}
+
 		if param.Type().Kind() == KindUnknown {
 			errs.Add(f.WrapError(fmt.Errorf("function %q has unknown parameter %q of type %s", f.Name(), param.Name(), param.Type())))
 		}
+	}
+
+	f.ret, err = c.resolveTypes(f.Position, f.Return())
+	if err != nil {
+		errs.Add(err)
 	}
 
 	if f.Return().Kind() == KindUnknown {
@@ -100,6 +128,42 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 	return nil
 }
 
+func (c *Compiler) resolveTypes(pos parser.Position, typ Type) (_ Type, err error) {
+	errs := newErrorSet()
+	defer func() {
+		err = errs.Defer(err)
+	}()
+
+	if !IsTypeResolvable(typ) {
+		errs.Add(fmt.Errorf("type %s is unknown", typ))
+	}
+
+	switch typ := typ.(type) {
+	case *ArrayType:
+		err := typ.computeAndValidateLength(nil)
+		if err != nil {
+			errs.Add(pos.WrapError(err))
+		}
+
+		return typ, nil
+	case TypeKind:
+		switch typ.Kind() {
+		case KindInt:
+			return TypeInt, nil
+		case KindFloat:
+			return TypeFloat, nil
+		case KindString:
+			return TypeString, nil
+		case KindBool:
+			return TypeBool, nil
+		default:
+			return typ, nil
+		}
+	default:
+		return typ, nil
+	}
+}
+
 func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 	errs := newErrorSet()
 	defer func() {
@@ -109,17 +173,9 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 	if g.Type() != nil {
 		typ := dereferenceType(g.Type())
 
-		if kindType, ok := typ.(TypeKind); ok {
-			switch kindType.Kind() {
-			case KindInt:
-				typ = TypeInt
-			case KindFloat:
-				typ = TypeFloat
-			case KindString:
-				typ = TypeString
-			case KindBool:
-				typ = TypeBool
-			}
+		g.typ, err = c.resolveTypes(g.Position, typ)
+		if err != nil {
+			return err
 		}
 
 		if !IsTypeResolvable(typ) {
@@ -152,21 +208,9 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 		if stmt.Type != nil {
 			typ := dereferenceType(stmt.Type)
 
-			if kindType, ok := typ.(TypeKind); ok {
-				switch kindType.Kind() {
-				case KindInt:
-					typ = TypeInt
-				case KindFloat:
-					typ = TypeFloat
-				case KindString:
-					typ = TypeString
-				case KindBool:
-					typ = TypeBool
-				}
-			}
-
-			if !IsTypeResolvable(typ) {
-				errs.Add(stmt.WrapError(fmt.Errorf("type %s is unknown", typ)))
+			stmt.Type, err = c.resolveTypes(stmt.Position, typ)
+			if err != nil {
+				return err
 			}
 
 			stmt.Type = typ
@@ -1032,13 +1076,29 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		}
 
 		return expr, nil
-	case *ArrayExpression:
-		arrayBound, ok := resolveType(bound).(*ArrayType)
+	case *TypeLiteralExpression:
+		if arrayType, ok := dereferenceType(expr.Type()).(*ArrayType); ok {
+			numElems := len(expr.Elems)
+			err := arrayType.computeAndValidateLength(&numElems)
+			if err != nil {
+				errs.Add(expr.WrapError(err))
+			}
+		}
+
+		exprType, err := c.resolveTypes(expr.Position, expr.Type())
+		if err != nil {
+			errs.Add(err)
+		}
+
+		expr.typ = exprType
+
 		var elemBound Type
-		if ok {
+		if arrayBound, ok := resolveType(bound).(*ArrayType); ok {
 			elemBound = arrayBound.Elem()
+		} else if arrayExprType, ok := exprType.(*ArrayType); ok {
+			elemBound = arrayExprType.Elem()
 		} else {
-			elemBound = expr.ElemType
+			elemBound = UnknownType
 		}
 
 		for i, elem := range expr.Elems {
