@@ -685,7 +685,7 @@ func (r *Runtime) panic(err error) error {
 
 func (r *Runtime) Run(ctx context.Context) error {
 	for _, varinit := range r.prog.VarInitFunctions() {
-		r.funcTrace = append(r.funcTrace, varinit.Name())
+		r.funcTrace = append(r.funcTrace, varinit.QualifiedName())
 		err := r.RunFrom(ctx, varinit.Addr())
 		if err != nil {
 			return r.panic(err)
@@ -693,7 +693,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 
 	for _, init := range r.prog.InitFunctions() {
-		r.funcTrace = append(r.funcTrace, init.Name())
+		r.funcTrace = append(r.funcTrace, init.QualifiedName())
 		err := r.RunFrom(ctx, init.Addr())
 		if err != nil {
 			return r.panic(err)
@@ -701,7 +701,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 	}
 
 	for _, update := range r.prog.UpdateFunctions() {
-		r.funcTrace = append(r.funcTrace, update.Name())
+		r.funcTrace = append(r.funcTrace, update.QualifiedName())
 		err := r.RunFrom(ctx, update.Addr())
 		if err != nil {
 			return r.panic(err)

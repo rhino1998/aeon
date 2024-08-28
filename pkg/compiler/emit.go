@@ -180,7 +180,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 		hdr := scope.newGlobal("@"+fName, funcType)
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(Int(2)),
-			NewLiteral(String(fun.pkg.qualifiedName)),
+			NewLiteral(String(fun.QualifiedName())),
 			NewLiteral(Int(0)),
 			&CompilerFunctionReferenceExpression{fun},
 		}, scope, hdr)
