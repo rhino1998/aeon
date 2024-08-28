@@ -336,9 +336,9 @@ func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *Va
 		f.bytecode.Add(Ret{Args: argReturnSize})
 	}
 
-	// for i, bc := range f.bytecode {
-	// 	log.Printf("%02x: %v", i, bc)
-	// }
+	for i, bc := range f.bytecode {
+		log.Printf("%02x: %v", i, bc)
+	}
 
 	// Can resolve here for debugging
 	// err := f.bytecode.ResolveLabels()

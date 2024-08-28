@@ -170,6 +170,10 @@ func (f *Function) Addr() Addr {
 	return f.addr
 }
 
+func (f *Function) AddrRange() (Addr, Addr) {
+	return f.addr, f.addr + Addr(len(f.bytecode))
+}
+
 func (f *Function) OffsetAddr(addr Addr) {
 	f.addr += addr
 	f.addrOp.Value = f.addrOp.Value.(Int) + Int(addr)

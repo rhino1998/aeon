@@ -137,7 +137,7 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 		"panic": {
 			ArgSize: 1,
 			Func: func(r *Runtime, s ...float64) error {
-				return fmt.Errorf("panic: %v", s[0])
+				return fmt.Errorf("%v", s[0])
 			},
 		},
 	}
@@ -159,6 +159,8 @@ type Runtime struct {
 	codePages [][PageSize]compiler.Bytecode
 	heapStart Addr
 	heapIndex Addr
+
+	funcTrace []string
 
 	registers []float64
 
@@ -198,6 +200,8 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		page, pageAddr := r.splitAddr(compiler.Addr(i))
 		r.strPages[page][pageAddr] = str
 		r.strIndex++
+
+		log.Printf("string %d: %s", i, str)
 	}
 
 	for i, code := range prog.Bytecode() {
@@ -671,25 +675,38 @@ func (r *Runtime) store(operand *compiler.Operand) storeFunc {
 	}
 }
 
+func (r *Runtime) panic(err error) error {
+	log.Printf("panic: %v", err)
+	for i := len(r.funcTrace) - 1; i >= 0; i-- {
+		frame := r.funcTrace[i]
+		log.Printf("\t%s", frame)
+	}
+
+	return err
+}
+
 func (r *Runtime) Run(ctx context.Context) error {
 	for _, varinit := range r.prog.VarInitFunctions() {
+		r.funcTrace = append(r.funcTrace, varinit.Name())
 		err := r.RunFrom(ctx, varinit.Addr())
 		if err != nil {
-			return err
+			return r.panic(err)
 		}
 	}
 
 	for _, init := range r.prog.InitFunctions() {
+		r.funcTrace = append(r.funcTrace, init.Name())
 		err := r.RunFrom(ctx, init.Addr())
 		if err != nil {
-			return err
+			return r.panic(err)
 		}
 	}
 
 	for _, update := range r.prog.UpdateFunctions() {
+		r.funcTrace = append(r.funcTrace, update.Name())
 		err := r.RunFrom(ctx, update.Addr())
 		if err != nil {
-			return err
+			return r.panic(err)
 		}
 	}
 
@@ -770,6 +787,20 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				return fmt.Errorf("could not resolve function addr: %w", err)
 			}
 
+			fNameAddr, err := r.loadAddr(Addr(funcInfoAddr) + 1)
+			if err != nil {
+				return fmt.Errorf("could not resolve function name addr: %w", err)
+			}
+
+			fName, err := r.LoadString(Addr(fNameAddr))
+			if err != nil {
+				return fmt.Errorf("could not resolve function name")
+			}
+
+			log.Println(fName, funcInfoAddr)
+
+			r.funcTrace = append(r.funcTrace, string(fName))
+
 			switch int(funcType) {
 			case RuntimeFuncTypeNil:
 				return fmt.Errorf("tried to call nil function reference")
@@ -783,8 +814,6 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				if err != nil {
 					return fmt.Errorf("could not load extern function name string")
 				}
-
-				// TODO load string
 
 				entry, ok := r.externFuncs[externNameStr]
 				if !ok {
@@ -802,8 +831,10 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 				err = entry.Func(r, retArgs...)
 				if err != nil {
-					return fmt.Errorf("failed to call extern %q: %w", string(externNameStr), err)
+					return err
 				}
+
+				r.funcTrace = r.funcTrace[:len(r.funcTrace)-1]
 				for i := range entry.ReturnSize {
 					r.storeAddr(r.sp().Offset(-(entry.ArgSize + entry.ReturnSize)).Offset(-i), retArgs[i])
 				}
@@ -858,6 +889,8 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			}
 
 			r.setSP(r.sp().Offset(-code.Args))
+
+			r.funcTrace = r.funcTrace[:len(r.funcTrace)-1]
 
 			// exit completely
 			if r.fp() == 0 {
