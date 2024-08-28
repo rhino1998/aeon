@@ -200,8 +200,6 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		page, pageAddr := r.splitAddr(compiler.Addr(i))
 		r.strPages[page][pageAddr] = str
 		r.strIndex++
-
-		log.Printf("string %d: %s", i, str)
 	}
 
 	for i, code := range prog.Bytecode() {
@@ -676,10 +674,10 @@ func (r *Runtime) store(operand *compiler.Operand) storeFunc {
 }
 
 func (r *Runtime) panic(err error) error {
-	log.Printf("panic: %v", err)
+	fmt.Fprintf(r.stdout, "panic: %v\n", err)
 	for i := len(r.funcTrace) - 1; i >= 0; i-- {
 		frame := r.funcTrace[i]
-		log.Printf("\t%s", frame)
+		fmt.Fprintf(r.stdout, "\t%s\n", frame)
 	}
 
 	return err
@@ -796,8 +794,6 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 			if err != nil {
 				return fmt.Errorf("could not resolve function name")
 			}
-
-			log.Println(fName, funcInfoAddr)
 
 			r.funcTrace = append(r.funcTrace, string(fName))
 

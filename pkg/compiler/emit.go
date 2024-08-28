@@ -3,7 +3,6 @@ package compiler
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/parser"
@@ -336,9 +335,9 @@ func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *Va
 		f.bytecode.Add(Ret{Args: argReturnSize})
 	}
 
-	for i, bc := range f.bytecode {
-		log.Printf("%02x: %v", i, bc)
-	}
+	// for i, bc := range f.bytecode {
+	// 	log.Printf("%02x: %v", i, bc)
+	// }
 
 	// Can resolve here for debugging
 	// err := f.bytecode.ResolveLabels()
@@ -353,8 +352,6 @@ func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *Va
 
 	numLocals.Operand.Value = Int(localSize)
 	var _ = locals
-
-	log.Printf("%s: %v", f.Name(), locals)
 
 	return nil
 }
