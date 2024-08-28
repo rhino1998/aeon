@@ -677,7 +677,7 @@ func (r *Runtime) panic(err error) error {
 	fmt.Fprintf(r.stdout, "panic: %v\n", err)
 	for i := len(r.funcTrace) - 1; i >= 0; i-- {
 		frame := r.funcTrace[i]
-		fmt.Fprintf(r.stdout, "\t%s\n", frame)
+		fmt.Fprintf(r.stdout, "    func %s\n", frame)
 	}
 
 	return err
