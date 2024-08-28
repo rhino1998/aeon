@@ -3,6 +3,7 @@ package compiler
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/parser"
@@ -192,7 +193,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 		scope.newConstant(fName, fun.Type(), hdr.Operand.AddressOf())
 
-		fun.SetInfoAddr(Addr(hdr.AddressOf().Value.(Int)))
+		fun.SetInfoAddr(Addr(hdr.Operand.AddressOf().Value.(Int)))
 	}
 
 	for _, global := range pkg.Globals() {
@@ -243,7 +244,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 			scope.newConstant(met.Name(), met.Type(), hdr.Operand.AddressOf())
 
-			met.SetInfoAddr(Addr(hdr.AddressOf().Value.(Int)))
+			met.SetInfoAddr(Addr(hdr.Operand.AddressOf().Value.(Int)))
 		}
 
 		for _, met := range drv.PtrMethodFunctions() {
@@ -262,13 +263,18 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 			scope.newConstant(met.Name(), met.Type(), hdr.Operand.AddressOf())
 
-			met.SetInfoAddr(Addr(hdr.AddressOf().Value.(Int)))
+			met.SetInfoAddr(Addr(hdr.Operand.AddressOf().Value.(Int)))
 		}
 	}
 
 	f.bytecode.Add(Ret{})
 
-	numLocals.Value = Int(*scope.maxLocal)
+	localSize, err := f.bytecode.ResolveLocals()
+	if err != nil {
+		return f, err
+	}
+
+	numLocals.Operand.Value = Int(localSize)
 
 	pkg.varinit = f
 
@@ -328,13 +334,22 @@ func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *Va
 		f.bytecode.Add(Ret{Args: argReturnSize})
 	}
 
+	for i, bc := range f.bytecode {
+		log.Printf("%02x: %v", i, bc)
+	}
+
 	// Can resolve here for debugging
 	// err := f.bytecode.ResolveLabels()
 	// if err != nil {
 	// 	return err
 	// }
+	//
+	localSize, err := f.bytecode.ResolveLocals()
+	if err != nil {
+		return err
+	}
 
-	numLocals.Value = Int(*scope.maxLocal)
+	numLocals.Operand.Value = Int(localSize)
 
 	return nil
 }
@@ -506,7 +521,7 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 		var initBC []Bytecode
 		var rhsLoc *Location
 
-		local := scope.newLocal(stmt.Variable.Name(), stmt.Type)
+		local := scope.newLocal(stmt.Variable)
 
 		if stmt.Expression != nil {
 			initBC, rhsLoc, err = c.compileBCExpression(ctx, prog, stmt.Expression, scope, local)
@@ -529,7 +544,7 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 		return bc, nil
 	case *DeclarationStatement:
 		if len(stmt.Variables) == 1 {
-			local := scope.newLocal(stmt.Variables[0].Name(), stmt.Expression.Type())
+			local := scope.newLocal(stmt.Variables[0])
 
 			initBC, rhsOp, err := c.compileBCExpression(ctx, prog, stmt.Expression, scope, local)
 			if err != nil {
@@ -546,7 +561,7 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 		} else {
 			locals := make([]*Location, len(stmt.Variables))
 			for i := range stmt.Variables {
-				locals[i] = scope.newLocal(stmt.Variables[i].Name(), stmt.Variables[i].Type())
+				locals[i] = scope.newLocal(stmt.Variables[i])
 			}
 
 			tupleLoc := locals[0].AsType(stmt.Expression.Type())
@@ -1034,12 +1049,12 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 		switch ftype := resolveType(expr.Function.Type()).(type) {
 		case *FunctionType:
-			callTmp := callScope.allocTemp(expr.Function.Type())
-			defer callScope.deallocTemp(callTmp)
+			callTmp := scope.allocTemp(expr.Function.Type())
+			defer scope.deallocTemp(callTmp)
 
-			retVar := callScope.newArg("__return", 0, ftype.Return)
+			retVar := callScope.newArg("__return", ftype.Return)
 
-			recvVar := callScope.newArg("__recv", 0, ftype.Receiver)
+			recvVar := callScope.newArg("__recv", ftype.Receiver)
 
 			if ftype.Return.Size() > 0 {
 				bc.Mov(scope.SP(), scope.SP().AddConst(ftype.Return.Size()))
@@ -1063,15 +1078,15 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 					break
 				}
 
-				argVar := callScope.newArg(fmt.Sprintf("%d", i), 0, ftype.Parameters[i])
-				argTmp := callScope.allocTemp(arg.Type())
+				argVar := callScope.newArg(fmt.Sprintf("%d", i), ftype.Parameters[i])
+				argTmp := scope.allocTemp(arg.Type())
 
 				argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmp)
 				if err != nil {
 					return nil, nil, err
 				}
 
-				callScope.deallocTemp(argTmp)
+				scope.deallocTemp(argTmp)
 
 				bc.Add(argBC...)
 
@@ -1080,13 +1095,11 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 				bc.Mov(scope.SP(), scope.SP().AddConst(arg.Type().Size()))
 			}
 
-			// TODO: handle spread operator
-
 			if hasVariadic {
 				varTmp := callScope.allocTemp(variadicParam)
 				defer callScope.deallocTemp(varTmp)
 
-				varArg := callScope.newArg("...", 0, variadicParam)
+				varArg := callScope.newArg("...", variadicParam)
 
 				if len(expr.Args) > len(ftype.Parameters)-1 && expr.Args[len(ftype.Parameters)-1].Type().Kind() == KindVariadic {
 					varBC, varLoc, err := c.compileBCExpression(ctx, prog, expr.Args[len(ftype.Parameters)-1], callScope, varTmp)
@@ -1107,13 +1120,13 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 					bc.Add(varBC...)
 
 					for _, arg := range expr.Args[len(ftype.Parameters)-1:] {
-						argTmp := callScope.allocTemp(arg.Type())
+						argTmp := scope.allocTemp(arg.Type())
 						argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmp)
 						if err != nil {
 							return nil, nil, err
 						}
 
-						callScope.deallocTemp(argTmp)
+						scope.deallocTemp(argTmp)
 
 						bc.Add(argBC...)
 
@@ -1123,7 +1136,6 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 					bc.Mov(varArg, varLoc)
 					bc.Mov(scope.SP(), scope.SP().AddConst(variadicParam.Size()))
 				}
-
 			}
 
 			bc.Add(Cal{
@@ -1321,12 +1333,35 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		bc.JumpAfter(skipRet, &Operand{
 			Kind: OperandKindBinary,
 			Value: BinaryOperand{
-				Left:  errLoc.Operand,
+				Left:  must1(errLoc.InterfaceType()).Operand,
 				Op:    OperatorEqual,
 				Right: scope.typeName(Nil{}).Operand,
 			},
 		})
-		bc.Mov(errRetLoc, errLoc)
+		errHandlerLoc, ok := scope.Get(errorHandlerSymbolName)
+		if !ok {
+			bc.Mov(errRetLoc, errLoc)
+		} else {
+			handlerScope := scope.sub(scope.symbols)
+			handlerRet := handlerScope.newArg("__return", expr.Function.Return())
+			handlerArg := handlerScope.newArg("err", TypeError)
+			bc.Mov(scope.SP(), scope.SP().AddConst(TypeError.Size()))
+			bc.Mov(handlerArg, errLoc)
+			bc.Mov(scope.SP(), scope.SP().AddConst(TypeError.Size()))
+			bc.Add(Cal{
+				Func: errHandlerLoc.Operand,
+			})
+			bc.JumpAfter(skipRet, &Operand{
+				Kind: OperandKindBinary,
+				Value: BinaryOperand{
+					Left:  must1(handlerRet.InterfaceType()).Operand,
+					Op:    OperatorEqual,
+					Right: scope.typeName(Nil{}).Operand,
+				},
+			})
+			bc.Mov(errRetLoc, handlerRet)
+		}
+
 		bc.Add(Ret{
 			Args: scope.function.ReturnArgSize(),
 		})
@@ -1335,6 +1370,31 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		bc.Mov(dst, tmp.AsType(dst.Type))
 
 		return bc, dst, nil
+	case *ErrorHandlerExpression:
+		errHandlerVar := &Variable{
+			name: errorHandlerSymbolName,
+			typ:  errorHandlerFunctionType,
+		}
+
+		handlerDst := scope.newLocal(errHandlerVar)
+
+		handlerBC, handlerLoc, err := c.compileBCExpression(ctx, prog, expr.Handler, scope, handlerDst)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		bc.Add(handlerBC...)
+		if handlerLoc != handlerDst {
+			bc.Mov(handlerDst, handlerLoc)
+		}
+
+		subExprBC, subExprLoc, err := c.compileBCExpression(ctx, prog, expr.Expr, scope, dst)
+		if err != nil {
+			return nil, nil, err
+		}
+		bc.Add(subExprBC...)
+
+		return bc, subExprLoc, nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}
@@ -1674,6 +1734,11 @@ func (c *Compiler) compileBCBinaryComparison(ctx context.Context, prog *Program,
 			return nil, nil, pos.WrapError(fmt.Errorf("cannot use operator %s on type %s", op, left.Type))
 		}
 
+		mergeOp := OperatorLogicalOr
+		if op == OperatorEqual {
+			mergeOp = OperatorLogicalAnd
+		}
+
 		tmp := scope.allocTemp(TypeKind(KindBool))
 		defer scope.deallocTemp(tmp)
 
@@ -1694,13 +1759,18 @@ func (c *Compiler) compileBCBinaryComparison(ctx context.Context, prog *Program,
 			}
 			bc.Add(elemBC...)
 
-			bc.BinOp(dst, dst, OperatorLogicalAnd, elemLoc)
+			bc.BinOp(dst, dst, mergeOp, elemLoc)
 		}
 
 		return bc, dst, nil
 	case KindArray:
 		if op != OperatorEqual && op != OperatorNotEqual {
 			return nil, nil, pos.WrapError(fmt.Errorf("cannot use operator %s on type %s", op, left.Type))
+		}
+
+		mergeOp := OperatorLogicalOr
+		if op == OperatorEqual {
+			mergeOp = OperatorLogicalAnd
 		}
 
 		tmp := scope.allocTemp(TypeKind(KindBool))
@@ -1728,13 +1798,18 @@ func (c *Compiler) compileBCBinaryComparison(ctx context.Context, prog *Program,
 			}
 			bc.Add(elemBC...)
 
-			bc.BinOp(dst, dst, OperatorLogicalAnd, elemLoc)
+			bc.BinOp(dst, dst, mergeOp, elemLoc)
 		}
 
 		return bc, dst, nil
 	case KindStruct:
 		if op != OperatorEqual && op != OperatorNotEqual {
 			return nil, nil, pos.WrapError(fmt.Errorf("cannot use operator %s on type %s", op, left.Type))
+		}
+
+		mergeOp := OperatorLogicalOr
+		if op == OperatorEqual {
+			mergeOp = OperatorLogicalAnd
 		}
 
 		tmp := scope.allocTemp(TypeKind(KindBool))
@@ -1758,7 +1833,7 @@ func (c *Compiler) compileBCBinaryComparison(ctx context.Context, prog *Program,
 			bc.Add(elemBC...)
 
 			// TODO: short-circuit
-			bc.BinOp(dst, dst, OperatorLogicalAnd, elemLoc)
+			bc.BinOp(dst, dst, mergeOp, elemLoc)
 		}
 
 		return bc, dst, nil

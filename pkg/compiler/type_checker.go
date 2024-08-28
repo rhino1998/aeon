@@ -1194,6 +1194,26 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		}
 
 		return expr, nil
+	case *ErrorHandlerExpression:
+		subExpr, err := c.resolveExpressionTypes(expr.Expr, nil)
+		if err != nil {
+			return expr, err
+		}
+
+		expr.Expr = subExpr
+
+		handlerExpr, err := c.resolveExpressionTypes(expr.Handler, nil)
+		if err != nil {
+			return expr, err
+		}
+
+		if !IsAssignableTo(handlerExpr.Type(), errorHandlerFunctionType) {
+			errs.Add(expr.WrapError(fmt.Errorf("error handler expression expects %s, got %s", errorHandlerFunctionType, handlerExpr.Type())))
+		}
+
+		expr.Handler = handlerExpr
+
+		return expr, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %s", expr))
 	}

@@ -35,3 +35,10 @@ func sortedMapKeysByKey[S ~string, T any](m map[S]T) []S {
 
 	return keys
 }
+
+func must1[T any](v T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return v
+}

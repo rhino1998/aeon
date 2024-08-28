@@ -21,6 +21,7 @@ const (
 	OperandKindType
 	OperandKindString
 	OperandKindSymbol
+	OperandKindLocal
 )
 
 func (s OperandKind) String() string {
@@ -43,6 +44,8 @@ func (s OperandKind) String() string {
 		return "<compiler type>"
 	case OperandKindString:
 		return "<compiler string>"
+	case OperandKindLocal:
+		return "<compiler local>"
 	default:
 		return "?"
 	}
@@ -66,6 +69,13 @@ func LabelOperand(label Label) *Operand {
 	return &Operand{
 		Kind:  OperandKindLabel,
 		Value: label,
+	}
+}
+
+func LocalOperand(v *Variable) *Operand {
+	return &Operand{
+		Kind:  OperandKindLocal,
+		Value: v,
 	}
 }
 
@@ -159,7 +169,7 @@ func (o *Operand) walk(w operandWalkFunc) (*Operand, error) {
 		o.Value = v
 
 		return w(o)
-	case OperandKindImmediate, OperandKindLabel, OperandKindString, OperandKindRegister, OperandKindType:
+	case OperandKindImmediate, OperandKindLabel, OperandKindString, OperandKindRegister, OperandKindType, OperandKindLocal:
 		return w(o)
 	default:
 		return nil, fmt.Errorf("unhandled operand type %q", o.Kind)

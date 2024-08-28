@@ -967,7 +967,6 @@ func (t *ArrayType) Elem() Type   { return t.elem }
 func (t *ArrayType) Length() *int { return t.length }
 func (t *ArrayType) Size() Size {
 	if t.length == nil {
-		return 0
 		panic("bug: array type has nil length")
 	}
 	return t.elem.Size() * Size(*t.length)

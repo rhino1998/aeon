@@ -1089,6 +1089,7 @@ var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{
 	"F>F": mathBinOp(opGT[Float]),
 
 	"B&&B": mathBinOp(opLAnd[Bool]),
+	"B||B": mathBinOp(opLOr[Bool]),
 
 	"I>=I": mathBinOp(opGTE[Int]),
 	"F>=F": mathBinOp(opGTE[Float]),
@@ -1139,6 +1140,13 @@ func opAdd[T Int | Float](a, b float64) float64 {
 
 func opLAnd[T Bool](a float64, b float64) float64 {
 	if a != 0 && b != 0 {
+		return 1
+	}
+	return 0
+}
+
+func opLOr[T Bool](a float64, b float64) float64 {
+	if a != 0 || b != 0 {
 		return 1
 	}
 	return 0

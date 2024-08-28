@@ -11,10 +11,10 @@ type T struct {
 }
 
 func (t *T) Do() (*T, error) {
-  print(t.x)
   if t.x == 3 {
-    return nil, Err("hello")
+    return t, Err("hello")
   }
+  print(t.x)
   t.x++
   return t, nil
 }
@@ -29,8 +29,7 @@ func handler(err error) error {
 
 func run() error {
   var t T
-  t.Do()?.Do()?.Do()?.Do()? -> handler
-  t.Do()?.Do()? -> handler
+  t.Do()?.Do()?.Do()?.Do()?.Do()?.Do()? -> handler
 
   return nil
 }
@@ -39,3 +38,11 @@ func run() error {
 func main() {
   print(run())
 }
+---
+0
+1
+2
+error: hello
+error: hello
+error: hello
+<nil>

@@ -215,6 +215,8 @@ func (e *ErrorReturnExpression) Type() Type {
 	}
 }
 
+var errorHandlerFunctionType = NewFunctionType(TypeVoid, []Type{TypeError}, TypeError)
+
 type ErrorHandlerExpression struct {
 	Function *Function
 

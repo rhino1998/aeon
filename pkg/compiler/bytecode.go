@@ -86,7 +86,6 @@ func (s BytecodeSnippet) ResolveLabels() error {
 				return nil, fmt.Errorf("unknown label %q in operand", label)
 			}
 
-			// TODO: maybe off by one
 			return ImmediateOperand(Int(labelIndex - index)), nil
 		default:
 			return o, nil
@@ -134,6 +133,29 @@ func (s BytecodeSnippet) ResolveStrings(strings []String) error {
 			return o, nil
 		}
 	}))
+}
+
+func (s BytecodeSnippet) ResolveLocals() (Size, error) {
+	var totalSize Size = 1
+
+	err := s.walk(bytecodeOperandWalker(func(index int, o *Operand) (*Operand, error) {
+		switch o.Kind {
+		case OperandKindLocal:
+			local := o.Value.(*Variable)
+			*o = *OperandRegisterFP.ConstOffset(totalSize)
+			totalSize += local.Type().Size()
+
+			return o, nil
+		default:
+			return o, nil
+		}
+	}))
+
+	if err != nil {
+		return 0, err
+	}
+
+	return totalSize, nil
 }
 
 type bytecodeWalker struct {
@@ -270,58 +292,70 @@ func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalk
 }
 
 func (s BytecodeSnippet) walk(w bytecodeWalker) error {
-	for i, bc := range s {
-		var err error
+	var walkBC func(int, Bytecode) (Bytecode, error)
+	walkBC = func(i int, bc Bytecode) (Bytecode, error) {
 		switch bc := bc.(type) {
 		case Jmp:
 			if w.Jmp == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.Jmp(i, bc)
+			return w.Jmp(i, bc)
 		case Mov:
 			if w.Mov == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.Mov(i, bc)
+			return w.Mov(i, bc)
 		case BinOp:
 			if w.BinOp == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.BinOp(i, bc)
+			return w.BinOp(i, bc)
 		case UnOp:
 			if w.UnOp == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.UnOp(i, bc)
+			return w.UnOp(i, bc)
 		case Str:
 			if w.Str == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.Str(i, bc)
+			return w.Str(i, bc)
 		case Cal:
 			if w.Str == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.Cal(i, bc)
+			return w.Cal(i, bc)
 		case Ret:
 			if w.Ret == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.Ret(i, bc)
+			return w.Ret(i, bc)
 		case Alc:
 			if w.Alc == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.Alc(i, bc)
+			return w.Alc(i, bc)
 		case App:
 			if w.App == nil {
-				continue
+				return bc, nil
 			}
-			s[i], err = w.App(i, bc)
-		default:
-			return fmt.Errorf("unhandled bytecode type %T", bc)
-		}
+			return w.App(i, bc)
+		case LabelledBytecode:
+			subBC, err := walkBC(i, bc.Bytecode)
+			if err != nil {
+				return nil, err
+			}
 
+			bc.Bytecode = subBC
+			return bc, nil
+		default:
+			return nil, fmt.Errorf("unhandled bytecode type %T", bc)
+		}
+	}
+
+	for i, bc := range s {
+		var err error
+		s[i], err = walkBC(i, bc)
 		if err != nil {
 			return err
 		}

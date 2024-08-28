@@ -92,8 +92,6 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	xeCtx.Debug = logger.Handler().Enabled(ctx, slog.LevelDebug)
 	xeCtx.OPSep = "\x9B"
 
-	xeCtx.OPSep = "|"
-
 	xeCtx.KindNil = int(compiler.KindNil)
 	xeCtx.KindInt = int(compiler.KindInt)
 	xeCtx.KindFloat = int(compiler.KindFloat)

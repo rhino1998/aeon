@@ -28,8 +28,9 @@ type SymbolScope struct {
 	name   string
 	scope  map[string]Symbol
 
-	pkg      *Package
-	function *Function
+	pkg        *Package
+	function   *Function
+	errHandler Expression
 }
 
 func newScope(parent *SymbolScope, name string) *SymbolScope {
@@ -265,10 +266,14 @@ const (
 )
 
 type Location struct {
-	Kind LocationKind
-	Name string
-	Type Type
-	*Operand
+	Kind    LocationKind
+	Name    string
+	Type    Type
+	Operand *Operand
+}
+
+func (l *Location) String() string {
+	return l.Operand.String()
 }
 
 func (l *Location) Equal(o *Location) bool {
@@ -316,12 +321,25 @@ func (l *Location) AsType(typ Type) *Location {
 	}
 }
 
+func (l *Location) InterfaceType() (*Location, error) {
+	return l.AsType(interfaceTuple).IndexTuple(0)
+}
+
 func (l *Location) AddressOf() *Location {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    fmt.Sprintf("&%s", l.Name),
 		Type:    NewPointerType(l.Type),
 		Operand: l.Operand.AddressOf(),
+	}
+}
+
+func (l *Location) Value() *Location {
+	return &Location{
+		Kind:    l.Kind,
+		Name:    fmt.Sprintf("*%s", l.Name),
+		Type:    dereferenceType(l.Type),
+		Operand: l.Operand.Dereference(),
 	}
 }
 
@@ -453,7 +471,9 @@ func (l *Location) IndexFieldConst(name string) (*Location, error) {
 }
 
 type ValueScope struct {
-	parent *ValueScope
+	parent  *ValueScope
+	name    string
+	nextSub int
 
 	function *Function
 	symbols  *SymbolScope
@@ -494,6 +514,7 @@ func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
 }
 
 func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
+	vs.nextSub++
 	return &ValueScope{
 		parent:  vs,
 		symbols: scope,
@@ -570,12 +591,12 @@ func (vs *ValueScope) newGlobal(name string, typ Type) *Location {
 	return loc
 }
 
-func (vs *ValueScope) newArg(name string, offset Size, typ Type) *Location {
+func (vs *ValueScope) newArg(name string, typ Type) *Location {
 	loc := &Location{
 		Kind:    LocationKindArg,
 		Name:    fmt.Sprintf("arg_%s", name),
 		Type:    typ,
-		Operand: OperandRegisterSP.ConstOffset(offset).Dereference(),
+		Operand: OperandRegisterSP.Dereference(),
 	}
 	vs.variables[loc.Name] = loc
 	return loc
@@ -590,22 +611,19 @@ func (vs *ValueScope) newParam(name string, offset Size, typ Type) {
 	}
 }
 
-func (vs *ValueScope) newLocal(name string, typ Type) *Location {
+func (vs *ValueScope) newLocal(v *Variable) *Location {
 	loc := &Location{
 		Kind:    LocationKindLocal,
-		Name:    name,
-		Type:    dereferenceType(typ),
-		Operand: OperandRegisterFP.ConstOffset(vs.nextLocal).Dereference(),
+		Name:    v.Name(),
+		Type:    dereferenceType(v.Type()),
+		Operand: LocalOperand(v),
 	}
 
-	vs.variables[name] = loc
+	locVal := loc.Value()
 
-	vs.nextLocal += Size(typ.Size())
-	if *vs.maxLocal < vs.nextLocal-1 {
-		*vs.maxLocal = vs.nextLocal - 1
-	}
+	vs.variables[v.Name()] = locVal
 
-	return loc
+	return locVal
 }
 
 func (vs *ValueScope) allocTemp(typ Type) *Location {
@@ -632,24 +650,20 @@ func (vs *ValueScope) allocTemp(typ Type) *Location {
 		}
 	}
 
+	tmpVar := &Variable{
+		name: "__local_tmp",
+		typ:  typ,
+	}
+
 	// all registers are used or type is too large
-	return vs.newLocal(fmt.Sprintf("__local_tmp_%d", int(vs.nextLocal)), typ)
+	return vs.newLocal(tmpVar)
 }
 
 func (vs *ValueScope) deallocTemp(l *Location) {
 	switch l.Kind {
-	case LocationKindLocal:
-		offset := Size(l.Value.(Indirect).Ptr.Value.(BinaryOperand).Right.Value.(Int))
-		if offset == vs.nextLocal-l.Type.Size() {
-			vs.nextLocal -= l.Type.Size()
-		}
 	case LocationKindRegister:
-		vs.usedRegisters[l.Value.(Register)] = false
+		vs.usedRegisters[l.Operand.Value.(Register)] = false
 	}
-}
-
-func (vs *ValueScope) Push(name string, value *Location) Mov {
-	return vs.Mov(value, vs.newLocal(name, value.Type))
 }
 
 func (vs *ValueScope) Mov(src, dst *Location) Mov {
@@ -700,6 +714,10 @@ func (vs *ValueScope) registerType(typ Type) TypeName {
 
 	return name
 }
+
+const (
+	errorHandlerSymbolName = "#error_handler"
+)
 
 func (vs *ValueScope) getString(s String) *Location {
 	vs.strings[s] = struct{}{}
