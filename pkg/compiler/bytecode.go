@@ -135,7 +135,8 @@ func (s BytecodeSnippet) ResolveStrings(strings []String) error {
 	}))
 }
 
-func (s BytecodeSnippet) ResolveLocals() (Size, error) {
+func (s BytecodeSnippet) ResolveLocals() (Size, []Type, error) {
+	var locals []Type
 	var totalSize Size = 1
 
 	err := s.walk(bytecodeOperandWalker(func(index int, o *Operand) (*Operand, error) {
@@ -143,6 +144,7 @@ func (s BytecodeSnippet) ResolveLocals() (Size, error) {
 		case OperandKindLocal:
 			local := o.Value.(*Variable)
 			*o = *OperandRegisterFP.ConstOffset(totalSize)
+			locals = append(locals, local.Type())
 			totalSize += local.Type().Size()
 
 			return o, nil
@@ -152,10 +154,10 @@ func (s BytecodeSnippet) ResolveLocals() (Size, error) {
 	}))
 
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 
-	return totalSize, nil
+	return totalSize, locals, nil
 }
 
 type bytecodeWalker struct {

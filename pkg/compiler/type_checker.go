@@ -1208,7 +1208,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		}
 
 		if !IsAssignableTo(handlerExpr.Type(), errorHandlerFunctionType) {
-			errs.Add(expr.WrapError(fmt.Errorf("error handler expression expects %s, got %s", errorHandlerFunctionType, handlerExpr.Type())))
+			errs.Add(expr.WrapError(fmt.Errorf("error handler expression expects value of type %s, got %s", errorHandlerFunctionType, handlerExpr.Type())))
 		}
 
 		expr.Handler = handlerExpr

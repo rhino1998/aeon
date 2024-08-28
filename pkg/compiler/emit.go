@@ -269,12 +269,14 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 	f.bytecode.Add(Ret{})
 
-	localSize, err := f.bytecode.ResolveLocals()
+	localSize, locals, err := f.bytecode.ResolveLocals()
 	if err != nil {
 		return f, err
 	}
 
 	numLocals.Operand.Value = Int(localSize)
+
+	var _ = locals
 
 	pkg.varinit = f
 
@@ -334,9 +336,9 @@ func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *Va
 		f.bytecode.Add(Ret{Args: argReturnSize})
 	}
 
-	for i, bc := range f.bytecode {
-		log.Printf("%02x: %v", i, bc)
-	}
+	// for i, bc := range f.bytecode {
+	// 	log.Printf("%02x: %v", i, bc)
+	// }
 
 	// Can resolve here for debugging
 	// err := f.bytecode.ResolveLabels()
@@ -344,12 +346,15 @@ func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *Va
 	// 	return err
 	// }
 	//
-	localSize, err := f.bytecode.ResolveLocals()
+	localSize, locals, err := f.bytecode.ResolveLocals()
 	if err != nil {
 		return err
 	}
 
 	numLocals.Operand.Value = Int(localSize)
+	var _ = locals
+
+	log.Printf("%s: %v", f.Name(), locals)
 
 	return nil
 }
@@ -954,13 +959,10 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 	case *BuiltinSymbol:
 		return nil, nil, expr.WrapError(fmt.Errorf("builtin %q used as value", expr.Name()))
 	case *BinaryExpression:
-		var leftTmp *Location
-		if expr.Left.Type().Size() == dst.Type.Size() {
-			leftTmp = dst.AsType(expr.Left.Type())
-		} else {
-			leftTmp = scope.allocTemp(expr.Left.Type())
-			defer scope.deallocTemp(leftTmp)
-		}
+		// TODO: short-circuiting
+
+		leftTmp := scope.allocTemp(expr.Left.Type())
+		defer scope.deallocTemp(leftTmp)
 
 		leftBC, leftLoc, err := c.compileBCExpression(ctx, prog, expr.Left, scope, leftTmp)
 		if err != nil {
@@ -1052,20 +1054,27 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 			callTmp := scope.allocTemp(expr.Function.Type())
 			defer scope.deallocTemp(callTmp)
 
-			retVar := callScope.newArg("__return", ftype.Return)
+			recvTmp := scope.allocTemp(ftype.Receiver)
+			defer scope.deallocTemp(recvTmp)
 
-			recvVar := callScope.newArg("__recv", ftype.Receiver)
-
-			if ftype.Return.Size() > 0 {
-				bc.Mov(scope.SP(), scope.SP().AddConst(ftype.Return.Size()))
-			}
-
-			callBC, callLoc, err := c.compileBCCallReceiverExpression(ctx, prog, expr.Function, callScope, recvVar, callTmp)
+			callBC, callLoc, recvLoc, err := c.compileBCCallReceiverExpression(ctx, prog, expr.Function, callScope, recvTmp, callTmp)
 			if err != nil {
 				return nil, nil, err
 			}
 
 			bc.Add(callBC...)
+
+			argLocs := make([]*Location, 0, len(ftype.Parameters))
+			argTmps := make([]*Location, 0, len(ftype.Parameters))
+			defer func() {
+				for _, argTmp := range argTmps {
+					scope.deallocTemp(argTmp)
+				}
+			}()
+
+			if recvLoc != nil {
+				argLocs = append(argLocs, recvLoc)
+			}
 
 			var hasVariadic bool
 			var variadicParam *VariadicType
@@ -1078,28 +1087,21 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 					break
 				}
 
-				argVar := callScope.newArg(fmt.Sprintf("%d", i), ftype.Parameters[i])
-				argTmp := scope.allocTemp(arg.Type())
+				argTmps = append(argTmps, scope.allocTemp(arg.Type()))
 
-				argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmp)
+				argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmps[i])
 				if err != nil {
 					return nil, nil, err
 				}
 
-				scope.deallocTemp(argTmp)
+				argLocs = append(argLocs, argLoc)
 
 				bc.Add(argBC...)
-
-				bc.Mov(argVar, argLoc)
-
-				bc.Mov(scope.SP(), scope.SP().AddConst(arg.Type().Size()))
 			}
 
 			if hasVariadic {
 				varTmp := callScope.allocTemp(variadicParam)
-				defer callScope.deallocTemp(varTmp)
-
-				varArg := callScope.newArg("...", variadicParam)
+				argTmps = append(argTmps, varTmp)
 
 				if len(expr.Args) > len(ftype.Parameters)-1 && expr.Args[len(ftype.Parameters)-1].Type().Kind() == KindVariadic {
 					varBC, varLoc, err := c.compileBCExpression(ctx, prog, expr.Args[len(ftype.Parameters)-1], callScope, varTmp)
@@ -1109,15 +1111,17 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 					bc.Add(varBC...)
 
-					bc.Mov(varArg, varLoc)
-					bc.Mov(scope.SP(), scope.SP().AddConst(variadicParam.Size()))
+					argLocs = append(argLocs, varLoc)
 				} else {
+					// TODO: maybe stack allocate this when escape analysis works
 					varBC, varLoc, err := c.compileBCZeroValue(ctx, prog, expr.Position, sliceHeader, scope, varTmp.AsType(sliceHeader))
 					if err != nil {
 						return nil, nil, err
 					}
 
 					bc.Add(varBC...)
+
+					argLocs = append(argLocs, varLoc)
 
 					for _, arg := range expr.Args[len(ftype.Parameters)-1:] {
 						argTmp := scope.allocTemp(arg.Type())
@@ -1132,19 +1136,22 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 						bc.App(varLoc, varLoc, argLoc, variadicParam.Elem().Size())
 					}
-
-					bc.Mov(varArg, varLoc)
-					bc.Mov(scope.SP(), scope.SP().AddConst(variadicParam.Size()))
 				}
+			}
+
+			retVar := scope.newArg("__return", ftype.Return)
+			bc.Mov(scope.SP(), scope.SP().AddConst(ftype.Return.Size()))
+			for _, argLoc := range argLocs {
+				argVar := scope.newArg("arg", argLoc.Type)
+				bc.Mov(argVar, argLoc)
+				bc.Mov(scope.SP(), scope.SP().AddConst(argLoc.Type.Size()))
 			}
 
 			bc.Add(Cal{
 				Func: callLoc.Operand,
 			})
 
-			if retVar.Type.Size() > 0 && !retVar.SameMemory(dst) {
-				bc.Mov(dst, retVar)
-			}
+			bc.Mov(dst, retVar)
 
 			return bc, dst, nil
 		case *TypeType:
@@ -1400,13 +1407,13 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 	}
 }
 
-func (c *Compiler) compileBCCallReceiverExpression(ctx context.Context, prog *Program, expr Expression, scope *ValueScope, recvDst, callDst *Location) (BytecodeSnippet, *Location, error) {
+func (c *Compiler) compileBCCallReceiverExpression(ctx context.Context, prog *Program, expr Expression, scope *ValueScope, recvDst, callDst *Location) (BytecodeSnippet, *Location, *Location, error) {
 	var bc BytecodeSnippet
 	switch expr := expr.(type) {
 	case *MethodExpression:
 		recvBC, recvLoc, err := c.compileBCExpression(ctx, prog, expr.Receiver, scope, recvDst)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 
 		bc.Add(recvBC...)
@@ -1418,49 +1425,38 @@ func (c *Compiler) compileBCCallReceiverExpression(ctx context.Context, prog *Pr
 
 			method, ok := iface.Methods().Get(methodName)
 			if !ok {
-				return nil, nil, expr.WrapError(fmt.Errorf("could not resolve method %s on type %s", methodName, expr.Receiver.Type()))
+				return nil, nil, nil, expr.WrapError(fmt.Errorf("could not resolve method %s on type %s", methodName, expr.Receiver.Type()))
 			}
 
 			typLoc, err := recvLoc.AsType(interfaceTuple).IndexTuple(0)
 			if err != nil {
-				return nil, nil, expr.WrapError(err)
+				return nil, nil, nil, expr.WrapError(err)
 			}
 
 			valLoc, err := recvLoc.AsType(interfaceTuple).IndexTuple(1)
 			if err != nil {
-				return nil, nil, expr.WrapError(err)
+				return nil, nil, nil, expr.WrapError(err)
 			}
 
-			// TODO: handle wide receivers
-			bc.Mov(recvDst, valLoc)
-			bc.Mov(scope.SP(), scope.SP().AddConst(1))
-
-			return bc, scope.vtableLookup(typLoc, method), nil
+			return bc, scope.vtableLookup(typLoc, method), valLoc, nil
 		} else {
-			if recvLoc != recvDst {
-				bc.Mov(recvDst, recvLoc)
-			}
-
-			if expr.Receiver.Type().Size() > 0 {
-				bc.Mov(scope.SP(), scope.SP().AddConst(expr.Receiver.Type().Size()))
-			}
-
 			methodFunc, ok := TypeMethod(expr.Receiver.Type(), methodName)
 			if !ok {
-				return nil, nil, expr.WrapError(fmt.Errorf("could not resolve method %s on type %s", methodName, expr.Receiver.Type()))
+				return nil, nil, nil, expr.WrapError(fmt.Errorf("could not resolve method %s on type %s", methodName, expr.Receiver.Type()))
 			}
 
 			callLoc, ok := scope.Get(methodFunc.Name())
 			if !ok {
-				return nil, nil, expr.WrapError(fmt.Errorf("could not resolve location for method %q", methodFunc.Name()))
+				return nil, nil, nil, expr.WrapError(fmt.Errorf("could not resolve location for method %q", methodFunc.Name()))
 			}
 
-			return bc, callLoc, nil
+			return bc, callLoc, recvLoc, nil
 		}
 	case *ParenthesizedExpression:
 		return c.compileBCCallReceiverExpression(ctx, prog, expr.Expression, scope, recvDst, callDst)
 	default:
-		return c.compileBCExpression(ctx, prog, expr, scope, callDst)
+		bc, callLoc, err := c.compileBCExpression(ctx, prog, expr, scope, callDst)
+		return bc, callLoc, nil, err
 	}
 }
 
@@ -1599,10 +1595,6 @@ func (c *Compiler) compileBCBinaryElementwiseOperator(ctx context.Context, prog 
 		}
 	case KindTuple:
 		opDst := dst
-		if op.IsComparison() {
-			opDst = scope.allocTemp(left.Type)
-			defer scope.deallocTemp(opDst)
-		}
 
 		for i := range resolveType(left.Type).(*TupleType).Elems() {
 			elemDst, err := opDst.IndexTuple(i)
