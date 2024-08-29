@@ -146,6 +146,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(Int(1)),
 			NewLiteral(String(externFunc.Name())),
+			NewLiteral(String("extern")),
 			NewLiteral(Int(0)),
 			NewLiteral(String(externFunc.Name())),
 		}, scope, hdr)
@@ -163,6 +164,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(Int(1)),
 			NewLiteral(String(externFunc.Name())),
+			NewLiteral(String("extern")),
 			NewLiteral(Int(0)),
 			NewLiteral(String(externFunc.Name())),
 		}, scope, hdr)
@@ -181,6 +183,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(Int(2)),
 			NewLiteral(String(fun.QualifiedName())),
+			NewLiteral(String(fun.Position.File)),
 			NewLiteral(Int(0)),
 			&CompilerFunctionReferenceExpression{fun},
 		}, scope, hdr)
@@ -232,6 +235,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 			hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
+				NewLiteral(String(met.Position.File)),
 				NewLiteral(Int(0)),
 				&CompilerFunctionReferenceExpression{met},
 			}, scope, hdr)
@@ -251,6 +255,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 			hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
+				NewLiteral(String(met.Position.File)),
 				NewLiteral(Int(0)),
 				&CompilerFunctionReferenceExpression{met},
 			}, scope, hdr)
@@ -267,6 +272,10 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 	}
 
 	f.bytecode.Add(Ret{})
+
+	// for i, bc := range f.bytecode {
+	// 	log.Printf("%02x: %v", i, bc)
+	// }
 
 	localSize, locals, err := f.bytecode.ResolveLocals()
 	if err != nil {

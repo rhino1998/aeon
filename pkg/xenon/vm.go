@@ -160,7 +160,7 @@ type Runtime struct {
 	heapStart Addr
 	heapIndex Addr
 
-	funcTrace []string
+	funcTrace []float64
 
 	registers []float64
 
@@ -674,10 +674,34 @@ func (r *Runtime) store(operand *compiler.Operand) storeFunc {
 }
 
 func (r *Runtime) panic(err error) error {
-	fmt.Fprintf(r.stdout, "panic: %v\n", err)
-	for i := len(r.funcTrace) - 1; i >= 0; i-- {
-		frame := r.funcTrace[i]
-		fmt.Fprintf(r.stdout, "    func %s\n", frame)
+	fmt.Fprintf(r.stdout, "panic: %v\n\n", err)
+	log.Printf("%v %v", err, r.funcTrace)
+	for i := len(r.funcTrace) - 2; i >= 0; i -= 2 {
+		funcAddr := Addr(r.funcTrace[i])
+
+		funcNameAddr, err := r.loadAddr(funcAddr + 1)
+		if err != nil {
+			return err
+		}
+
+		funcName, err := r.LoadString(Addr(funcNameAddr))
+		if err != nil {
+			return err
+		}
+
+		funcFileAddr, err := r.loadAddr(funcAddr + 2)
+		if err != nil {
+			return err
+		}
+
+		funcFile, err := r.LoadString(Addr(funcFileAddr))
+		if err != nil {
+			return err
+		}
+
+		line := int(r.funcTrace[i+1])
+		fmt.Fprintf(r.stdout, "%s()\n", string(funcName))
+		fmt.Fprintf(r.stdout, "\t%s: %d\n", string(funcFile), line)
 	}
 
 	return err
@@ -685,24 +709,21 @@ func (r *Runtime) panic(err error) error {
 
 func (r *Runtime) Run(ctx context.Context) error {
 	for _, varinit := range r.prog.VarInitFunctions() {
-		r.funcTrace = append(r.funcTrace, varinit.QualifiedName())
-		err := r.RunFrom(ctx, varinit.Addr())
+		err := r.RunFunc(ctx, varinit.InfoAddr())
 		if err != nil {
 			return r.panic(err)
 		}
 	}
 
 	for _, init := range r.prog.InitFunctions() {
-		r.funcTrace = append(r.funcTrace, init.QualifiedName())
-		err := r.RunFrom(ctx, init.Addr())
+		err := r.RunFunc(ctx, init.InfoAddr())
 		if err != nil {
 			return r.panic(err)
 		}
 	}
 
 	for _, update := range r.prog.UpdateFunctions() {
-		r.funcTrace = append(r.funcTrace, update.QualifiedName())
-		err := r.RunFrom(ctx, update.Addr())
+		err := r.RunFunc(ctx, update.InfoAddr())
 		if err != nil {
 			return r.panic(err)
 		}
@@ -711,7 +732,14 @@ func (r *Runtime) Run(ctx context.Context) error {
 	return nil
 }
 
-func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
+func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
+	pc, err := r.loadAddr(funcAddr + 4)
+	if err != nil {
+		return err
+	}
+
+	r.funcTrace = append(r.funcTrace, float64(funcAddr), 0)
+
 	for reg := range r.registers {
 		r.registers[reg] = 0
 	}
@@ -724,7 +752,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 	r.push(0)
 
 	r.setFP(r.sp() - 1)
-	r.setPC(pc)
+	r.setPC(Addr(pc))
 
 	for {
 		select {
@@ -785,23 +813,13 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 				return fmt.Errorf("could not resolve function addr: %w", err)
 			}
 
-			fNameAddr, err := r.loadAddr(Addr(funcInfoAddr) + 1)
-			if err != nil {
-				return fmt.Errorf("could not resolve function name addr: %w", err)
-			}
-
-			fName, err := r.LoadString(Addr(fNameAddr))
-			if err != nil {
-				return fmt.Errorf("could not resolve function name")
-			}
-
-			r.funcTrace = append(r.funcTrace, string(fName))
+			r.funcTrace = append(r.funcTrace, funcInfoAddr, 0)
 
 			switch int(funcType) {
 			case RuntimeFuncTypeNil:
 				return fmt.Errorf("tried to call nil function reference")
 			case RuntimeFuncTypeExtern:
-				externName, err := r.loadAddr(Addr(funcInfoAddr) + 3)
+				externName, err := r.loadAddr(Addr(funcInfoAddr) + 4)
 				if err != nil {
 					return fmt.Errorf("could not resolve extern function name")
 				}
@@ -830,7 +848,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 					return err
 				}
 
-				r.funcTrace = r.funcTrace[:len(r.funcTrace)-1]
+				r.funcTrace = r.funcTrace[:len(r.funcTrace)-2]
 				for i := range entry.ReturnSize {
 					r.storeAddr(r.sp().Offset(-(entry.ArgSize + entry.ReturnSize)).Offset(-i), retArgs[i])
 				}
@@ -853,7 +871,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 				continue
 			case RuntimeFuncTypeFunc:
-				faddr, err := r.loadAddr(Addr(funcInfoAddr) + 3)
+				faddr, err := r.loadAddr(Addr(funcInfoAddr) + 4)
 				if err != nil {
 					return fmt.Errorf("could not resolve function addr")
 				}
@@ -886,7 +904,7 @@ func (r *Runtime) RunFrom(ctx context.Context, pc Addr) (err error) {
 
 			r.setSP(r.sp().Offset(-code.Args))
 
-			r.funcTrace = r.funcTrace[:len(r.funcTrace)-1]
+			r.funcTrace = r.funcTrace[:len(r.funcTrace)-2]
 
 			// exit completely
 			if r.fp() == 0 {

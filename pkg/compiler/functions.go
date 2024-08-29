@@ -356,12 +356,14 @@ const (
 var externType = NewTupleType(
 	TypeInt,
 	TypeString,
+	TypeString,
 	NewPointerType(TypeVoid),
 	TypeString,
 )
 
 var funcType = NewTupleType(
 	TypeInt,
+	TypeString,
 	TypeString,
 	NewPointerType(TypeVoid),
 	NewPointerType(TypeVoid),

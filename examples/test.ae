@@ -37,6 +37,6 @@ func run() error {
 
 #init
 func main() {
-  print(run())
+  // print(run())
   panic("yo")
 }
