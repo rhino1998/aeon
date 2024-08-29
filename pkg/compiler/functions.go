@@ -26,7 +26,7 @@ type Function struct {
 	addrOp   Operand
 	infoAddr Addr
 
-	stackLayout []Type
+	locals []Type
 }
 
 func newFunction(name string, pkg *Package) *Function {
@@ -125,7 +125,7 @@ func (f *Function) StackLayout() []Type {
 
 	layout = append(layout, TypeInt, TypeInt, TypeInt)
 
-	layout = append(layout, f.stackLayout...)
+	layout = append(layout, f.locals...)
 	return layout
 }
 

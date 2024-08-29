@@ -282,9 +282,8 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 		return f, err
 	}
 
+	f.locals = locals
 	numLocals.Operand.Value = Int(localSize)
-
-	var _ = locals
 
 	pkg.varinit = f
 
