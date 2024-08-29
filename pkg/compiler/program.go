@@ -15,6 +15,8 @@ type Program struct {
 
 	registers int
 	bytecode  BytecodeSnippet
+
+	stringOffset Addr
 }
 
 func newProgram() *Program {
@@ -111,6 +113,25 @@ func (p *Program) Functions() []*Function {
 	var ret []*Function
 	for _, pkg := range p.Packages() {
 		ret = append(ret, pkg.Functions()...)
+	}
+
+	return ret
+}
+
+func (p *Program) AllFunctions() []*Function {
+	var ret []*Function
+	for _, pkg := range p.Packages() {
+		ret = append(ret, pkg.Functions()...)
+	}
+
+	for _, typ := range p.DerivedTypes() {
+		for _, fun := range typ.MethodFunctions() {
+			ret = append(ret, fun)
+		}
+
+		for _, fun := range typ.PtrMethodFunctions() {
+			ret = append(ret, fun)
+		}
 	}
 
 	return ret

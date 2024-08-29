@@ -29,6 +29,11 @@ type Function struct {
 	locals []Type
 }
 
+type TypeSlot struct {
+	Offset Size
+	Type   Type
+}
+
 func newFunction(name string, pkg *Package) *Function {
 	f := &Function{
 		name: name,
@@ -114,18 +119,38 @@ func (f *Function) withPointerReceiver() *Function {
 	return ptrF
 }
 
-func (f *Function) StackLayout() []Type {
-	layout := make([]Type, 0, len(f.parameters)+2+3)
+func (f *Function) StackLayout() []TypeSlot {
 
-	layout = append(layout, f.ret)
-	layout = append(layout, f.receiver.typ)
-	for _, param := range f.parameters {
-		layout = append(layout, param.typ)
+	frameSize := f.symbols.Package().prog.FrameSize()
+
+	layout := make([]TypeSlot, 0, len(f.parameters)+2+int(frameSize))
+
+	offset := -(f.ReturnArgSize() + frameSize) + 1
+
+	addLayout := func(typ Type) {
+		if typ.Size() == 0 {
+			return
+		}
+
+		layout = append(layout, TypeSlot{Offset: offset, Type: typ})
+		offset += typ.Size()
 	}
 
-	layout = append(layout, TypeInt, TypeInt, TypeInt)
+	addLayout(f.ret)
+	addLayout(f.receiver.typ)
 
-	layout = append(layout, f.locals...)
+	for _, param := range f.parameters {
+		addLayout(param.typ)
+	}
+
+	for range frameSize {
+		addLayout(TypeInt)
+	}
+
+	for _, local := range f.locals {
+		addLayout(local)
+	}
+
 	return layout
 }
 

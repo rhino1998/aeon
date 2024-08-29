@@ -718,6 +718,14 @@ func (r *Runtime) panic(err error) error {
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
+	for _, fun := range r.prog.AllFunctions() {
+		fmt.Printf("%v\n", fun.QualifiedName())
+
+		for _, slot := range fun.StackLayout() {
+			fmt.Printf("  %v(%v): %v \n", slot.Offset, slot.Type.Size(), slot.Type)
+		}
+	}
+
 	for _, varinit := range r.prog.VarInitFunctions() {
 		err := r.RunFunc(ctx, varinit.InfoAddr())
 		if err != nil {

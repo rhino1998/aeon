@@ -131,6 +131,7 @@ func (c *Compiler) compileBCPackage(ctx context.Context, pkg *Package) error {
 
 func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Function, error) {
 	f := newFunction(VarInitFuncName, pkg)
+	f.ret = TypeVoid
 	f.receiver = &Variable{typ: TypeVoid}
 
 	scope := pkg.values
@@ -357,6 +358,8 @@ func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *Va
 	if err != nil {
 		return err
 	}
+
+	f.locals = locals
 
 	numLocals.Operand.Value = Int(localSize)
 	var _ = locals
