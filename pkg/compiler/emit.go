@@ -1155,6 +1155,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 			bc.Add(Cal{
 				Func: callLoc.Operand,
+				Line: int(expr.Position.Line),
 			})
 
 			bc.Mov(dst, retVar)
@@ -1363,6 +1364,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 			bc.Mov(scope.SP(), scope.SP().AddConst(TypeError.Size()))
 			bc.Add(Cal{
 				Func: errHandlerLoc.Operand,
+				Line: int(expr.Position.Line),
 			})
 			bc.JumpAfter(skipRet, &Operand{
 				Kind: OperandKindBinary,

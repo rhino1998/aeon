@@ -676,7 +676,7 @@ func (r *Runtime) store(operand *compiler.Operand) storeFunc {
 func (r *Runtime) panic(err error) error {
 	fmt.Fprintf(r.stdout, "panic: %v\n\n", err)
 	log.Printf("%v %v", err, r.funcTrace)
-	for i := len(r.funcTrace) - 2; i >= 0; i -= 2 {
+	for i := len(r.funcTrace) - 1; i >= 1; i -= 2 {
 		funcAddr := Addr(r.funcTrace[i])
 
 		funcNameAddr, err := r.loadAddr(funcAddr + 1)
@@ -699,9 +699,14 @@ func (r *Runtime) panic(err error) error {
 			return err
 		}
 
-		line := int(r.funcTrace[i+1])
-		fmt.Fprintf(r.stdout, "%s()\n", string(funcName))
-		fmt.Fprintf(r.stdout, "\t%s: %d\n", string(funcFile), line)
+		if i+1 >= len(r.funcTrace) {
+			fmt.Fprintf(r.stdout, "%s()\n", string(funcName))
+			fmt.Fprintf(r.stdout, "\t%s\n", string(funcFile))
+		} else {
+			line := int(r.funcTrace[i+1])
+			fmt.Fprintf(r.stdout, "%s()\n", string(funcName))
+			fmt.Fprintf(r.stdout, "\t%s:%d\n", string(funcFile), line)
+		}
 	}
 
 	return err
@@ -738,7 +743,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 		return err
 	}
 
-	r.funcTrace = append(r.funcTrace, float64(funcAddr), 0)
+	r.funcTrace = append(r.funcTrace, -1, float64(funcAddr))
 
 	for reg := range r.registers {
 		r.registers[reg] = 0
@@ -813,7 +818,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				return fmt.Errorf("could not resolve function addr: %w", err)
 			}
 
-			r.funcTrace = append(r.funcTrace, funcInfoAddr, 0)
+			r.funcTrace = append(r.funcTrace, float64(code.Line), funcInfoAddr)
 
 			switch int(funcType) {
 			case RuntimeFuncTypeNil:

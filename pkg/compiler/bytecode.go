@@ -657,10 +657,11 @@ func (r Ret) String() string {
 
 type Cal struct {
 	Func *Operand `xc:"f"`
+	Line int      `xc:"l"`
 }
 
 func (c Cal) String() string {
-	return fmt.Sprintf("CAL %s", c.Func)
+	return fmt.Sprintf("CAL %s on line %d", c.Func, c.Line)
 }
 
 func (c Cal) Name() string {
