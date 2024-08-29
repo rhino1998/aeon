@@ -1,6 +1,6 @@
 package main
 
-extern func panic(x string)
+extern func panic(x any)
 
 type Err string
 
@@ -38,5 +38,5 @@ func run() error {
 #init
 func main() {
   // print(run())
-  panic("yo")
+  panic("user-panic")
 }

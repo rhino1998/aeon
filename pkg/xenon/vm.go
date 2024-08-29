@@ -24,6 +24,8 @@ type RuntimeExternFuncEntry struct {
 	Func       RuntimeExternFunc
 }
 
+var ErrRuntimePanic = fmt.Errorf("panic")
+
 func DefaultExternFuncs() RuntimeExternFuncs {
 	return RuntimeExternFuncs{
 		"__builtin_assert": {
@@ -135,9 +137,13 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 			},
 		},
 		"panic": {
-			ArgSize: 1,
+			ArgSize: 2,
 			Func: func(r *Runtime, s ...float64) error {
-				return fmt.Errorf("%v", s[0])
+				valStr, err := r.toString(s[0], s[1])
+				if err != nil {
+					return err
+				}
+				return fmt.Errorf("%v", valStr)
 			},
 		},
 	}
@@ -675,7 +681,6 @@ func (r *Runtime) store(operand *compiler.Operand) storeFunc {
 
 func (r *Runtime) panic(err error) error {
 	fmt.Fprintf(r.stdout, "panic: %v\n\n", err)
-	log.Printf("%v %v", err, r.funcTrace)
 	for i := len(r.funcTrace) - 1; i >= 1; i -= 2 {
 		funcAddr := Addr(r.funcTrace[i])
 

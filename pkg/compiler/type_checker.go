@@ -87,15 +87,13 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 		err = errs.Defer(err)
 	}()
 
-	if f.Receiver() != nil {
-		f.receiver.typ, err = c.resolveTypes(f.Position, f.Receiver().Type())
-		if err != nil {
-			errs.Add(err)
-		}
+	f.receiver.typ, err = c.resolveTypes(f.Position, f.Receiver().Type())
+	if err != nil {
+		errs.Add(err)
+	}
 
-		if f.Receiver().Type().Kind() == KindUnknown {
-			errs.Add(f.WrapError(fmt.Errorf("function %q has unknown receiver %q of type %s", f.Name(), f.Receiver().Name(), f.Receiver().Type())))
-		}
+	if f.Receiver().Type().Kind() == KindUnknown {
+		errs.Add(f.WrapError(fmt.Errorf("function %q has unknown receiver %q of type %s", f.Name(), f.Receiver().Name(), f.Receiver().Type())))
 	}
 
 	for _, param := range f.Parameters() {

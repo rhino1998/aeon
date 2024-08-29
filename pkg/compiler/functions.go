@@ -25,6 +25,8 @@ type Function struct {
 	addr     Addr
 	addrOp   Operand
 	infoAddr Addr
+
+	stackLayout []Type
 }
 
 func newFunction(name string, pkg *Package) *Function {
@@ -110,6 +112,21 @@ func (f *Function) withPointerReceiver() *Function {
 	)
 
 	return ptrF
+}
+
+func (f *Function) StackLayout() []Type {
+	layout := make([]Type, 0, len(f.parameters)+2+3)
+
+	layout = append(layout, f.ret)
+	layout = append(layout, f.receiver.typ)
+	for _, param := range f.parameters {
+		layout = append(layout, param.typ)
+	}
+
+	layout = append(layout, TypeInt, TypeInt, TypeInt)
+
+	layout = append(layout, f.stackLayout...)
+	return layout
 }
 
 func (f *Function) Package() *Package {
