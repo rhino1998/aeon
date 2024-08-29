@@ -235,7 +235,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 			if stmt.Type.Kind() == KindInterface && expr.Type().Kind() != KindInterface {
 				stmt.Expression = &InterfaceTypeCoercionExpression{
-					Interface:  resolveType(stmt.Type).(*InterfaceType),
+					Interface:  ResolveType(stmt.Type).(*InterfaceType),
 					Expression: expr,
 				}
 			} else {
@@ -262,7 +262,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 		stmt.Expression = expr
 
 		if len(stmt.Variables) > 1 {
-			tupleType, ok := resolveType(expr.Type()).(*TupleType)
+			tupleType, ok := ResolveType(expr.Type()).(*TupleType)
 			if !ok {
 				errs.Add(stmt.WrapError(fmt.Errorf("cannot destructure non-tuple type %s", expr.Type())))
 			} else {
@@ -326,7 +326,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		if stmt.Left.Type().Kind() == KindInterface && stmt.Right.Type().Kind() != KindInterface {
 			stmt.Right = &InterfaceTypeCoercionExpression{
-				Interface:  resolveType(stmt.Left.Type()).(*InterfaceType),
+				Interface:  ResolveType(stmt.Left.Type()).(*InterfaceType),
 				Expression: stmt.Right,
 			}
 		}
@@ -515,7 +515,7 @@ func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ
 		err = errs.Defer(err)
 	}()
 
-	switch typ := resolveType(typ).(type) {
+	switch typ := ResolveType(typ).(type) {
 	case *TupleType:
 		index, err := strconv.Atoi(expr.Key)
 		if err != nil {
@@ -908,7 +908,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		expr.Function = fExpr
 
-		switch ftype := resolveType(expr.Function.Type()).(type) {
+		switch ftype := ResolveType(expr.Function.Type()).(type) {
 		case *FunctionType:
 			var concreteParams []Type
 			var variadicParam *VariadicType
@@ -938,7 +938,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 				if ftype.Parameters[i].Kind() == KindInterface && arg.Type().Kind() != KindInterface {
 					expr.Args[i] = &InterfaceTypeCoercionExpression{
-						Interface:  resolveType(ftype.Parameters[i]).(*InterfaceType),
+						Interface:  ResolveType(ftype.Parameters[i]).(*InterfaceType),
 						Expression: arg,
 					}
 				} else {
@@ -975,7 +975,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 						if variadicParam.Elem().Kind() == KindInterface && arg.Type().Kind() != KindInterface {
 							expr.Args[i] = &InterfaceTypeCoercionExpression{
-								Interface:  resolveType(variadicParam.Elem()).(*InterfaceType),
+								Interface:  ResolveType(variadicParam.Elem()).(*InterfaceType),
 								Expression: arg,
 							}
 						} else {
@@ -999,7 +999,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				}
 
 				return &InterfaceTypeCoercionExpression{
-					Interface:  resolveType(ftype.Type).(*InterfaceType),
+					Interface:  ResolveType(ftype.Type).(*InterfaceType),
 					Expression: arg,
 					Position:   expr.Position,
 				}, nil
@@ -1039,7 +1039,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		return c.resolveIndexExpressionReceiverTypes(expr, expr.Receiver.Type(), bound)
 	case *TupleExpression:
-		tupleBound, ok := resolveType(bound).(*TupleType)
+		tupleBound, ok := ResolveType(bound).(*TupleType)
 		if !ok {
 			return expr, expr.WrapError(fmt.Errorf("cannot use tuple literal as %s", bound))
 		}
@@ -1065,7 +1065,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 			if elemBound.Kind() == KindInterface && elem.Type().Kind() != KindInterface {
 				expr.Elems[i] = &InterfaceTypeCoercionExpression{
-					Interface:  resolveType(elemBound).(*InterfaceType),
+					Interface:  ResolveType(elemBound).(*InterfaceType),
 					Expression: elem,
 				}
 			} else {
@@ -1091,9 +1091,9 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		expr.typ = exprType
 
 		var elemBound Type
-		if arrayBound, ok := resolveType(bound).(*ArrayType); ok {
+		if arrayBound, ok := ResolveType(bound).(*ArrayType); ok {
 			elemBound = arrayBound.Elem()
-		} else if arrayExprType, ok := resolveType(exprType).(*ArrayType); ok {
+		} else if arrayExprType, ok := ResolveType(exprType).(*ArrayType); ok {
 			elemBound = arrayExprType.Elem()
 		} else {
 			elemBound = UnknownType
@@ -1111,7 +1111,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 			if elemBound.Kind() == KindInterface && elem.Type().Kind() != KindInterface {
 				elem = &InterfaceTypeCoercionExpression{
-					Interface:  resolveType(elemBound).(*InterfaceType),
+					Interface:  ResolveType(elemBound).(*InterfaceType),
 					Expression: elem,
 				}
 			}
@@ -1156,7 +1156,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects function with error compatible return type, got %s", expr.Function.Return())))
 			}
 		case KindTuple:
-			tupleTyp := resolveType(expr.Function.Return()).(*TupleType)
+			tupleTyp := ResolveType(expr.Function.Return()).(*TupleType)
 			if len(tupleTyp.Elems()) < 1 {
 				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects function with error compatible return type, got %s", expr.Function.Return())))
 			} else if tupleTyp.Elems()[len(tupleTyp.Elems())-1].Kind() != KindInterface || !TypeErrorInterface.ImplementedBy(tupleTyp.Elems()[len(tupleTyp.Elems())-1]) {
@@ -1337,7 +1337,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 		}
 	}
 
-	switch typ := resolveType(expr.Receiver.Type()).(type) {
+	switch typ := ResolveType(expr.Receiver.Type()).(type) {
 	case *TupleType:
 		if isNumeric {
 			if !IsAssignableTo(typ.Elems()[numericKey], bound) {
@@ -1367,7 +1367,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 
 		return expr, nil
 	case *PointerType:
-		switch typ := resolveType(typ.Pointee()).(type) {
+		switch typ := ResolveType(typ.Pointee()).(type) {
 		case *TupleType:
 			if isNumeric {
 				if !IsAssignableTo(typ.Elems()[numericKey], bound) {
@@ -1429,7 +1429,7 @@ func (c *Compiler) resolveIndexExpressionReceiverTypes(expr *IndexExpression, ty
 		err = errs.Defer(err)
 	}()
 
-	switch typ := resolveType(typ).(type) {
+	switch typ := ResolveType(typ).(type) {
 	case *ArrayType:
 		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
@@ -1476,7 +1476,7 @@ func (c *Compiler) checkInterfaceTypeCoercion(expr Expression, bound Type) (err 
 		err = errs.Defer(err)
 	}()
 
-	ifaceType, ok := resolveType(bound).(*InterfaceType)
+	ifaceType, ok := ResolveType(bound).(*InterfaceType)
 	if !ok {
 		errs.Add(expr.WrapError(fmt.Errorf("cannot resolve interface %v", bound)))
 		return errs

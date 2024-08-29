@@ -208,19 +208,19 @@ func dereferenceType(typ Type) Type {
 	}
 }
 
-func resolveType(typ Type) Type {
+func ResolveType(typ Type) Type {
 	switch typ := typ.(type) {
 	case *ReferencedType:
-		res := resolveType(typ.Dereference())
+		res := ResolveType(typ.Dereference())
 		if res == UnknownType {
 			return typ
 		}
 
 		return res
 	case *ParenthesizedType:
-		return resolveType(typ.Type)
+		return ResolveType(typ.Type)
 	case *DerivedType:
-		return resolveType(typ.underlying)
+		return ResolveType(typ.underlying)
 	default:
 		return typ
 	}
@@ -247,6 +247,13 @@ func typesEqual(t1, t2 Type) bool {
 		}
 	case *DerivedType:
 		return t1 == t2
+	case *VariadicType:
+		switch t2 := t2.(type) {
+		case *VariadicType:
+			return TypesEqual(t1.Elem(), t2.Elem())
+		default:
+			return false
+		}
 	case *SliceType:
 		switch t2 := t2.(type) {
 		case *SliceType:
@@ -346,6 +353,8 @@ func IsTypeResolvable(typ Type) bool {
 		return IsTypeResolvable(typ.Elem())
 	case *MapType:
 		return IsTypeResolvable(typ.Key()) && IsTypeResolvable(typ.Value())
+	case *VariadicType:
+		return IsTypeResolvable(typ.Elem())
 	case *TupleType:
 		for _, subType := range typ.Elems() {
 			if !IsTypeResolvable(subType) {

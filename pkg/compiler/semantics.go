@@ -154,7 +154,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 			errs.Add(err)
 		}
 
-		varType, isVariadic := resolveType(typ).(*VariadicType)
+		varType, isVariadic := ResolveType(typ).(*VariadicType)
 		if isVariadic {
 			if !last {
 				errs.Add(decl.WrapError(fmt.Errorf("only the last paramater may be variadic")))
@@ -559,7 +559,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 			errs.Add(err)
 		}
 
-		varType, isVariadic := resolveType(typ).(*VariadicType)
+		varType, isVariadic := ResolveType(typ).(*VariadicType)
 		if isVariadic {
 			if !last {
 				return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
@@ -697,7 +697,7 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 			errs.Add(err)
 		}
 
-		varType, isVariadic := resolveType(typ).(*VariadicType)
+		varType, isVariadic := ResolveType(typ).(*VariadicType)
 		if isVariadic {
 			if !last {
 				return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
@@ -819,7 +819,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 		}
 
 		var variables []*Variable
-		tupleTyp, isTuple := resolveType(expr.Type()).(*TupleType)
+		tupleTyp, isTuple := ResolveType(expr.Type()).(*TupleType)
 
 		if isTuple && len(stmt.Names) > 1 {
 			for i, name := range stmt.Names {

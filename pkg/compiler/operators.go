@@ -182,8 +182,8 @@ func validateBinaryExpression(left Type, operator Operator, right Type) (Type, e
 
 		return UnknownType, fmt.Errorf("invalid binary operator %q for type %q", operator, left)
 	case KindTuple:
-		leftTuple := resolveType(left).(*TupleType)
-		rightTuple := resolveType(right).(*TupleType)
+		leftTuple := ResolveType(left).(*TupleType)
+		rightTuple := ResolveType(right).(*TupleType)
 		for i := range leftTuple.Elems() {
 			leftElem := leftTuple.Elems()[i]
 			rightElem := rightTuple.Elems()[i]
@@ -199,8 +199,8 @@ func validateBinaryExpression(left Type, operator Operator, right Type) (Type, e
 
 		return left, nil
 	case KindArray:
-		leftElem := resolveType(left).(*ArrayType).Elem()
-		rightElem := resolveType(right).(*ArrayType).Elem()
+		leftElem := ResolveType(left).(*ArrayType).Elem()
+		rightElem := ResolveType(right).(*ArrayType).Elem()
 		_, err := validateBinaryExpression(leftElem, operator, rightElem)
 		if err != nil {
 			return UnknownType, err
@@ -339,7 +339,7 @@ func validateUnaryExpression(expr Type, operator Operator) (Type, error) {
 			return nil, fmt.Errorf("cannot dereference non-pointer type: %v", expr)
 		}
 
-		return resolveType(expr).(*PointerType).Pointee(), nil
+		return ResolveType(expr).(*PointerType).Pointee(), nil
 	} else if operator == OperatorAddress {
 		return NewPointerType(expr), nil
 	}

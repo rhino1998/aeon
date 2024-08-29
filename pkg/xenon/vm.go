@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
@@ -156,8 +157,47 @@ type RuntimeExternFuncs map[String]RuntimeExternFuncEntry
 type RuntimeExternFunc func(*Runtime, ...float64) error
 
 type RuntimeTypeSlot struct {
-	Offset Size
-	Type   int
+	Size Size
+	Type int
+}
+
+type RuntimeTypeAddr struct {
+	Addr Addr
+	Type int
+}
+
+type gcState struct {
+	heapStart Addr
+	heapEnd   Addr
+	heapIndex Addr
+
+	heapAllocs []Addr
+	heapVars   []Addr
+	heapPtrs   []Addr
+	heapUnused []Addr
+
+	strHeapStart Addr
+	strHeapEnd   Addr
+	strHeapIndex Addr
+
+	strVars []Addr
+	strPtrs []Addr
+	strUsed []Addr
+}
+
+func (g *gcState) addStrVar(v, ptr Addr) {
+	if ptr >= g.strHeapStart && ptr < g.strHeapEnd {
+		g.strVars = append(g.strVars, v)
+		g.strPtrs = append(g.strPtrs, ptr)
+	}
+
+}
+
+func (g *gcState) addHeapVar(v, ptr Addr) {
+	if ptr >= g.heapStart && ptr < g.heapEnd {
+		g.heapVars = append(g.heapVars, v)
+		g.heapPtrs = append(g.heapPtrs, ptr)
+	}
 }
 
 type Runtime struct {
@@ -169,15 +209,18 @@ type Runtime struct {
 
 	codePages [][PageSize]compiler.Bytecode
 	heapStart Addr
+	heapEnd   Addr
 	heapIndex Addr
 
 	funcTrace []float64
 
 	registers []float64
 
-	memPages [][PageSize]float64
-	strIndex Addr
-	strPages [][PageSize]String
+	memPages     [][PageSize]float64
+	strHeapStart Addr
+	strHeapEnd   Addr
+	strHeapIndex Addr
+	strPages     [][PageSize]String
 
 	vtables   map[int]map[string]float64
 	globalMap []RuntimeTypeSlot
@@ -202,6 +245,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 		heapStart: heapStart,
 		heapIndex: heapStart,
+		heapEnd:   Addr(memPages * PageSize),
 
 		vtables: make(map[int]map[string]float64),
 		funcMap: make(map[int][]RuntimeTypeSlot),
@@ -217,8 +261,11 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		strMap[str] = Addr(Addr(i))
 		page, pageAddr := r.splitAddr(compiler.Addr(i))
 		r.strPages[page][pageAddr] = str
-		r.strIndex++
+		r.strHeapIndex++
 	}
+
+	r.strHeapStart = r.strHeapIndex
+	r.strHeapEnd = Addr(strPages * PageSize)
 
 	for i, code := range prog.Bytecode() {
 		page, pageAddr := r.splitAddr(compiler.Addr(i))
@@ -263,23 +310,49 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		}
 	}
 
+	for typeID, typ := range prog.Types() {
+		switch typ := compiler.ResolveType(typ).(type) {
+		case *compiler.PointerType:
+			r.vtables[typeID]["#pointee"] = float64(typeIDFromName[typ.Pointee().GlobalName()])
+			// TODO: product types somehow
+		case *compiler.ArrayType:
+			r.vtables[typeID]["#length"] = float64(*typ.Length())
+			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
+		case *compiler.TupleType:
+			r.vtables[typeID]["#elems"] = float64(len(typ.Elems()))
+			for i, elem := range typ.Elems() {
+				r.vtables[typeID][fmt.Sprintf("#elem.%d", i)] = float64(typeIDFromName[elem.GlobalName()])
+			}
+		case *compiler.SliceType:
+			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
+		case *compiler.VariadicType:
+			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
+		case *compiler.StructType:
+			r.vtables[typeID]["#fields"] = float64(len(typ.Fields()))
+			for i, field := range typ.Fields() {
+				r.vtables[typeID][fmt.Sprintf("#field.%d", i)] = float64(typeIDFromName[field.Type.GlobalName()])
+				r.vtables[typeID][fmt.Sprintf("#field.%d.name", i)] = float64(strMap[String(field.Name)])
+			}
+		}
+	}
+
 	r.printVTables()
 
 	for _, slot := range prog.GlobalLayout() {
 		r.globalMap = append(r.globalMap,
-			RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Offset: slot.Offset})
+			RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Size: slot.Type.Size()})
 	}
 
 	for _, fun := range prog.AllFunctions() {
 		layout := fun.StackLayout()
 		funLayout := make([]RuntimeTypeSlot, 0)
 
-		var offset Size
 		for _, slot := range layout {
 			funLayout = append(funLayout,
-				RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Offset: offset})
-			offset += slot.Type.Size()
+				RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Size: slot.Type.Size()})
 		}
+
+		r.funcMap[int(fun.Addr())] = funLayout
 	}
 
 	return r, nil
@@ -315,59 +388,263 @@ func (r *Runtime) toNative(typ float64, value float64) (any, error) {
 	}
 }
 
-func (r *Runtime) referencedPointers() ([]Addr, []Addr, error) {
-	var base Addr
-	var ptrVars []Addr
-	var ptrs []Addr
+func (r *Runtime) memmove(dst, src Addr, size Size) error {
+	var err error
+	tmp := make([]float64, size)
+	for i := Size(0); i < size; i++ {
+		tmp[i], err = r.loadAddr(src.Offset(i))
+		if err != nil {
+			return err
+		}
+	}
+
+	for i := Size(0); i < size; i++ {
+		err = r.storeAddr(dst.Offset(i), tmp[i])
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (r *Runtime) gc() error {
+	gc := gcState{
+		// TODO: list of heap allocs
+		heapStart: r.heapStart,
+		heapEnd:   r.heapEnd,
+		heapIndex: r.heapIndex,
+
+		strHeapStart: r.strHeapStart,
+		strHeapEnd:   r.strHeapEnd,
+		strHeapIndex: r.strHeapIndex,
+	}
+
+	if float64(gc.heapIndex) < float64(gc.heapEnd)*0.8 && float64(gc.strHeapIndex) < float64(gc.strHeapEnd)*0.8 {
+		return nil
+	}
+
+	err := gc.scanPointers(r)
+	if err != nil {
+		return err
+	}
+
+	err = gc.mark(r)
+	if err != nil {
+		return err
+	}
+
+	err = gc.sweep(r)
+	if err != nil {
+		return err
+	}
+
+	r.strHeapIndex = gc.strHeapIndex
+
+	return nil
+}
+
+func (gc *gcState) scanPointers(r *Runtime) error {
+	var base Addr = 1
 	for _, slot := range r.globalMap {
-		ptrVars, ptrs = r.typePointers(slot.Type, base, ptrVars, ptrs)
-		base += Addr(slot.Offset)
+		var err error
+		err = gc.scanTypePointers(r, slot.Type, base)
+		if err != nil {
+			return err
+		}
+		base += compiler.Addr(slot.Size)
 	}
 
 	for i := 1; i < len(r.funcTrace); i += 2 {
 		funcType, err := r.loadAddr(Addr(r.funcTrace[i] + 0))
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
+
+		// funcName, err := r.loadAddr(Addr(r.funcTrace[i] + 1))
+		// if err != nil {
+		// 	return nil, nil, err
+		// }
+		//
+		// fname, err := r.LoadString(Addr(funcName))
+		// if err != nil {
+		// 	return nil, nil, err
+		// }
 
 		switch funcType {
 		case RuntimeFuncTypeNil, RuntimeFuncTypeExtern:
 			continue
 		case RuntimeFuncTypeFunc:
-			funcLayout := r.funcMap[int(funcType)]
-			for _, slot := range funcLayout {
-				ptrVars, ptrs = r.typePointers(slot.Type, base+Addr(slot.Offset), ptrVars, ptrs)
+			funcAddr, err := r.loadAddr(Addr(r.funcTrace[i] + 3))
+			if err != nil {
+				return err
 			}
+
+			funcLayout := r.funcMap[int(funcAddr)]
+			for _, slot := range funcLayout {
+				err = gc.scanTypePointers(r, slot.Type, base)
+				if err != nil {
+					return err
+				}
+				base += Addr(slot.Size)
+			}
+
 		default:
-			return nil, nil, fmt.Errorf("invalid function type %d", int(funcType))
+			return fmt.Errorf("invalid function type %d", int(funcType))
 		}
 	}
 
-	return ptrVars, ptrs, nil
+	return nil
 }
 
-func (r *Runtime) typePointers(typeID int, base Addr, ptrVars, ptrs []Addr) ([]Addr, []Addr) {
-	log.Println(r.vtables[typeID]["#size"])
-	for _, slot := range r.typeMap[typeID] {
+func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
+	var slots []RuntimeTypeAddr
+	slots = append(slots, RuntimeTypeAddr{Type: typeID, Addr: addr})
+
+	for len(slots) > 0 {
+		slot := slots[len(slots)-1]
+		slots = slots[:len(slots)-1]
 		kind := compiler.Kind(r.vtables[slot.Type]["#kind"])
 
-		if kind == compiler.KindPointer {
-			underlying := int(r.vtables[slot.Type]["#underlying"])
-			ptrVar := base + Addr(slot.Offset)
-			ptrVars = append(ptrVars, ptrVar)
+		// val, err := r.loadAddr(slot.Addr)
+		// if err != nil {
+		// 	return err
+		// }
 
-			ptr, err := r.loadAddr(ptrVar)
+		// name, err := r.LoadString(Addr(r.vtables[slot.Type]["#name"]))
+		// if err != nil {
+		// 	return nil, nil, err
+		// }
+		//
+		// log.Printf("%v %s = %v", slot.Addr, string(name), val)
+
+		switch kind {
+		case compiler.KindNil, compiler.KindVoid, compiler.KindInt, compiler.KindBool, compiler.KindFloat:
+		case compiler.KindString:
+			val, err := r.loadAddr(slot.Addr)
 			if err != nil {
-				continue
+				return err
 			}
 
-			ptrs = append(ptrs, Addr(ptr))
+			// str, err := r.LoadString(Addr(val))
+			// if err != nil {
+			// 	return err
+			// }
+			// log.Printf("%s = %s", slot.Addr, str)
 
-			ptrVars, ptrs = r.typePointers(underlying, Addr(ptr), ptrVars, ptrs)
+			gc.addStrVar(slot.Addr, Addr(val))
+		case compiler.KindPointer:
+			val, err := r.loadAddr(slot.Addr)
+			if err != nil {
+				return err
+			}
+
+			gc.addHeapVar(slot.Addr, Addr(val))
+
+			slots = append(slots, RuntimeTypeAddr{Type: int(r.vtables[slot.Type]["#pointee"]), Addr: Addr(val)})
+		case compiler.KindArray:
+			length := int(r.vtables[slot.Type]["#length"])
+			elem := int(r.vtables[slot.Type]["#elem"])
+			elemSize := Size(r.vtables[elem]["#size"])
+
+			for i := 0; i < length; i++ {
+				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(elemSize * Size(i))})
+			}
+		case compiler.KindTuple:
+			var totalOffset Size
+			elems := int(r.vtables[slot.Type]["#elems"])
+			for i := 0; i < elems; i++ {
+				elem := int(r.vtables[slot.Type][fmt.Sprintf("#elem.%d", i)])
+				elemSize := Size(r.vtables[elem]["#size"])
+
+				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(totalOffset)})
+
+				totalOffset += elemSize
+			}
+		case compiler.KindInterface:
+			typ, err := r.loadAddr(slot.Addr)
+			if err != nil {
+				return err
+			}
+
+			slots = append(slots, RuntimeTypeAddr{Type: int(typ), Addr: slot.Addr.Offset(1)})
+		case compiler.KindSlice, compiler.KindVariadic:
+			sliceData, err := r.loadAddr(slot.Addr)
+			if err != nil {
+				return err
+			}
+
+			sliceCap, err := r.loadAddr(slot.Addr + 2)
+			if err != nil {
+				return err
+			}
+
+			gc.addHeapVar(slot.Addr, Addr(sliceData))
+
+			elem := int(r.vtables[slot.Type]["#elem"])
+			elemSize := Size(r.vtables[elem]["#size"])
+
+			for i := 0; i < int(sliceCap); i++ {
+				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: Addr(sliceData).Offset(elemSize * Size(i))})
+			}
+		case compiler.KindStruct:
+			var totalOffset Size
+			elems := int(r.vtables[slot.Type]["#fields"])
+			for i := 0; i < elems; i++ {
+				elem := int(r.vtables[slot.Type][fmt.Sprintf("#field.%d", i)])
+				elemSize := Size(r.vtables[elem]["#size"])
+
+				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(totalOffset)})
+
+				totalOffset += elemSize
+			}
 		}
 	}
 
-	return ptrVars, ptrs
+	return nil
+}
+
+func (gc *gcState) mark(r *Runtime) error {
+	for ptr := gc.strHeapStart; ptr <= gc.strHeapIndex; ptr++ {
+		if slices.Contains(gc.strPtrs, ptr) {
+			gc.strUsed = append(gc.strUsed, ptr)
+		}
+	}
+
+	return nil
+}
+
+func (gc *gcState) sweep(r *Runtime) error {
+	log.Println("COLLECT")
+	gc.strHeapIndex = gc.strHeapStart
+	for _, ptr := range gc.strUsed {
+		gc.strHeapIndex++
+
+		str, err := r.LoadString(ptr)
+		if err != nil {
+			return err
+		}
+		err = r.storeStr(gc.strHeapIndex, str)
+		if err != nil {
+			return err
+		}
+
+		for _, v := range gc.strVars {
+			val, err := r.loadAddr(v)
+			if err != nil {
+				return err
+			}
+
+			if Addr(val) == ptr {
+				err = r.storeAddr(v, float64(gc.strHeapIndex))
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (r *Runtime) toString(typ float64, value float64) (string, error) {
@@ -415,8 +692,18 @@ func (r *Runtime) printVTable(typeID int) {
 
 	switch kind := compiler.Kind(kind); kind {
 	case compiler.KindPointer:
-		underlying := int(r.vtables[typeID]["#underlying"])
+		underlying := int(r.vtables[typeID]["#pointee"])
 		fmt.Fprintf(r.stdout, "  Pointer to %d %q\n", underlying, string(r.prog.Strings()[int(r.vtables[underlying]["#name"])]))
+	case compiler.KindArray:
+		elem := int(r.vtables[typeID]["#elem"])
+		length := int(r.vtables[typeID]["#length"])
+		fmt.Fprintf(r.stdout, "  Array length %d of %d %q\n", length, elem, string(r.prog.Strings()[int(r.vtables[elem]["#name"])]))
+	case compiler.KindTuple:
+		elems := int(r.vtables[typeID]["#elems"])
+		for i := range elems {
+			elem := int(r.vtables[typeID][fmt.Sprintf("#elem.%d", i)])
+			fmt.Fprintf(r.stdout, "  Tuple element %d of %d %q\n", i, elem, string(r.prog.Strings()[int(r.vtables[elem]["#name"])]))
+		}
 	}
 
 	for method, addr := range r.vtables[typeID] {
@@ -555,20 +842,25 @@ func (r *Runtime) storeStr(addr compiler.Addr, val String) error {
 }
 
 func (r *Runtime) allocStr(val String) (Addr, error) {
-	r.strIndex++
-	page, pageAddr := r.splitAddr(r.strIndex)
+	err := r.gc()
+	if err != nil {
+		return 0, err
+	}
+	r.strHeapIndex++
+
+	page, pageAddr := r.splitAddr(r.strHeapIndex)
 
 	if page >= uint64(len(r.strPages)) {
-		return 0, fmt.Errorf("invalid str page 0x%08x for addr 0x%08x", page, r.strIndex)
+		return 0, fmt.Errorf("invalid str page 0x%08x for addr %v", page, r.strHeapIndex)
 	}
 
 	if pageAddr >= uint64(len(r.strPages[page])) {
-		return 0, fmt.Errorf("invalid str page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, r.strIndex)
+		return 0, fmt.Errorf("invalid str page addr 0x%08x in page 0x%08x for addr %s", pageAddr, page, r.strHeapIndex)
 	}
 
 	r.strPages[page][pageAddr] = val
 
-	return r.strIndex, nil
+	return r.strHeapIndex, nil
 }
 
 func (r *Runtime) alloc(size Size) (Addr, error) {
@@ -859,11 +1151,13 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 	}
 
+	log.Println(r.strHeapIndex)
+
 	return nil
 }
 
 func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
-	pc, err := r.loadAddr(funcAddr + 4)
+	pc, err := r.loadAddr(funcAddr + 3)
 	if err != nil {
 		return err
 	}
@@ -875,11 +1169,9 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 	}
 
 	r.setSP(Addr(r.prog.GlobalSize()))
-	for range len(r.registers) - 2 {
+	for range len(r.registers) {
 		r.push(0)
 	}
-
-	r.push(0)
 
 	r.setFP(r.sp() - 1)
 	r.setPC(Addr(pc))
@@ -949,7 +1241,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			case RuntimeFuncTypeNil:
 				return fmt.Errorf("tried to call nil function reference")
 			case RuntimeFuncTypeExtern:
-				externName, err := r.loadAddr(Addr(funcInfoAddr) + 4)
+				externName, err := r.loadAddr(Addr(funcInfoAddr) + 3)
 				if err != nil {
 					return fmt.Errorf("could not resolve extern function name")
 				}
@@ -1001,7 +1293,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 
 				continue
 			case RuntimeFuncTypeFunc:
-				faddr, err := r.loadAddr(Addr(funcInfoAddr) + 4)
+				faddr, err := r.loadAddr(Addr(funcInfoAddr) + 3)
 				if err != nil {
 					return fmt.Errorf("could not resolve function addr")
 				}
@@ -1033,6 +1325,8 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			}
 
 			r.setSP(r.sp().Offset(-code.Args))
+
+			log.Printf("%v %v %v", r.sp(), r.fp(), r.pc())
 
 			r.funcTrace = r.funcTrace[:len(r.funcTrace)-2]
 
@@ -1106,7 +1400,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				return err
 			}
 
-			log.Println(r.referencedPointers())
+			log.Println(r.gc())
 		case compiler.App:
 			sliceData, err := r.load(code.Src.OffsetReference(0))()
 			if err != nil {
@@ -1129,10 +1423,10 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			}
 
 			if sliceLen == sliceCap {
-				log.Println(r.referencedPointers())
+				log.Println(r.gc())
 
 				if sliceCap == 0 {
-					sliceCap = 64
+					sliceCap = 1
 				} else {
 					sliceCap *= 2
 				}
@@ -1474,5 +1768,4 @@ func (r *Runtime) printStack() {
 
 		addr++
 	}
-
 }

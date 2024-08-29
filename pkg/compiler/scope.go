@@ -344,7 +344,7 @@ func (l *Location) Value() *Location {
 }
 
 func (l *Location) Dereference() (*Location, error) {
-	typ, ok := resolveType(l.Type).(*PointerType)
+	typ, ok := ResolveType(l.Type).(*PointerType)
 	if !ok {
 		return nil, fmt.Errorf("cannot dereference non-pointer type %s", l.Type)
 	}
@@ -359,7 +359,7 @@ func (l *Location) Dereference() (*Location, error) {
 }
 
 func (l *Location) IndexTuple(index int) (*Location, error) {
-	typ := resolveType(l.Type).(*TupleType)
+	typ := ResolveType(l.Type).(*TupleType)
 
 	if index >= len(typ.Elems()) {
 		return nil, fmt.Errorf("compile-time tuple index %d out of bounds", index)
@@ -374,7 +374,7 @@ func (l *Location) IndexTuple(index int) (*Location, error) {
 }
 
 func (l *Location) IndexArrayConst(index int) (*Location, error) {
-	typ := resolveType(l.Type).(*ArrayType)
+	typ := ResolveType(l.Type).(*ArrayType)
 
 	length := typ.Length()
 	if length == nil {
@@ -394,7 +394,7 @@ func (l *Location) IndexArrayConst(index int) (*Location, error) {
 }
 
 func (l *Location) IndexArray(index *Location) (*Location, error) {
-	typ := resolveType(l.Type).(*ArrayType)
+	typ := ResolveType(l.Type).(*ArrayType)
 
 	length := typ.Length()
 	if length == nil {
@@ -413,7 +413,7 @@ func (l *Location) IndexArray(index *Location) (*Location, error) {
 }
 
 func (l *Location) IndexSlice(index *Location) (*Location, error) {
-	typ := resolveType(l.Type).(*SliceType)
+	typ := ResolveType(l.Type).(*SliceType)
 
 	if index.Type.Kind() != KindInt {
 		return nil, fmt.Errorf("invalid type for slice index %s", index.Type)
@@ -428,7 +428,7 @@ func (l *Location) IndexSlice(index *Location) (*Location, error) {
 }
 
 func (l *Location) LenSlice() (*Location, error) {
-	typ := resolveType(l.Type).(*SliceType)
+	typ := ResolveType(l.Type).(*SliceType)
 
 	return &Location{
 		Kind:    LocationKindHeap,
@@ -439,7 +439,7 @@ func (l *Location) LenSlice() (*Location, error) {
 }
 
 func (l *Location) CapSlice() (*Location, error) {
-	typ := resolveType(l.Type).(*SliceType)
+	typ := ResolveType(l.Type).(*SliceType)
 
 	return &Location{
 		Kind:    LocationKindHeap,
@@ -450,7 +450,7 @@ func (l *Location) CapSlice() (*Location, error) {
 }
 
 func (l *Location) IndexFieldConst(name string) (*Location, error) {
-	typ := resolveType(l.Type).(*StructType)
+	typ := ResolveType(l.Type).(*StructType)
 
 	field, ok := typ.GetField(name)
 	if !ok {
@@ -623,6 +623,8 @@ func (vs *ValueScope) newLocal(v *Variable) *Location {
 
 	vs.variables[v.Name()] = locVal
 
+	vs.registerType(v.Type())
+
 	return locVal
 }
 
@@ -635,6 +637,8 @@ func (vs *ValueScope) allocTemp(typ Type) *Location {
 			default:
 				if !vs.usedRegisters[reg] {
 					vs.usedRegisters[reg] = true
+
+					vs.registerType(typ)
 
 					return &Location{
 						Kind: LocationKindRegister,
@@ -711,6 +715,7 @@ func (vs *ValueScope) registerType(typ Type) TypeName {
 	}
 
 	vs.types[name] = typ
+	vs.symbols.Package().prog.registerType(typ)
 
 	return name
 }

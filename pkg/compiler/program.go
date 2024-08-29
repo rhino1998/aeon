@@ -97,13 +97,15 @@ func (p *Program) GlobalSize() Size {
 		size += global.Type().Size()
 	}
 
-	size += funcType.Size() * Size(len(p.Functions()))
 	size += externType.Size() * Size(len(p.ExternFuncs()))
+	size += funcType.Size() * Size(len(p.Functions()))
 
 	for _, drv := range p.DerivedTypes() {
 		size += funcType.Size() * Size(len(drv.MethodFunctions()))
 		size += funcType.Size() * Size(len(drv.PtrMethodFunctions()))
 	}
+
+	size += 1
 
 	return size
 }
@@ -130,12 +132,12 @@ func (p *Program) GlobalLayout() []TypeSlot {
 		addLayout(global.Type())
 	}
 
-	for range p.Functions() {
-		addLayout(funcType)
-	}
-
 	for range p.ExternFuncs() {
 		addLayout(externType)
+	}
+
+	for range p.Functions() {
+		addLayout(funcType)
 	}
 
 	for _, drv := range p.DerivedTypes() {

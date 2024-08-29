@@ -120,7 +120,6 @@ func (f *Function) withPointerReceiver() *Function {
 }
 
 func (f *Function) StackLayout() []TypeSlot {
-
 	frameSize := f.symbols.Package().prog.FrameSize()
 
 	layout := make([]TypeSlot, 0, len(f.parameters)+2+int(frameSize))
@@ -397,18 +396,16 @@ const (
 
 var externType = NewTupleType(
 	TypeInt,
-	TypeString,
-	TypeString,
-	NewPointerType(TypeVoid),
+	TypeString, // funcname
+	TypeString, // filename
 	TypeString,
 )
 
 var funcType = NewTupleType(
 	TypeInt,
-	TypeString,
-	TypeString,
-	NewPointerType(TypeVoid),
-	NewPointerType(TypeVoid),
+	TypeString, // funcname
+	TypeString, // filename
+	TypeInt,    // ptr into code segment
 )
 
 type CompilerFunctionReferenceExpression struct {

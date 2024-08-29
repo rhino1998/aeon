@@ -2,47 +2,11 @@ package main
 
 extern func panic(x any)
 
-type Err string
-
-func (e Err) Error() string {
-  return "error: " + string(e)
-}
-
-type T struct {
-  x int
-
-  y string
-  z bool
-}
-
-func (t *T) Do() (*T, error) {
-  if t.x == 3 {
-    return nil, Err("hello")
-  }
-  print(t.x, t.y, t.z)
-  t.x++
-  return t, nil
-}
-
-func handler(err error) error {
-  if err != nil {
-    print(err.Error())
-  }
-
-  return nil
-}
-
-func run() error {
-  var t T
-  t.z = true
-  t.y = "example"
-  t.Do()?.Do()?.Do()?.Do()? -> handler
-
-  return nil
-}
+extern func itoa(x int) string
 
 #init
 func main() {
-  print(run())
-  panic("user-panic")
+  for i := 0; i < 4000000; i++ {
+    "hello" + itoa(i)
+  }
 }

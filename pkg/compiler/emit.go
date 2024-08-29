@@ -25,13 +25,14 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	}
 
 	prog.registerType(TypeVoid)
+	prog.registerType(NewPointerType(TypeVoid))
 	prog.registerType(TypeInt)
 	prog.registerType(TypeFloat)
 	prog.registerType(TypeBool)
 	prog.registerType(TypeString)
 	prog.registerType(Nil{})
-	prog.registerType(externType)
 	prog.registerType(funcType)
+	prog.registerType(externType)
 	prog.registerType(sliceHeader)
 	prog.registerType(interfaceTuple)
 
@@ -159,7 +160,6 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 			NewLiteral(Int(1)),
 			NewLiteral(String(externFunc.Name())),
 			NewLiteral(String("extern")),
-			NewLiteral(Int(0)),
 			NewLiteral(String(externFunc.Name())),
 		}, scope, hdr)
 		if err != nil {
@@ -177,7 +177,6 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 			NewLiteral(Int(1)),
 			NewLiteral(String(externFunc.Name())),
 			NewLiteral(String("extern")),
-			NewLiteral(Int(0)),
 			NewLiteral(String(externFunc.Name())),
 		}, scope, hdr)
 		if err != nil {
@@ -189,6 +188,27 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 		scope.newConstant(externFunc.Name(), externFunc.Type(), hdr.Operand.AddressOf())
 	}
 
+	{
+		fName := f.Name()
+		hdr := scope.newGlobal("@"+fName, funcType)
+
+		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
+			NewLiteral(Int(2)),
+			NewLiteral(String(f.QualifiedName())),
+			NewLiteral(String(f.Position.File)),
+			&CompilerFunctionReferenceExpression{f},
+		}, scope, hdr)
+		if err != nil {
+			return nil, err
+		}
+
+		f.bytecode.Add(hdrBC...)
+
+		scope.newConstant(fName, f.Type(), hdr.Operand.AddressOf())
+
+		f.SetInfoAddr(Addr(hdr.Operand.AddressOf().Value.(Int)))
+	}
+
 	for _, fun := range pkg.Functions() {
 		fName := fun.Name()
 		hdr := scope.newGlobal("@"+fName, funcType)
@@ -196,7 +216,6 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 			NewLiteral(Int(2)),
 			NewLiteral(String(fun.QualifiedName())),
 			NewLiteral(String(fun.Position.File)),
-			NewLiteral(Int(0)),
 			&CompilerFunctionReferenceExpression{fun},
 		}, scope, hdr)
 		if err != nil {
@@ -248,7 +267,6 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
 				NewLiteral(String(met.Position.File)),
-				NewLiteral(Int(0)),
 				&CompilerFunctionReferenceExpression{met},
 			}, scope, hdr)
 			if err != nil {
@@ -268,7 +286,6 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 				NewLiteral(Int(2)),
 				NewLiteral(String(met.QualifiedName())),
 				NewLiteral(String(met.Position.File)),
-				NewLiteral(Int(0)),
 				&CompilerFunctionReferenceExpression{met},
 			}, scope, hdr)
 			if err != nil {
@@ -477,7 +494,7 @@ func (c *Compiler) compileBCLHS(ctx context.Context, prog *Program, expr Express
 }
 
 func (c *Compiler) compileBCLHSDotExpression(ctx context.Context, prog *Program, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
-	switch typ := resolveType(typ).(type) {
+	switch typ := ResolveType(typ).(type) {
 	case *TupleType:
 		index, err := strconv.Atoi(expr.Key)
 		if err != nil {
@@ -514,7 +531,7 @@ func (c *Compiler) compileBCLHSDotExpression(ctx context.Context, prog *Program,
 }
 
 func (c *Compiler) compileBCLHSIndexExpression(ctx context.Context, prog *Program, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
-	switch resolveType(typ).(type) {
+	switch ResolveType(typ).(type) {
 	case *ArrayType:
 		elemLoc, err := receiverLoc.IndexArray(indexLoc)
 		if err != nil {
@@ -831,7 +848,7 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 func (c *Compiler) compileBCZeroValue(ctx context.Context, prog *Program, pos parser.Position, typ Type, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
 	var bc BytecodeSnippet
 
-	switch typ := resolveType(typ).(type) {
+	switch typ := ResolveType(typ).(type) {
 	case TypeKind:
 		var imm Immediate
 		switch typ.Kind() {
@@ -1068,7 +1085,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 	case *CallExpression:
 		callScope := scope.sub(scope.symbols)
 
-		switch ftype := resolveType(expr.Function.Type()).(type) {
+		switch ftype := ResolveType(expr.Function.Type()).(type) {
 		case *FunctionType:
 			callTmp := scope.allocTemp(expr.Function.Type())
 			defer scope.deallocTemp(callTmp)
@@ -1331,7 +1348,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		case KindInterface:
 			errRetLoc = ret.AsType(interfaceTuple)
 		case KindTuple:
-			tupleTyp := resolveType(scope.function.Return()).(*TupleType)
+			tupleTyp := ResolveType(scope.function.Return()).(*TupleType)
 			errRetLoc, err = ret.IndexTuple(len(tupleTyp.Elems()) - 1)
 			if err != nil {
 				return nil, nil, expr.WrapError(err)
@@ -1442,7 +1459,7 @@ func (c *Compiler) compileBCCallReceiverExpression(ctx context.Context, prog *Pr
 		methodName := expr.Method.Name
 
 		if expr.Receiver.Type().Kind() == KindInterface {
-			iface := resolveType(expr.Receiver.Type()).(*InterfaceType)
+			iface := ResolveType(expr.Receiver.Type()).(*InterfaceType)
 
 			method, ok := iface.Methods().Get(methodName)
 			if !ok {
@@ -1482,7 +1499,7 @@ func (c *Compiler) compileBCCallReceiverExpression(ctx context.Context, prog *Pr
 }
 
 func (c *Compiler) compileBCDotExpression(ctx context.Context, prog *Program, expr *DotExpression, typ Type, scope *ValueScope, receiverLoc *Location) (BytecodeSnippet, *Location, error) {
-	switch typ := resolveType(typ).(type) {
+	switch typ := ResolveType(typ).(type) {
 	case *TupleType:
 		index, err := strconv.Atoi(expr.Key)
 		if err != nil {
@@ -1527,7 +1544,7 @@ func (c *Compiler) compileBCDotExpression(ctx context.Context, prog *Program, ex
 }
 
 func (c *Compiler) compileBCIndexExpression(ctx context.Context, prog *Program, expr *IndexExpression, typ Type, scope *ValueScope, receiverLoc, indexLoc *Location) (BytecodeSnippet, *Location, error) {
-	switch resolveType(typ).(type) {
+	switch ResolveType(typ).(type) {
 	case *ArrayType:
 		elemLoc, err := receiverLoc.IndexArray(indexLoc)
 		if err != nil {
@@ -1617,7 +1634,7 @@ func (c *Compiler) compileBCBinaryElementwiseOperator(ctx context.Context, prog 
 	case KindTuple:
 		opDst := dst
 
-		for i := range resolveType(left.Type).(*TupleType).Elems() {
+		for i := range ResolveType(left.Type).(*TupleType).Elems() {
 			elemDst, err := opDst.IndexTuple(i)
 			if err != nil {
 				return nil, nil, pos.WrapError(err)
@@ -1642,7 +1659,7 @@ func (c *Compiler) compileBCBinaryElementwiseOperator(ctx context.Context, prog 
 
 		return bc, dst, nil
 	case KindArray:
-		length := resolveType(left.Type).(*ArrayType).Length()
+		length := ResolveType(left.Type).(*ArrayType).Length()
 		if length == nil {
 			return nil, nil, pos.WrapError(fmt.Errorf("unknown array length for array type %s", left.Type))
 		}
@@ -1672,7 +1689,7 @@ func (c *Compiler) compileBCBinaryElementwiseOperator(ctx context.Context, prog 
 
 		return bc, dst, nil
 	case KindStruct:
-		for _, field := range resolveType(left.Type).(*StructType).Fields() {
+		for _, field := range ResolveType(left.Type).(*StructType).Fields() {
 			elemDst, err := dst.IndexFieldConst(field.Name)
 			if err != nil {
 				return nil, nil, pos.WrapError(err)
@@ -1757,7 +1774,7 @@ func (c *Compiler) compileBCBinaryComparison(ctx context.Context, prog *Program,
 
 		bc.Mov(dst, scope.newImmediate(Bool(op == OperatorEqual)))
 
-		for i := range resolveType(left.Type).(*TupleType).Elems() {
+		for i := range ResolveType(left.Type).(*TupleType).Elems() {
 			elemLeft, err := left.IndexTuple(i)
 			if err != nil {
 				return nil, nil, pos.WrapError(err)
@@ -1791,7 +1808,7 @@ func (c *Compiler) compileBCBinaryComparison(ctx context.Context, prog *Program,
 
 		bc.Mov(dst, scope.newImmediate(Bool(op == OperatorEqual)))
 
-		length := resolveType(left.Type).(*ArrayType).Length()
+		length := ResolveType(left.Type).(*ArrayType).Length()
 		if length == nil {
 			return nil, nil, pos.WrapError(fmt.Errorf("unknown array length for array type %s", left.Type))
 		}
@@ -1830,7 +1847,7 @@ func (c *Compiler) compileBCBinaryComparison(ctx context.Context, prog *Program,
 
 		bc.Mov(dst, scope.newImmediate(Bool(op == OperatorEqual)))
 
-		for _, field := range resolveType(left.Type).(*StructType).Fields() {
+		for _, field := range ResolveType(left.Type).(*StructType).Fields() {
 			elemLeft, err := left.IndexFieldConst(field.Name)
 			if err != nil {
 				return nil, nil, pos.WrapError(err)

@@ -245,7 +245,7 @@ func (b builtinLenArray) Compile(ctx context.Context, c *Compiler, p *Program, p
 		return nil, nil, err
 	}
 
-	return nil, scope.newImmediate(Int(*resolveType(args[0].Type()).(*ArrayType).Length())), nil
+	return nil, scope.newImmediate(Int(*ResolveType(args[0].Type()).(*ArrayType).Length())), nil
 }
 
 type builtinLenSlice struct{}
@@ -496,7 +496,7 @@ func (b builtinNew) Compile(ctx context.Context, c *Compiler, prog *Program, pos
 	}
 
 	var bc BytecodeSnippet
-	bc.Alloc(dst, scope.newImmediate(Int(resolveType(args[0].Type()).Size())))
+	bc.Alloc(dst, scope.newImmediate(Int(ResolveType(args[0].Type()).Size())))
 
 	return bc, dst, nil
 }
@@ -635,7 +635,7 @@ func (b builtinAppend) TypeCheck(c *Compiler, pos parser.Position, args []Expres
 		return pos.WrapError(fmt.Errorf("builtin append expects a slice, got %s", args[0].Type()))
 	}
 
-	elemTyp := resolveType(args[0].Type()).(*SliceType).Elem()
+	elemTyp := ResolveType(args[0].Type()).(*SliceType).Elem()
 
 	args[1], err = c.resolveExpressionTypes(args[1], elemTyp)
 	if err != nil {

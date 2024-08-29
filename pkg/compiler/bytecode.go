@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"log"
 	"strings"
 )
 
@@ -393,6 +394,9 @@ func (s *BytecodeSnippet) LabelIndex(i int, labels ...Label) {
 }
 
 func (s *BytecodeSnippet) Mount(rel Relocatable) {
+	if namer, ok := rel.(interface{ QualifiedName() string }); ok {
+		log.Println(len(*s), namer.QualifiedName())
+	}
 	rel.OffsetAddr(Addr(len(*s)))
 	s.Add(rel.Bytecode()...)
 }

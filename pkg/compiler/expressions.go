@@ -25,7 +25,7 @@ func (e *DotExpression) Type() Type {
 }
 
 func resolveDotExpressionType(e *DotExpression, typ Type) Type {
-	switch typ := resolveType(typ).(type) {
+	switch typ := ResolveType(typ).(type) {
 	case *StructType:
 		field, ok := typ.GetField(e.Key)
 		if !ok {
@@ -80,7 +80,7 @@ type IndexExpression struct {
 }
 
 func (e *IndexExpression) Type() Type {
-	return resolveIndexExpressionType(e, resolveType(e.Receiver.Type()))
+	return resolveIndexExpressionType(e, ResolveType(e.Receiver.Type()))
 }
 
 func resolveIndexExpressionType(_ *IndexExpression, typ Type) Type {
@@ -171,7 +171,7 @@ func (e *SpreadExpression) Type() Type {
 			Position: e.Position,
 		}
 	}
-	return resolveType(e.Expr.Type()).(*SliceType).AsVariadic()
+	return ResolveType(e.Expr.Type()).(*SliceType).AsVariadic()
 }
 
 type ErrorReturnExpression struct {
@@ -192,7 +192,7 @@ func (e *ErrorReturnExpression) Type() Type {
 		return TypeVoid
 	case KindTuple:
 		tupleType := e.Expr.Type().(*TupleType)
-		iface, ok := resolveType(tupleType.Elems()[len(tupleType.Elems())-1]).(*InterfaceType)
+		iface, ok := ResolveType(tupleType.Elems()[len(tupleType.Elems())-1]).(*InterfaceType)
 		if !ok {
 			return UnknownType
 		}
