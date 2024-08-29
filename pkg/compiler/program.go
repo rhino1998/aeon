@@ -108,6 +108,48 @@ func (p *Program) GlobalSize() Size {
 	return size
 }
 
+func (p *Program) registerType(t Type) {
+	p.types[t.GlobalName()] = t
+	p.strings[String(t.GlobalName())] = struct{}{}
+
+}
+
+func (p *Program) GlobalLayout() []TypeSlot {
+	layout := make([]TypeSlot, 0)
+	var offset Size
+
+	addLayout := func(t Type) {
+		layout = append(layout, TypeSlot{
+			Offset: offset,
+			Type:   t,
+		})
+		offset += t.Size()
+	}
+
+	for _, global := range p.Globals() {
+		addLayout(global.Type())
+	}
+
+	for range p.Functions() {
+		addLayout(funcType)
+	}
+
+	for range p.ExternFuncs() {
+		addLayout(externType)
+	}
+
+	for _, drv := range p.DerivedTypes() {
+		for range drv.MethodFunctions() {
+			addLayout(funcType)
+		}
+		for range drv.PtrMethodFunctions() {
+			addLayout(funcType)
+		}
+	}
+
+	return layout
+}
+
 // TODO: topological sort by import
 func (p *Program) Functions() []*Function {
 	var ret []*Function

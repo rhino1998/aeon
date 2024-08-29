@@ -19,6 +19,7 @@ func (t *T) Do() (*T, error) {
   if t.x == 3 {
     return nil, Err("hello")
   }
+  print(t.x, t.y, t.z)
   t.x++
   return t, nil
 }
@@ -33,6 +34,8 @@ func handler(err error) error {
 
 func run() error {
   var t T
+  t.z = true
+  t.y = "example"
   t.Do()?.Do()?.Do()?.Do()? -> handler
 
   return nil
@@ -40,6 +43,6 @@ func run() error {
 
 #init
 func main() {
-  // print(run())
+  print(run())
   panic("user-panic")
 }

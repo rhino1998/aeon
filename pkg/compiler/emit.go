@@ -24,6 +24,17 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 		})
 	}
 
+	prog.registerType(TypeVoid)
+	prog.registerType(TypeInt)
+	prog.registerType(TypeFloat)
+	prog.registerType(TypeBool)
+	prog.registerType(TypeString)
+	prog.registerType(Nil{})
+	prog.registerType(externType)
+	prog.registerType(funcType)
+	prog.registerType(sliceHeader)
+	prog.registerType(interfaceTuple)
+
 	for _, pkg := range prog.Packages() {
 		err := c.compileBCPackage(ctx, pkg)
 		if err != nil {
@@ -39,7 +50,7 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 					panic(fmt.Errorf("non-equal duplicate types %s %s", typ, other))
 				}
 			} else {
-				prog.types[name] = typ
+				prog.registerType(typ)
 			}
 		}
 

@@ -42,6 +42,13 @@ func (v *Variable) String() string {
 	return fmt.Sprintf("<var %s %s>", v.name, v.typ)
 }
 
+type Global struct {
+	name string
+	typ  Type
+
+	parser.Position
+}
+
 type SymbolReferenceExpression struct {
 	scope *SymbolScope
 	name  string
