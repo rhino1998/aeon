@@ -676,15 +676,6 @@ func (gc *gcState) compact(r *Runtime) error {
 		alloc := gc.heapUsedAlloc[i]
 		size := gc.heapUsedSize[i]
 
-		log.Println(alloc, size, gc.heapIndex, gc.heapIndex+Addr(size), gc.heapEnd)
-
-		err := r.memmove(gc.heapIndex, alloc, size)
-		if err != nil {
-			return err
-		}
-
-		log.Println(gc.heapVarAllocs, alloc)
-
 		index := slices.Index(gc.heapVarAllocs, alloc)
 		if index != -1 {
 			varAddr := gc.heapVars[index]
@@ -703,6 +694,19 @@ func (gc *gcState) compact(r *Runtime) error {
 
 		gc.heapIndex += Addr(size)
 		newAllocs = append(newAllocs, gc.heapIndex)
+	}
+
+	gc.heapIndex = gc.heapStart
+	for i := range gc.heapUsedAlloc {
+		alloc := gc.heapUsedAlloc[i]
+		size := gc.heapUsedSize[i]
+
+		err := r.memmove(gc.heapIndex, alloc, size)
+		if err != nil {
+			return err
+		}
+
+		gc.heapIndex += Addr(size)
 	}
 
 	gc.heapAllocs = newAllocs
