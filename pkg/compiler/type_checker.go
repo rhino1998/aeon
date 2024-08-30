@@ -169,7 +169,7 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 	}()
 
 	if g.Type() != nil {
-		typ := dereferenceType(g.Type())
+		typ := DereferenceType(g.Type())
 
 		g.typ, err = c.resolveTypes(g.Position, typ)
 		if err != nil {
@@ -204,7 +204,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 	switch stmt := stmt.(type) {
 	case *VarStatement:
 		if stmt.Type != nil {
-			typ := dereferenceType(stmt.Type)
+			typ := DereferenceType(stmt.Type)
 
 			stmt.Type, err = c.resolveTypes(stmt.Position, typ)
 			if err != nil {
@@ -1075,7 +1075,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		return expr, nil
 	case *TypeLiteralExpression:
-		if arrayType, ok := dereferenceType(expr.Type()).(*ArrayType); ok {
+		if arrayType, ok := DereferenceType(expr.Type()).(*ArrayType); ok {
 			numElems := len(expr.Elems)
 			err := arrayType.computeAndValidateLength(&numElems)
 			if err != nil {
@@ -1267,7 +1267,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 	}
 
 	var hasMethods bool
-	if typ, ok := dereferenceType(expr.Receiver.Type()).(*DerivedType); ok && !isNumeric {
+	if typ, ok := DereferenceType(expr.Receiver.Type()).(*DerivedType); ok && !isNumeric {
 		hasMethods = true
 
 		methods := typ.Methods(false)
@@ -1318,8 +1318,8 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 				Position: expr.Position,
 			}, nil
 		}
-	} else if typ, ok := dereferenceType(expr.Receiver.Type()).(*PointerType); ok {
-		if typ, ok := dereferenceType(typ.Pointee()).(*DerivedType); ok && typ.Methods(true).Has(expr.Key) {
+	} else if typ, ok := DereferenceType(expr.Receiver.Type()).(*PointerType); ok {
+		if typ, ok := DereferenceType(typ.Pointee()).(*DerivedType); ok && typ.Methods(true).Has(expr.Key) {
 			method, _ := typ.Methods(true).Get(expr.Key)
 			targetReceiverType := method.Receiver
 			receiver := expr.Receiver

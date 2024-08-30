@@ -304,7 +304,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 		r.typeMap[typeID] = make([]RuntimeTypeSlot, 0)
 
-		switch typ := typ.(type) {
+		switch typ := compiler.DereferenceType(typ).(type) {
 		case *compiler.DerivedType:
 			for _, method := range typ.Methods(false) {
 				fun := typ.Method(method.Name, false)
@@ -314,7 +314,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 				r.vtables[typeID][method.String()] = float64(fun.InfoAddr())
 			}
 		case *compiler.PointerType:
-			switch typ := typ.Pointee().(type) {
+			switch typ := compiler.DereferenceType(typ.Pointee()).(type) {
 			case *compiler.DerivedType:
 				for _, method := range typ.Methods(true) {
 					fun := typ.Method(method.Name, true)
@@ -353,7 +353,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		}
 	}
 
-	r.printVTables()
+	// r.printVTables()
 
 	for _, slot := range prog.GlobalLayout() {
 		r.globalMap = append(r.globalMap,
@@ -406,7 +406,6 @@ func (r *Runtime) toNative(typ float64, value float64) (any, error) {
 }
 
 func (r *Runtime) memmove(dst, src Addr, size Size) error {
-	log.Printf("moving %v from %v to %v", size, src, dst)
 	var err error
 	tmp := make([]float64, size)
 	for i := Size(0); i < size; i++ {
@@ -469,8 +468,6 @@ func (r *Runtime) gc() error {
 		return nil
 	}
 
-	log.Println("gc start")
-
 	err := gc.scanPointers(r)
 	if err != nil {
 		return err
@@ -490,8 +487,6 @@ func (r *Runtime) gc() error {
 
 	r.heapAllocs = gc.heapAllocs
 	r.heapIndex = gc.heapIndex
-
-	log.Println("gc end")
 
 	return nil
 }
@@ -664,8 +659,6 @@ func (gc *gcState) mark(r *Runtime) error {
 		}) {
 			gc.heapUsedAlloc = append(gc.heapUsedAlloc, prevHeapAddr)
 			gc.heapUsedSize = append(gc.heapUsedSize, Size(heapAllocAddr-prevHeapAddr))
-
-			log.Println("used", heapAllocAddr, prevHeapAddr, heapAllocAddr-prevHeapAddr)
 		}
 
 		prevHeapAddr = heapAllocAddr
@@ -694,8 +687,6 @@ func (gc *gcState) compact(r *Runtime) error {
 			if err != nil {
 				return err
 			}
-
-			log.Println("fixup", varAddr, varVal, float64(gc.heapIndex)+(varVal-float64(alloc)))
 
 			err = r.storeAddr(varAddr, float64(gc.heapIndex)+(varVal-float64(alloc)))
 			if err != nil {
@@ -1121,6 +1112,16 @@ func (r *Runtime) loadVTable(lookup compiler.VTableLookup) loadFunc {
 			return 0, fmt.Errorf("failed to get type id: %w", err)
 		}
 
+		typeNameAddr, ok := r.vtables[int(typeID)]["#name"]
+		if !ok {
+			return 0, fmt.Errorf("no such type %d", int(typeID))
+		}
+
+		typeName, err := r.LoadString(Addr(typeNameAddr))
+		if err != nil {
+			return 0, fmt.Errorf("failed to get type name: %w", err)
+		}
+
 		nameAddr, err := r.load(lookup.Method)()
 		if err != nil {
 			return 0, fmt.Errorf("failed to get method name addr: %w", err)
@@ -1133,7 +1134,8 @@ func (r *Runtime) loadVTable(lookup compiler.VTableLookup) loadFunc {
 
 		funAddr, ok := r.vtables[int(typeID)][string(name)]
 		if !ok {
-			return 0, fmt.Errorf("no such vtable entry for %d %s", int(typeID), name)
+			r.printVTables()
+			return 0, fmt.Errorf("no such vtable entry for %d %s %s", int(typeID), typeName, name)
 		}
 
 		return funAddr, nil
@@ -1262,9 +1264,6 @@ func (r *Runtime) Run(ctx context.Context) error {
 			return r.panic(err)
 		}
 	}
-
-	log.Println(r.strHeapIndex, r.strHeapEnd)
-	log.Println(r.heapIndex, r.heapEnd)
 
 	return nil
 }
@@ -1438,8 +1437,6 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			}
 
 			r.setSP(r.sp().Offset(-code.Args))
-
-			log.Printf("%v %v %v", r.sp(), r.fp(), r.pc())
 
 			r.funcTrace = r.funcTrace[:len(r.funcTrace)-2]
 

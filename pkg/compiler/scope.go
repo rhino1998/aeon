@@ -316,7 +316,7 @@ func (l *Location) AsType(typ Type) *Location {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    l.Name,
-		Type:    dereferenceType(typ),
+		Type:    DereferenceType(typ),
 		Operand: l.Operand,
 	}
 }
@@ -338,7 +338,7 @@ func (l *Location) Value() *Location {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    fmt.Sprintf("*%s", l.Name),
-		Type:    dereferenceType(l.Type),
+		Type:    DereferenceType(l.Type),
 		Operand: l.Operand.Dereference(),
 	}
 }
@@ -368,7 +368,7 @@ func (l *Location) IndexTuple(index int) (*Location, error) {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    fmt.Sprintf("%s.%d", l.Name, index),
-		Type:    dereferenceType(typ.Elems()[index]),
+		Type:    DereferenceType(typ.Elems()[index]),
 		Operand: l.Operand.AddressOf().ConstOffset(typ.ElemOffset(index)).Dereference(),
 	}, nil
 }
@@ -388,7 +388,7 @@ func (l *Location) IndexArrayConst(index int) (*Location, error) {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    fmt.Sprintf("%s.%d", l.Name, index),
-		Type:    dereferenceType(typ.Elem()),
+		Type:    DereferenceType(typ.Elem()),
 		Operand: l.Operand.AddressOf().ConstOffset(typ.Elem().Size() * Size(index)).Dereference(),
 	}, nil
 }
@@ -404,7 +404,7 @@ func (l *Location) IndexArray(index *Location) (*Location, error) {
 	return &Location{
 		Kind: l.Kind,
 		Name: fmt.Sprintf("%s[%s]", l.Name, index),
-		Type: dereferenceType(typ.Elem()),
+		Type: DereferenceType(typ.Elem()),
 		Operand: l.Operand.AddressOf().Offset(
 			index.Operand.
 				Bound(ImmediateOperand(Int(*length))).
@@ -422,7 +422,7 @@ func (l *Location) IndexSlice(index *Location) (*Location, error) {
 	return &Location{
 		Kind:    LocationKindHeap,
 		Name:    fmt.Sprintf("%s[%s]", l.Name, index.Name),
-		Type:    dereferenceType(typ.Elem()),
+		Type:    DereferenceType(typ.Elem()),
 		Operand: l.Operand.Offset(index.Operand.Bound(l.Operand.ConstOffset(1)).Stride(ImmediateOperand(Int(typ.Elem().Size())))).Dereference(),
 	}, nil
 }
@@ -433,7 +433,7 @@ func (l *Location) LenSlice() (*Location, error) {
 	return &Location{
 		Kind:    LocationKindHeap,
 		Name:    fmt.Sprintf("len(%s)", l.Name),
-		Type:    dereferenceType(typ.Elem()),
+		Type:    DereferenceType(typ.Elem()),
 		Operand: l.Operand.OffsetReference(1),
 	}, nil
 }
@@ -444,7 +444,7 @@ func (l *Location) CapSlice() (*Location, error) {
 	return &Location{
 		Kind:    LocationKindHeap,
 		Name:    fmt.Sprintf("cap(%s)", l.Name),
-		Type:    dereferenceType(typ.Elem()),
+		Type:    DereferenceType(typ.Elem()),
 		Operand: l.Operand.OffsetReference(2),
 	}, nil
 }
@@ -465,7 +465,7 @@ func (l *Location) IndexFieldConst(name string) (*Location, error) {
 	return &Location{
 		Kind:    l.Kind,
 		Name:    fmt.Sprintf("%s.%s", l.Name, name),
-		Type:    dereferenceType(field.Type),
+		Type:    DereferenceType(field.Type),
 		Operand: l.Operand.AddressOf().ConstOffset(offset).Dereference(),
 	}, nil
 }
@@ -615,7 +615,7 @@ func (vs *ValueScope) newLocal(v *Variable) *Location {
 	loc := &Location{
 		Kind:    LocationKindLocal,
 		Name:    v.Name(),
-		Type:    dereferenceType(v.Type()),
+		Type:    DereferenceType(v.Type()),
 		Operand: LocalOperand(v),
 	}
 
@@ -643,7 +643,7 @@ func (vs *ValueScope) allocTemp(typ Type) *Location {
 					return &Location{
 						Kind: LocationKindRegister,
 						Name: reg.String(),
-						Type: dereferenceType(typ),
+						Type: DereferenceType(typ),
 						Operand: &Operand{
 							Kind:  OperandKindRegister,
 							Value: reg,
@@ -691,33 +691,41 @@ func (vs *ValueScope) Get(name string) (*Location, bool) {
 	return op, true
 }
 
-func (vs *ValueScope) typeName(typ Type) *Location {
-	name := vs.registerType(typ)
+func (vs *ValueScope) typeName(typ Type) (*Location, error) {
+	name, err := vs.registerType(typ)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Location{
 		Kind:    LocationKindConstant,
 		Name:    fmt.Sprintf("type %s", name),
 		Type:    TypeKind(KindType),
 		Operand: TypeOperand(name),
-	}
+	}, nil
 }
 
 func (vs *ValueScope) Types() []Type {
 	return sortedMapByKey(vs.types)
 }
 
-func (vs *ValueScope) registerType(typ Type) TypeName {
-	typ = dereferenceType(typ)
+func (vs *ValueScope) registerType(typ Type) (TypeName, error) {
+	if typ == UnknownType {
+		return "", fmt.Errorf("cannot register unknown type")
+	}
+
+	typ = DereferenceType(typ)
 	name := typ.GlobalName()
 	if other, ok := vs.types[name]; ok {
 		if !TypesEqual(typ, other) {
-			panic(fmt.Errorf("duplicate non-equal types %s %s", typ, other))
+			return "", fmt.Errorf("duplicate non-equal types %s %s", typ, other)
 		}
 	}
 
 	vs.types[name] = typ
 	vs.symbols.Package().prog.registerType(typ)
 
-	return name
+	return name, nil
 }
 
 const (

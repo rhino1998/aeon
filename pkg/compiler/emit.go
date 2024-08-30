@@ -50,8 +50,6 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 				if !TypesEqual(typ, other) {
 					panic(fmt.Errorf("non-equal duplicate types %s %s", typ, other))
 				}
-			} else {
-				prog.registerType(typ)
 			}
 		}
 
@@ -526,7 +524,7 @@ func (c *Compiler) compileBCLHSDotExpression(ctx context.Context, prog *Program,
 
 		return c.compileBCLHSDotExpression(ctx, prog, expr, typ.Pointee(), scope, receiverLocValue)
 	default:
-		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", dereferenceType(expr.Receiver.Type())))
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", DereferenceType(expr.Receiver.Type())))
 	}
 }
 
@@ -1291,7 +1289,12 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 			return nil, nil, expr.WrapError(err)
 		}
 
-		bc.Mov(typElem, scope.typeName(expr.Expression.Type()))
+		typeLoc, err := scope.typeName(expr.Expression.Type())
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
+		bc.Mov(typElem, typeLoc)
 
 		valElem, err := ifaceDst.IndexTuple(1)
 		if err != nil {
@@ -1317,7 +1320,11 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 		return bc, dst, nil
 	case *TypeExpression:
-		return bc, scope.typeName(expr.typ), nil
+		typeLoc, err := scope.typeName(expr.typ)
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+		return bc, typeLoc, nil
 	case *BuiltinExpression:
 		return expr.Impl.Compile(ctx, c, prog, expr.Position, expr.Args, scope, dst)
 	case *SpreadExpression:
@@ -1373,13 +1380,18 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 			return nil, nil, expr.WrapError(fmt.Errorf("cannot return error from expression of type %s", expr.Expr.Type()))
 		}
 
+		nilTypeLoc, err := scope.typeName(Nil{})
+		if err != nil {
+			return nil, nil, expr.WrapError(err)
+		}
+
 		skipRet := newLabel()
 		bc.JumpAfter(skipRet, &Operand{
 			Kind: OperandKindBinary,
 			Value: BinaryOperand{
 				Left:  must1(errLoc.InterfaceType()).Operand,
 				Op:    OperatorEqual,
-				Right: scope.typeName(Nil{}).Operand,
+				Right: nilTypeLoc.Operand,
 			},
 		})
 		errHandlerLoc, ok := scope.Get(errorHandlerSymbolName)
@@ -1401,7 +1413,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 				Value: BinaryOperand{
 					Left:  must1(handlerRet.InterfaceType()).Operand,
 					Op:    OperatorEqual,
-					Right: scope.typeName(Nil{}).Operand,
+					Right: nilTypeLoc.Operand,
 				},
 			})
 			bc.Mov(errRetLoc, handlerRet)
@@ -1539,7 +1551,7 @@ func (c *Compiler) compileBCDotExpression(ctx context.Context, prog *Program, ex
 
 		return nil, loc, nil
 	default:
-		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", dereferenceType(expr.Receiver.Type())))
+		return nil, nil, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", DereferenceType(expr.Receiver.Type())))
 	}
 }
 

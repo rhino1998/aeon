@@ -486,7 +486,7 @@ func (b builtinNew) TypeCheck(c *Compiler, pos parser.Position, args []Expressio
 }
 
 func (b builtinNew) Type(args []Expression) Type {
-	return NewPointerType(dereferenceType(args[0].Type()).(*TypeType).Type)
+	return NewPointerType(DereferenceType(args[0].Type()).(*TypeType).Type)
 }
 
 func (b builtinNew) Compile(ctx context.Context, c *Compiler, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
@@ -552,7 +552,7 @@ func (b builtinMakeSlice) TypeCheck(c *Compiler, pos parser.Position, args []Exp
 }
 
 func (b builtinMakeSlice) Type(args []Expression) Type {
-	return dereferenceType(args[0].Type()).(*TypeType).Type
+	return DereferenceType(args[0].Type()).(*TypeType).Type
 }
 
 func (b builtinMakeSlice) Compile(ctx context.Context, c *Compiler, prog *Program, pos parser.Position, args []Expression, scope *ValueScope, dst *Location) (BytecodeSnippet, *Location, error) {
@@ -609,7 +609,7 @@ func (b builtinMakeSlice) Compile(ctx context.Context, c *Compiler, prog *Progra
 		return nil, nil, pos.WrapError(fmt.Errorf("failed to index slice header: %w", err))
 	}
 
-	elemTyp := dereferenceType(args[0].Type()).(*TypeType).Type.(*SliceType).Elem()
+	elemTyp := DereferenceType(args[0].Type()).(*TypeType).Type.(*SliceType).Elem()
 	bc.Alloc(hdrPtrDst, hdrCapLoc.Mul(scope.newImmediate(Int(elemTyp.Size()))))
 
 	return bc, dst, nil

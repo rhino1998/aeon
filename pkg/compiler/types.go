@@ -25,7 +25,13 @@ func (n TypeName) Location(vs *ValueScope) *Location {
 	if !ok {
 		panic(fmt.Errorf("bug: failed to resolve type %s", n))
 	}
-	return vs.typeName(typ)
+
+	loc, err := vs.typeName(typ)
+	if err != nil {
+		panic(err)
+	}
+
+	return loc
 }
 
 var UnknownType = unknownType{}
@@ -109,11 +115,11 @@ func IsValidMethodReceiverType(t Type) bool {
 	default:
 	}
 
-	switch t := dereferenceType(t).(type) {
+	switch t := DereferenceType(t).(type) {
 	case *DerivedType:
 		return true
 	case *PointerType:
-		switch dereferenceType(t.Pointee()).(type) {
+		switch DereferenceType(t.Pointee()).(type) {
 		case *DerivedType:
 			return true
 		}
@@ -174,7 +180,7 @@ func IsConvertibleTo(v, to Type) bool {
 }
 
 func baseType(typ Type) Type {
-	switch typ := dereferenceType(typ).(type) {
+	switch typ := DereferenceType(typ).(type) {
 	case *ReferencedType:
 		return baseType(typ.Dereference())
 	case *DerivedType:
@@ -192,17 +198,17 @@ func baseType(typ Type) Type {
 	}
 }
 
-func dereferenceType(typ Type) Type {
+func DereferenceType(typ Type) Type {
 	switch typ := typ.(type) {
 	case *ReferencedType:
-		res := dereferenceType(typ.Dereference())
+		res := DereferenceType(typ.Dereference())
 		if res == UnknownType {
 			return typ
 		}
 
 		return res
 	case *ParenthesizedType:
-		return dereferenceType(typ.Type)
+		return DereferenceType(typ.Type)
 	default:
 		return typ
 	}
@@ -323,7 +329,7 @@ func typesEqual(t1, t2 Type) bool {
 }
 
 func TypesEqual(t1, t2 Type) bool {
-	return typesEqual(dereferenceType(t1), dereferenceType(t2))
+	return typesEqual(DereferenceType(t1), DereferenceType(t2))
 }
 
 func IsUnspecified(typ Type) bool {
@@ -331,12 +337,12 @@ func IsUnspecified(typ Type) bool {
 		return true
 	}
 
-	_, ok := dereferenceType(typ).(TypeKind)
+	_, ok := DereferenceType(typ).(TypeKind)
 	return ok
 }
 
 func IsTypeResolvable(typ Type) bool {
-	switch typ := dereferenceType(typ).(type) {
+	switch typ := DereferenceType(typ).(type) {
 	case TypeKind:
 		return true
 	case voidType:
@@ -680,11 +686,11 @@ func (m MethodSet) Subset(o MethodSet) bool {
 }
 
 func TypeMethods(typ Type) MethodSet {
-	switch typ := dereferenceType(typ).(type) {
+	switch typ := DereferenceType(typ).(type) {
 	case *DerivedType:
 		return typ.Methods(false)
 	case *PointerType:
-		switch typ := dereferenceType(typ.pointee).(type) {
+		switch typ := DereferenceType(typ.pointee).(type) {
 		case *DerivedType:
 			return typ.Methods(false)
 		}
@@ -694,7 +700,7 @@ func TypeMethods(typ Type) MethodSet {
 }
 
 func TypeMethod(typ Type, name string) (*Function, bool) {
-	switch typ := dereferenceType(typ).(type) {
+	switch typ := DereferenceType(typ).(type) {
 	case *DerivedType:
 		if typ.Methods(false).Has(name) {
 			return typ.Method(name, false), true
@@ -702,7 +708,7 @@ func TypeMethod(typ Type, name string) (*Function, bool) {
 
 		return nil, false
 	case *PointerType:
-		switch typ := dereferenceType(typ.pointee).(type) {
+		switch typ := DereferenceType(typ.pointee).(type) {
 		case *DerivedType:
 			if typ.Methods(true).Has(name) {
 				return typ.Method(name, true), true
@@ -1199,7 +1205,7 @@ var interfaceTuple = NewTupleType(
 )
 
 func (t *InterfaceType) ImplementedBy(i Type) bool {
-	switch i := dereferenceType(i).(type) {
+	switch i := DereferenceType(i).(type) {
 	case *DerivedType:
 		if i.Underlying().Kind() == KindInterface {
 			return t.ImplementedBy(i.Underlying())

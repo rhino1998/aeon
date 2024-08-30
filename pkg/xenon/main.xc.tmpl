@@ -590,8 +590,6 @@ function @aeon_run($pc:number):number
 	var $size = 0
 
 	repeat {{.NumRegisters}} ($reg)
-		if ($reg == 0)
-			continue
 		@aeon_mem_store($aeon_reg.1, 0)
 		$aeon_reg.1 += 1
 	$aeon_reg.2 = $aeon_reg.1 - 1

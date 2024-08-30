@@ -640,11 +640,11 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 	}
 
 	var recvDerivedType *DerivedType
-	switch recvTyp := dereferenceType(recvTyp).(type) {
+	switch recvTyp := DereferenceType(recvTyp).(type) {
 	case *DerivedType:
 		recvDerivedType = recvTyp
 	case *PointerType:
-		switch recvTyp := dereferenceType(recvTyp.Pointee()).(type) {
+		switch recvTyp := DereferenceType(recvTyp.Pointee()).(type) {
 		case *DerivedType:
 			recvDerivedType = recvTyp
 		default:
