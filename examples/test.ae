@@ -13,7 +13,7 @@ func main() {
   }
 
   y := make([]int, 0, 1)
-  for i := 0; i < 512; i++ {
+  for i := 0; i < 5120; i++ {
     y = append(y, i)
   }
 
