@@ -442,6 +442,17 @@ func (r *Runtime) memcpy(dst, src Addr, size Size) error {
 	return nil
 }
 
+func (r *Runtime) memzero(dst Addr, size Size) error {
+	for i := Size(0); i < size; i++ {
+		err := r.storeAddr(dst.Offset(i), 0)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (r *Runtime) gc() error {
 	gc := gcState{
 		heapAllocs: r.heapAllocs,
@@ -964,6 +975,11 @@ func (r *Runtime) alloc(size Size) (Addr, error) {
 	r.heapAllocs = append(r.heapAllocs, r.heapIndex)
 	if r.heapIndex > Addr(len(r.memPages)*PageSize) {
 		return 0, fmt.Errorf("out of memory")
+	}
+
+	err := r.memzero(addr, size)
+	if err != nil {
+		return 0, err
 	}
 
 	// TODO: garbage collection
