@@ -128,7 +128,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 				xeCtx.VTable[i][method.String()] = int(methodFunc.InfoAddr())
 			}
 		case *compiler.PointerType:
-			switch typ := typ.Pointee().(type) {
+			switch typ := compiler.DereferenceType(typ.Pointee()).(type) {
 			case *compiler.DerivedType:
 				for _, method := range typ.Methods(true) {
 					methodFunc := typ.Method(method.Name, true)
