@@ -6,7 +6,24 @@ extern func itoa(x int) string
 
 #init
 func main() {
-  for i := 0; i < 4000000; i++ {
-    "hello" + itoa(i)
+  z := make([]int, 100)
+  for i := 0; i < 400000; i++ {
+    z = make([]int, 100)
+    print("hello" + itoa(i))
+  }
+
+  y := make([]int, 0, 1)
+  for i := 0; i < 512; i++ {
+    y = append(y, i)
+  }
+
+  for i := 0; i < 400000; i++ {
+    print("hello" + itoa(i))
+  }
+
+  for i := 0; i < len(y); i++ {
+    if y[i] != i {
+      print((itoa(i)) + " !=  " + itoa(y[i]))
+    }
   }
 }

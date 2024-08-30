@@ -171,10 +171,13 @@ type gcState struct {
 	heapEnd   Addr
 	heapIndex Addr
 
-	heapAllocs []Addr
-	heapVars   []Addr
-	heapPtrs   []Addr
-	heapUnused []Addr
+	heapAllocs    []Addr
+	heapVars      []Addr
+	heapVarAllocs []Addr
+	heapPtrs      []Addr
+	heapUsedAlloc []Addr
+	heapUsedSize  []Size
+	heapUsedPtr   []Addr
 
 	strHeapStart Addr
 	strHeapEnd   Addr
@@ -195,8 +198,21 @@ func (g *gcState) addStrVar(v, ptr Addr) {
 
 func (g *gcState) addHeapVar(v, ptr Addr) {
 	if ptr >= g.heapStart && ptr < g.heapEnd {
+		log.Println("adding", v, ptr)
 		g.heapVars = append(g.heapVars, v)
 		g.heapPtrs = append(g.heapPtrs, ptr)
+
+		prevAlloc := g.heapStart
+		for _, alloc := range g.heapAllocs {
+			if ptr < alloc {
+				g.heapVarAllocs = append(g.heapVarAllocs, prevAlloc)
+				break
+			}
+
+			prevAlloc = alloc
+		}
+
+		log.Println(ptr, g.heapPtrs, g.heapVarAllocs)
 	}
 }
 
@@ -207,10 +223,11 @@ type Runtime struct {
 
 	debug bool
 
-	codePages [][PageSize]compiler.Bytecode
-	heapStart Addr
-	heapEnd   Addr
-	heapIndex Addr
+	codePages  [][PageSize]compiler.Bytecode
+	heapAllocs []Addr
+	heapStart  Addr
+	heapEnd    Addr
+	heapIndex  Addr
 
 	funcTrace []float64
 
@@ -389,6 +406,7 @@ func (r *Runtime) toNative(typ float64, value float64) (any, error) {
 }
 
 func (r *Runtime) memmove(dst, src Addr, size Size) error {
+	log.Printf("moving %v from %v to %v", size, src, dst)
 	var err error
 	tmp := make([]float64, size)
 	for i := Size(0); i < size; i++ {
@@ -408,12 +426,28 @@ func (r *Runtime) memmove(dst, src Addr, size Size) error {
 	return nil
 }
 
+func (r *Runtime) memcpy(dst, src Addr, size Size) error {
+	for i := Size(0); i < size; i++ {
+		val, err := r.loadAddr(src.Offset(i))
+		if err != nil {
+			return err
+		}
+
+		err = r.storeAddr(dst.Offset(i), val)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
 func (r *Runtime) gc() error {
 	gc := gcState{
-		// TODO: list of heap allocs
-		heapStart: r.heapStart,
-		heapEnd:   r.heapEnd,
-		heapIndex: r.heapIndex,
+		heapAllocs: r.heapAllocs,
+		heapStart:  r.heapStart,
+		heapEnd:    r.heapEnd,
+		heapIndex:  r.heapIndex,
 
 		strHeapStart: r.strHeapStart,
 		strHeapEnd:   r.strHeapEnd,
@@ -423,6 +457,8 @@ func (r *Runtime) gc() error {
 	if float64(gc.heapIndex) < float64(gc.heapEnd)*0.8 && float64(gc.strHeapIndex) < float64(gc.strHeapEnd)*0.8 {
 		return nil
 	}
+
+	log.Println("gc start")
 
 	err := gc.scanPointers(r)
 	if err != nil {
@@ -434,12 +470,17 @@ func (r *Runtime) gc() error {
 		return err
 	}
 
-	err = gc.sweep(r)
+	err = gc.compact(r)
 	if err != nil {
 		return err
 	}
 
 	r.strHeapIndex = gc.strHeapIndex
+
+	r.heapAllocs = gc.heapAllocs
+	r.heapIndex = gc.heapIndex
+
+	log.Println("gc end")
 
 	return nil
 }
@@ -605,6 +646,20 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 }
 
 func (gc *gcState) mark(r *Runtime) error {
+	prevHeapAddr := gc.heapStart
+	for _, heapAllocAddr := range gc.heapAllocs {
+		if slices.ContainsFunc(gc.heapPtrs, func(ptr Addr) bool {
+			return ptr >= prevHeapAddr && ptr < heapAllocAddr
+		}) {
+			gc.heapUsedAlloc = append(gc.heapUsedAlloc, prevHeapAddr)
+			gc.heapUsedSize = append(gc.heapUsedSize, Size(heapAllocAddr-prevHeapAddr))
+
+			log.Println("used", heapAllocAddr, prevHeapAddr, heapAllocAddr-prevHeapAddr)
+		}
+
+		prevHeapAddr = heapAllocAddr
+	}
+
 	for ptr := gc.strHeapStart; ptr <= gc.strHeapIndex; ptr++ {
 		if slices.Contains(gc.strPtrs, ptr) {
 			gc.strUsed = append(gc.strUsed, ptr)
@@ -614,12 +669,46 @@ func (gc *gcState) mark(r *Runtime) error {
 	return nil
 }
 
-func (gc *gcState) sweep(r *Runtime) error {
-	log.Println("COLLECT")
+func (gc *gcState) compact(r *Runtime) error {
+	gc.heapIndex = gc.heapStart
+	newAllocs := make([]Addr, 0)
+	for i := range gc.heapUsedAlloc {
+		alloc := gc.heapUsedAlloc[i]
+		size := gc.heapUsedSize[i]
+
+		log.Println(alloc, size, gc.heapIndex, gc.heapIndex+Addr(size), gc.heapEnd)
+
+		err := r.memmove(gc.heapIndex, alloc, size)
+		if err != nil {
+			return err
+		}
+
+		log.Println(gc.heapVarAllocs, alloc)
+
+		index := slices.Index(gc.heapVarAllocs, alloc)
+		if index != -1 {
+			varAddr := gc.heapVars[index]
+			varVal, err := r.loadAddr(varAddr)
+			if err != nil {
+				return err
+			}
+
+			log.Println("fixup", varAddr, varVal, float64(gc.heapIndex)+(varVal-float64(alloc)))
+
+			err = r.storeAddr(varAddr, float64(gc.heapIndex)+(varVal-float64(alloc)))
+			if err != nil {
+				return err
+			}
+		}
+
+		gc.heapIndex += Addr(size)
+		newAllocs = append(newAllocs, gc.heapIndex)
+	}
+
+	gc.heapAllocs = newAllocs
+
 	gc.strHeapIndex = gc.strHeapStart
 	for _, ptr := range gc.strUsed {
-		gc.strHeapIndex++
-
 		str, err := r.LoadString(ptr)
 		if err != nil {
 			return err
@@ -642,6 +731,8 @@ func (gc *gcState) sweep(r *Runtime) error {
 				}
 			}
 		}
+
+		gc.strHeapIndex++
 	}
 
 	return nil
@@ -771,11 +862,11 @@ func (r *Runtime) loadAddr(addr compiler.Addr) (float64, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
-		return 0, fmt.Errorf("invalid page %v for addr %v", page, addr)
+		return 0, fmt.Errorf("invalid page 0x%08x for addr %v", page, addr)
 	}
 
 	if pageAddr >= uint64(len(r.memPages[page])) {
-		return 0, fmt.Errorf("invalid page addr %v in page %v for addr %v", pageAddr, page, addr)
+		return 0, fmt.Errorf("invalid page addr 0x%08x in page 0x%08x for addr %v", pageAddr, page, addr)
 	}
 
 	return r.memPages[page][pageAddr], nil
@@ -785,11 +876,11 @@ func (r *Runtime) LoadString(addr compiler.Addr) (String, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.strPages)) {
-		return "", fmt.Errorf("invalid str page %v for addr %v", page, addr)
+		return "", fmt.Errorf("invalid str page 0x%08x for addr %v", page, addr)
 	}
 
 	if pageAddr >= uint64(len(r.strPages[page])) {
-		return "", fmt.Errorf("invalid str page addr %v in page %v for addr %v", pageAddr, page, addr)
+		return "", fmt.Errorf("invalid str page addr 0x%08x in page 0x%08x for addr %v", pageAddr, page, addr)
 	}
 
 	return r.strPages[page][pageAddr], nil
@@ -813,11 +904,11 @@ func (r *Runtime) storeAddr(addr compiler.Addr, val float64) error {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
-		return fmt.Errorf("invalid page %v for addr %v", page, addr)
+		return fmt.Errorf("invalid page 0x%08x for addr %v", page, addr)
 	}
 
 	if pageAddr >= uint64(len(r.memPages[page])) {
-		return fmt.Errorf("invalid page addr %v in page %v for addr %v", pageAddr, page, addr)
+		return fmt.Errorf("invalid page addr 0x%08x in page 0x%08x for addr %v", pageAddr, page, addr)
 	}
 
 	r.memPages[page][pageAddr] = val
@@ -866,6 +957,7 @@ func (r *Runtime) allocStr(val String) (Addr, error) {
 func (r *Runtime) alloc(size Size) (Addr, error) {
 	addr := r.heapIndex
 	r.heapIndex += Addr(size)
+	r.heapAllocs = append(r.heapAllocs, r.heapIndex)
 	if r.heapIndex > Addr(len(r.memPages)*PageSize) {
 		return 0, fmt.Errorf("out of memory")
 	}
@@ -1151,7 +1243,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 	}
 
-	log.Println(r.strHeapIndex)
+	log.Println(r.strHeapIndex, r.strHeapEnd)
+	log.Println(r.heapIndex, r.heapEnd)
 
 	return nil
 }
@@ -1385,6 +1478,11 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				return err
 			}
 		case compiler.Alc:
+			err = r.gc()
+			if err != nil {
+				return err
+			}
+
 			size, err := r.load(code.Size)()
 			if err != nil {
 				return err
@@ -1399,8 +1497,6 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			if err != nil {
 				return err
 			}
-
-			log.Println(r.gc())
 		case compiler.App:
 			sliceData, err := r.load(code.Src.OffsetReference(0))()
 			if err != nil {
@@ -1423,7 +1519,10 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			}
 
 			if sliceLen == sliceCap {
-				log.Println(r.gc())
+				err = r.gc()
+				if err != nil {
+					return err
+				}
 
 				if sliceCap == 0 {
 					sliceCap = 1
@@ -1436,12 +1535,9 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 					return err
 				}
 
-				for i := Size(0); i < Size(sliceLen)*code.Size; i++ {
-					val, err := r.loadAddr(sliceDataAddr.Offset(i))
-					if err != nil {
-						return err
-					}
-					r.storeAddr(newDataAddr.Offset(i), val)
+				err = r.memcpy(newDataAddr, sliceDataAddr, Size(sliceLen)*code.Size)
+				if err != nil {
+					return err
 				}
 
 				sliceDataAddr = newDataAddr
