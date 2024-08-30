@@ -198,7 +198,6 @@ func (g *gcState) addStrVar(v, ptr Addr) {
 
 func (g *gcState) addHeapVar(v, ptr Addr) {
 	if ptr >= g.heapStart && ptr < g.heapEnd {
-		log.Println("adding", v, ptr)
 		g.heapVars = append(g.heapVars, v)
 		g.heapPtrs = append(g.heapPtrs, ptr)
 
@@ -211,8 +210,6 @@ func (g *gcState) addHeapVar(v, ptr Addr) {
 
 			prevAlloc = alloc
 		}
-
-		log.Println(ptr, g.heapPtrs, g.heapVarAllocs)
 	}
 }
 
@@ -452,7 +449,11 @@ func (r *Runtime) memzero(dst Addr, size Size) error {
 	return nil
 }
 
-func (r *Runtime) gc() error {
+func (r *Runtime) printMemUsage() {
+	log.Printf("MEM: %d/%d heap, %d/%d str", r.heapIndex-r.heapStart, r.heapEnd-r.heapStart, r.strHeapIndex-r.strHeapStart, r.strHeapEnd-r.strHeapStart)
+}
+
+func (r *Runtime) gc(size Size) error {
 	gc := gcState{
 		heapAllocs: r.heapAllocs,
 		heapStart:  r.heapStart,
@@ -464,7 +465,8 @@ func (r *Runtime) gc() error {
 		strHeapIndex: r.strHeapIndex,
 	}
 
-	if float64(gc.heapIndex) < float64(gc.heapEnd)*0.8 && float64(gc.strHeapIndex) < float64(gc.strHeapEnd)*0.8 {
+	if float64(gc.heapIndex+Addr(size)-gc.heapStart)/float64(gc.heapEnd-gc.heapStart) < 1 &&
+		float64(gc.strHeapIndex+1-gc.strHeapStart)/float64(gc.strHeapEnd-gc.strHeapStart) < 1 {
 		return nil
 	}
 
@@ -939,7 +941,7 @@ func (r *Runtime) storeStr(addr compiler.Addr, val String) error {
 }
 
 func (r *Runtime) allocStr(val String) (Addr, error) {
-	err := r.gc()
+	err := r.gc(0)
 	if err != nil {
 		return 0, err
 	}
@@ -961,14 +963,19 @@ func (r *Runtime) allocStr(val String) (Addr, error) {
 }
 
 func (r *Runtime) alloc(size Size) (Addr, error) {
+	err := r.gc(size)
+	if err != nil {
+		return 0, err
+	}
+
 	addr := r.heapIndex
 	r.heapIndex += Addr(size)
 	r.heapAllocs = append(r.heapAllocs, r.heapIndex)
-	if r.heapIndex > Addr(len(r.memPages)*PageSize) {
+	if r.heapIndex > r.heapEnd {
 		return 0, fmt.Errorf("out of memory")
 	}
 
-	err := r.memzero(addr, size)
+	err = r.memzero(addr, size)
 	if err != nil {
 		return 0, err
 	}
@@ -1265,6 +1272,8 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 	}
 
+	r.printMemUsage()
+
 	return nil
 }
 
@@ -1495,11 +1504,6 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				return err
 			}
 		case compiler.Alc:
-			err = r.gc()
-			if err != nil {
-				return err
-			}
-
 			size, err := r.load(code.Size)()
 			if err != nil {
 				return err
@@ -1536,11 +1540,6 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			}
 
 			if sliceLen == sliceCap {
-				err = r.gc()
-				if err != nil {
-					return err
-				}
-
 				if sliceCap == 0 {
 					sliceCap = 1
 				} else {
