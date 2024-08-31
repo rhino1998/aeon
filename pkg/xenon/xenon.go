@@ -83,8 +83,8 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	var xeCtx xenonContext
 	xeCtx.PageSize = 65535
 	xeCtx.NumCodePages = (len(prog.Bytecode()) + xeCtx.PageSize) / xeCtx.PageSize
-	xeCtx.NumMemPages = 10
-	xeCtx.NumStrPages = 10
+	xeCtx.NumMemPages = 1
+	xeCtx.NumStrPages = 1
 	xeCtx.NumRegisters = prog.Registers()
 	xeCtx.MaxLoadDepth = 5
 	xeCtx.GlobalSize = int(prog.GlobalSize())
@@ -209,6 +209,12 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		},
 		"sub": func(a, b int) int {
 			return a - b
+		},
+		"mul": func(a, b int) int {
+			return a * b
+		},
+		"div": func(a, b int) int {
+			return a / b
 		},
 	}
 

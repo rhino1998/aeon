@@ -2,25 +2,39 @@ package main
 
 extern func itoa(x int) string
 
+type list struct {
+  head *node
+}
+
+func (l *list) PushBack(val int) {
+  if l.head == nil {
+    l.head = new(node)
+    l.head.val = val
+  } else {
+    l.head.pushBack(val)
+  }
+}
+
+type node struct {
+  val int
+  next *node
+}
+
+func (n *node) pushBack(val int) {
+  if n.next == nil {
+    n2 := new(node)
+    n2.val = val
+    n.next = n2
+  } else {
+    n.next.pushBack(val)
+  }
+}
+
 #init
 func main() {
-  z := make([]int, 100)
-  for i := 0; i < 400000; i++ {
-    z = make([]int, 100)
-  }
+  var l list
 
-  y := make([]int, 0, 1)
-  for i := 0; i < 5120; i++ {
-    y = append(y, i)
-  }
-
-  for i := 0; i < 40000; i++ {
-    z = make([]int, i)
-  }
-
-  for i := 0; i < len(y); i++ {
-    if y[i] != i {
-      print((itoa(i)) + " !=  " + itoa(y[i]))
-    }
+  for i := 0; i < 100; i++ {
+    l.PushBack(i)
   }
 }

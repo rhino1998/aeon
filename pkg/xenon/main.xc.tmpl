@@ -30,7 +30,9 @@ function @__builtin_cos($n:number):number
 	return cos($n)
 
 ; Memory Layout
-const $PAGE_SIZE = {{.PageSize}}
+
+{{$PageSize := .PageSize}}
+const $PAGE_SIZE = {{$PageSize}}
 
 {{range $page := loop 0 .NumCodePages -}}
 array $aeon_code_page_{{$page}}:text
@@ -49,36 +51,26 @@ function @aeon_code_init()
 	{{range $addr, $bc := .Code}}$aeon_code_page_{{$addr.Page}}.{{$addr.Addr}} = "{{$bc}}"{{"\n\t"}}{{end}}
 
 function @aeon_code($addr:number):text
-	var $page = @aeon_trunc($addr / $PAGE_SIZE)
-	var $pageAddr = @aeon_trunc($addr % $PAGE_SIZE)
+	var $pageAddr = $addr % $PAGE_SIZE
 	{{range $page := loop 0 .NumCodePages}}
-	if ($page == {{$page}})
+	if ($addr < {{mul (add $page 1) $PageSize}})
 		return $aeon_code_page_{{$page}}.$pageAddr
 	{{ end }}
-
-function @aeon_reg_load($reg:number):number
-	return $aeon_reg.$reg
-
-function @aeon_reg_store($reg:number, $v:number)
-	$aeon_reg.$reg = $v
 
 function @aeon_reg_init()
 	$aeon_reg.fill({{.NumRegisters}}, 0)
 
 function @aeon_mem_load($addr:number):number
-	var $page = floor($addr / $PAGE_SIZE)
 	var $pageAddr = $addr % $PAGE_SIZE
 	{{range $page := loop 0 .NumMemPages}}
-	if ($page == {{$page}})
+	if ($addr < {{mul (add $page 1) $PageSize}})
 		return $aeon_mem_page_{{$page}}.$pageAddr
 	{{end}}
 
 function @aeon_mem_store($addr:number, $v:number):text
-	var $page = floor($addr / $PAGE_SIZE)
 	var $pageAddr = $addr % $PAGE_SIZE
-
 	{{range $page := loop 0 .NumMemPages}}
-	if ($page == {{$page}})
+	if ($addr < {{mul (add $page 1) $PageSize}})
 		$aeon_mem_page_{{$page}}.$pageAddr = $v
 	{{end}}
 
@@ -120,7 +112,7 @@ var $aeon_heap_start:number
 var $aeon_heap_index:number
 
 function @aeon_heap_init()
-	$aeon_heap_start = @aeon_trunc({{.NumMemPages}} * {{.PageSize}} / 2)
+	$aeon_heap_start = {{div (mul .NumMemPages $PageSize) 2}}
 	$aeon_heap_index = $aeon_heap_start
 
 function @aeon_heap_alloc($size:number):number
@@ -140,12 +132,11 @@ array $aeon_op_arg_stack:number
 
 var $aeon_numbers = "0123456789"
 
-function @aeon_load_internal($op:text):number
+function @aeon_load_internal($op:text, $limit:number):number
 	var $index = 0
 	var $arg1 = 0
 	var $arg2 = 0
-	var $sign = 0
-	while ($index < size($op))
+	while ($index < $limit)
 		var $k = $op.$index
 		$index++
 		if ($k == "F")
@@ -154,14 +145,13 @@ function @aeon_load_internal($op:text):number
 			$aeon_op_arg_stack.append(1)
 		elseif ($k == "I")
 			var $base = $index
-			while ($op.$index != "I")
-				$index++
+			$index += find(substring($op, $base, -1), "I")
 			$aeon_op_arg_stack.append(substring($op, $base, $index-$base))
 			$index++
 		elseif ($k == "R")
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append(@aeon_reg_load($arg1))
+			$aeon_op_arg_stack.append($aeon_reg.$arg1)
 		elseif ($k == "@")
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
@@ -235,13 +225,13 @@ function @aeon_load_internal($op:text):number
 	return $ret
 
 function @aeon_load($op:text):number
-	var $ret = @aeon_load_internal($op)
+	var $ret = @aeon_load_internal($op, size($op))
 	{{if .Debug}}@debug(text("load {} -> {}", $op, $ret)){{end}}
 	return $ret
 
 function @aeon_load_addr($op:text):number
 	if (last($op) == "@")
-		return @aeon_load_internal(substring($op, 0, size($op)-1))
+		return @aeon_load_internal($op, size($op)-1)
 	else
 		@__builtin_panic(text("bad operand for load addr {}", $op))
 
@@ -265,11 +255,11 @@ function @aeon_load_field($op:text, $offset:number):number
 
 function @aeon_store($op:text, $v:number)
 	if (last($op) == "R")
-		var $reg = @aeon_load_internal(substring($op, 0, size($op)-1))
+		var $reg = @aeon_load_internal($op, size($op)-1)
 		{{if .Debug}}@debug(text("store {} -> R{} = {}", $op, $reg, $v)){{end}}
-		@aeon_reg_store($reg, $v)
+		$aeon_reg.$reg = $v
 	elseif (last($op) == "@")
-		var $addr = @aeon_load_internal(substring($op, 0, size($op)-1))
+		var $addr = @aeon_load_internal($op, size($op)-1)
 		{{if .Debug}}@debug(text("store {} -> @{} = {}", $op, $addr, $v)){{end}}
 		@aeon_mem_store($addr, $v)
 	else

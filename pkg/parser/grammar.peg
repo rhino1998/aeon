@@ -433,7 +433,7 @@ MethodDeclaration <- "func" _ '(' _ receiver:Receiver _ ')' _ name:Identifier '(
   }, nil
 }
 
-StatementList <- __ stmt:Statement __ rest:StatementList? __ {
+StatementList <- __ stmt:Statement nl rest:StatementList? __ {
   if stmt == nil {
     return rest, nil
   }
@@ -547,7 +547,7 @@ ParenthesizedExpr <- '(' _ expr:Expr _ ')' {
   }, nil
 }
 
-IntLiteral <- '-'? ( [0-9_]+ / ("0x" [0-9a-f_]+) / ("0o" [0-7_]) / ("0b" [0-1_])) {
+IntLiteral <- '-'? ( ("0x" [0-9a-f_]+) / ("0o" [0-7_]) / ("0b" [0-1_]) / ([0-9_]+)) {
   i, err := strconv.ParseInt(string(c.text), 0, 64)
   if err != nil {
     return 0, err
@@ -762,7 +762,7 @@ MaybeBareTupleExpr <- expr:Expr _ !',' {
   return expr, nil
 }/ BareTupleExpr
 
-BareTupleExpr <- __ args:BareTupleArgumentList _ {
+BareTupleExpr <- _ args:BareTupleArgumentList _ {
   tuple := TupleExpr{
 		Elems: maybeSlice[Expr](args),
 

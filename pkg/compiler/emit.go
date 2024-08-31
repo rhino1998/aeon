@@ -73,7 +73,7 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 		return err
 	}
 
-	prog.bytecode.OptimizeOperands()
+	// prog.bytecode.OptimizeOperands()
 
 	// for i, bc := range prog.bytecode {
 	// 	log.Printf("%02x: %v", i, bc)
@@ -863,7 +863,12 @@ func (c *Compiler) compileBCZeroValue(ctx context.Context, prog *Program, pos pa
 		}
 		return nil, scope.newImmediate(imm), nil
 	case *PointerType:
-		return nil, scope.newImmediate(Int(0)), nil
+		return nil, &Location{
+			Kind:    LocationKindConstant,
+			Name:    fmt.Sprintf("(%s)(nil)", typ),
+			Type:    typ,
+			Operand: ImmediateOperand(Int(0)),
+		}, nil
 	case *StructType:
 		var offset Size
 		for _, field := range typ.Fields() {

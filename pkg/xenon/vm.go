@@ -205,6 +205,7 @@ func (g *gcState) addHeapVar(v, ptr Addr) {
 		for _, alloc := range g.heapAllocs {
 			if ptr < alloc {
 				g.heapVarAllocs = append(g.heapVarAllocs, prevAlloc)
+				log.Println("adding", v, ptr, prevAlloc)
 				break
 			}
 
@@ -682,13 +683,18 @@ func (gc *gcState) compact(r *Runtime) error {
 		alloc := gc.heapUsedAlloc[i]
 		size := gc.heapUsedSize[i]
 
-		index := slices.Index(gc.heapVarAllocs, alloc)
-		if index != -1 {
+		for index := range gc.heapVarAllocs {
+			if gc.heapVarAllocs[index] != alloc {
+				continue
+			}
+
 			varAddr := gc.heapVars[index]
 			varVal, err := r.loadAddr(varAddr)
 			if err != nil {
 				return err
 			}
+
+			log.Println("moving", alloc, varAddr, varVal, gc.heapIndex, varVal-float64(alloc))
 
 			err = r.storeAddr(varAddr, float64(gc.heapIndex)+(varVal-float64(alloc)))
 			if err != nil {
@@ -772,6 +778,8 @@ func (r *Runtime) toString(typ float64, value float64) (string, error) {
 		}
 
 		return string(str), nil
+	case compiler.KindPointer:
+		return fmt.Sprintf("%d", int(value)), nil
 	default:
 		return fmt.Sprintf("<unhandled type: %d>", int(typ)), nil
 	}
@@ -979,8 +987,6 @@ func (r *Runtime) alloc(size Size) (Addr, error) {
 	if err != nil {
 		return 0, err
 	}
-
-	// TODO: garbage collection
 
 	return addr, nil
 }

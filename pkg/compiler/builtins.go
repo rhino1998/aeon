@@ -496,7 +496,7 @@ func (b builtinNew) Compile(ctx context.Context, c *Compiler, prog *Program, pos
 	}
 
 	var bc BytecodeSnippet
-	bc.Alloc(dst, scope.newImmediate(Int(ResolveType(args[0].Type()).Size())))
+	bc.Alloc(dst, scope.newImmediate(Int(ResolveType(args[0].Type()).((*TypeType)).Type.Size())))
 
 	return bc, dst, nil
 }

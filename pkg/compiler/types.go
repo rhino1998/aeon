@@ -237,6 +237,10 @@ func typesEqual(t1, t2 Type) bool {
 		return false
 	}
 
+	if t1.Size() != t2.Size() {
+		return false
+	}
+
 	switch t1 := t1.(type) {
 	case Nil:
 		return t1 == t2
@@ -310,6 +314,25 @@ func typesEqual(t1, t2 Type) bool {
 
 			if !TypesEqual(t1.Return, t2.Return) {
 				return false
+			}
+
+			return true
+		default:
+			return false
+		}
+	case *StructType:
+		switch t2 := t2.(type) {
+		case *StructType:
+			t1f := t1.Fields()
+			t2f := t2.Fields()
+			if len(t1f) != len(t2f) {
+				return false
+			}
+
+			for i := range len(t1f) {
+				if !TypesEqual(t1f[i].Type, t2f[i].Type) {
+					return false
+				}
 			}
 
 			return true
@@ -400,6 +423,7 @@ func IsTypeResolvable(typ Type) bool {
 
 		return true
 	case *StructType:
+		return true
 		for _, field := range typ.Fields() {
 			if !IsTypeResolvable(field.Type) {
 				return false
@@ -412,7 +436,6 @@ func IsTypeResolvable(typ Type) bool {
 	default:
 		return false
 	}
-
 }
 
 type TypeKind Kind
