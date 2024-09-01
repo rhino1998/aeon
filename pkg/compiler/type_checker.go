@@ -4,6 +4,10 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/rhino1998/aeon/pkg/compiler/air"
+	"github.com/rhino1998/aeon/pkg/compiler/kinds"
+	"github.com/rhino1998/aeon/pkg/compiler/operators"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
@@ -34,7 +38,7 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 			errs.Add(err)
 		}
 
-		typ.underlying = newTyp
+		typ.SetUnderlying(newTyp)
 	}
 
 	for _, g := range pkg.Globals() {
@@ -58,22 +62,6 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 		}
 	}
 
-	for _, typ := range pkg.DerivedTypes() {
-		for _, m := range typ.MethodFunctions() {
-			err := c.resolveFunctionTypes(m)
-			if err != nil {
-				errs.Add(err)
-			}
-		}
-
-		for _, m := range typ.PtrMethodFunctions() {
-			err := c.resolveFunctionTypes(m)
-			if err != nil {
-				errs.Add(err)
-			}
-		}
-	}
-
 	return nil
 }
 
@@ -92,17 +80,17 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 		errs.Add(err)
 	}
 
-	if f.Receiver().Type().Kind() == KindUnknown {
+	if f.Receiver().Type().Kind() == kinds.Unknown {
 		errs.Add(f.WrapError(fmt.Errorf("function %q has unknown receiver %q of type %s", f.Name(), f.Receiver().Name(), f.Receiver().Type())))
 	}
 
 	for _, param := range f.Parameters() {
-		param.typ, err = c.resolveTypes(f.Position, param.Type())
+		param.typ, err = c.resolveTypes(param.Position, param.Type())
 		if err != nil {
 			errs.Add(err)
 		}
 
-		if param.Type().Kind() == KindUnknown {
+		if param.Type().Kind() == kinds.Unknown {
 			errs.Add(f.WrapError(fmt.Errorf("function %q has unknown parameter %q of type %s", f.Name(), param.Name(), param.Type())))
 		}
 	}
@@ -112,7 +100,7 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 		errs.Add(err)
 	}
 
-	if f.Return().Kind() == KindUnknown {
+	if f.Return().Kind() == kinds.Unknown {
 		errs.Add(f.WrapError(fmt.Errorf("function %q has unknown return type %s", f.Name(), f.Return())))
 	}
 
@@ -126,33 +114,28 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 	return nil
 }
 
-func (c *Compiler) resolveTypes(pos parser.Position, typ Type) (_ Type, err error) {
+func (c *Compiler) resolveTypes(pos parser.Position, typ types.Type) (_ types.Type, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
 	}()
 
-	if !IsTypeResolvable(typ) {
-		errs.Add(fmt.Errorf("type %s is unknown", typ))
+	if !types.IsResolvable(typ) {
+		errs.Add(pos.WrapError(fmt.Errorf("type %s is unknown", typ)))
 	}
 
 	switch typ := typ.(type) {
-	case *ArrayType:
-		err := typ.computeAndValidateLength(nil)
-		if err != nil {
-			errs.Add(pos.WrapError(err))
-		}
-
+	case *types.Array:
 		return typ, nil
-	case TypeKind:
+	case types.Kind:
 		switch typ.Kind() {
-		case KindInt:
+		case kinds.Int:
 			return TypeInt, nil
-		case KindFloat:
+		case kinds.Float:
 			return TypeFloat, nil
-		case KindString:
+		case kinds.String:
 			return TypeString, nil
-		case KindBool:
+		case kinds.Bool:
 			return TypeBool, nil
 		default:
 			return typ, nil
@@ -169,14 +152,14 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 	}()
 
 	if g.Type() != nil {
-		typ := DereferenceType(g.Type())
+		typ := types.Dereference(g.Type())
 
 		g.typ, err = c.resolveTypes(g.Position, typ)
 		if err != nil {
 			return err
 		}
 
-		if !IsTypeResolvable(typ) {
+		if !types.IsResolvable(typ) {
 			errs.Add(g.WrapError(fmt.Errorf("type %s is unknown", typ)))
 		}
 
@@ -204,7 +187,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 	switch stmt := stmt.(type) {
 	case *VarStatement:
 		if stmt.Type != nil {
-			typ := DereferenceType(stmt.Type)
+			typ := types.Dereference(stmt.Type)
 
 			stmt.Type, err = c.resolveTypes(stmt.Position, typ)
 			if err != nil {
@@ -221,21 +204,21 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 				errs.Add(err)
 			}
 
-			if expr.Type() == TypeVoid {
+			if expr.Type() == types.Void {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot declare variable of type void")))
 			}
 
-			if expr.Type().Kind() == KindType {
+			if expr.Type().Kind() == kinds.Type {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot use type as a value")))
 			}
 
-			if !IsAssignableTo(expr.Type(), stmt.Type) {
+			if !types.IsAssignableTo(expr.Type(), stmt.Type) {
 				errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to variable %q of type %v", expr.Type(), stmt.Variable.Name(), stmt.Type)))
 			}
 
-			if stmt.Type.Kind() == KindInterface && expr.Type().Kind() != KindInterface {
-				stmt.Expression = &InterfaceTypeCoercionExpression{
-					Interface:  ResolveType(stmt.Type).(*InterfaceType),
+			if stmt.Type.Kind() == kinds.Interface && expr.Type().Kind() != kinds.Interface {
+				stmt.Expression = &InterfaceCoercionExpression{
+					Interface:  types.Resolve(stmt.Type).(*types.Interface),
 					Expression: expr,
 				}
 			} else {
@@ -251,26 +234,27 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			errs.Add(err)
 		}
 
-		if expr.Type() == TypeVoid {
+		if expr.Type() == types.Void {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot declare variable of type void")))
 		}
 
-		if expr.Type().Kind() == KindType {
+		if expr.Type().Kind() == kinds.Type {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot use type as a value")))
 		}
 
 		stmt.Expression = expr
 
 		if len(stmt.Variables) > 1 {
-			tupleType, ok := ResolveType(expr.Type()).(*TupleType)
+			tupleType, ok := types.Resolve(expr.Type()).(*types.Tuple)
 			if !ok {
 				errs.Add(stmt.WrapError(fmt.Errorf("cannot destructure non-tuple type %s", expr.Type())))
 			} else {
 				for i := range stmt.Variables {
-					var varType Type = UnknownType
+					var varType types.Type = types.Unknown
 					if i < len(tupleType.Elems()) {
 						varType = tupleType.Elems()[i]
 					}
+
 					stmt.Variables[i].SetType(varType)
 				}
 			}
@@ -299,7 +283,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			errs.Add(stmt.WrapError(err))
 		}
 
-		_, err = validateBinaryExpression(left.Type(), op, right.Type())
+		_, err = air.ValidateBinaryExpression(left.Type(), op, right.Type())
 		if err != nil {
 			errs.Add(stmt.WrapError(err))
 		}
@@ -320,13 +304,13 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		stmt.Right = right
 
-		if !IsAssignableTo(right.Type(), left.Type()) {
+		if !types.IsAssignableTo(right.Type(), left.Type()) {
 			errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to %q of type %v", right.Type(), left, left.Type())))
 		}
 
-		if stmt.Left.Type().Kind() == KindInterface && stmt.Right.Type().Kind() != KindInterface {
-			stmt.Right = &InterfaceTypeCoercionExpression{
-				Interface:  ResolveType(stmt.Left.Type()).(*InterfaceType),
+		if stmt.Left.Type().Kind() == kinds.Interface && stmt.Right.Type().Kind() != kinds.Interface {
+			stmt.Right = &InterfaceCoercionExpression{
+				Interface:  types.Resolve(stmt.Left.Type()).(*types.Interface),
 				Expression: stmt.Right,
 			}
 		}
@@ -339,7 +323,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 		}
 		stmt.Expression = expr
 
-		_, err = validatePostfixExpression(expr.Type(), stmt.Operator)
+		_, err = air.ValidatePostfixExpression(expr.Type(), stmt.Operator)
 		if err != nil {
 			errs.Add(stmt.WrapError(err))
 		}
@@ -347,12 +331,12 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 		return nil
 	case *IfStatement:
 		if stmt.Condition != nil {
-			cond, err := c.resolveExpressionTypes(stmt.Condition, TypeKind(KindBool))
+			cond, err := c.resolveExpressionTypes(stmt.Condition, types.Kind(kinds.Bool))
 			if err != nil {
 				errs.Add(err)
 			}
 
-			if cond.Type().Kind() != KindBool {
+			if cond.Type().Kind() != kinds.Bool {
 				errs.Add(cond.WrapError(fmt.Errorf("cannot use expression of type %v as a condition", cond.Type())))
 			}
 
@@ -383,12 +367,12 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 		}
 
 		if stmt.Condition != nil {
-			cond, err := c.resolveExpressionTypes(stmt.Condition, TypeKind(KindBool))
+			cond, err := c.resolveExpressionTypes(stmt.Condition, types.Kind(kinds.Bool))
 			if err != nil {
 				errs.Add(err)
 			}
 
-			if cond.Type().Kind() != KindBool {
+			if cond.Type().Kind() != kinds.Bool {
 				errs.Add(cond.WrapError(fmt.Errorf("cannot use expression of type %v as a condition", cond.Type())))
 			}
 
@@ -411,7 +395,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		return nil
 	case *ReturnStatement:
-		if stmt.Expression == nil && stmt.Function.Return() != TypeVoid {
+		if stmt.Expression == nil && stmt.Function.Return() != types.Void {
 			errs.Add(stmt.WrapError(fmt.Errorf("expected return value of type %s", stmt.Function.Return())))
 		}
 
@@ -475,7 +459,7 @@ func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to binary expression"))
 	case *UnaryExpression:
 		switch expr.Operator {
-		case OperatorDereference:
+		case operators.Dereference:
 			subExpr, err := c.resolveExpressionTypes(expr.Expression, nil)
 			if err != nil {
 				errs.Add(err)
@@ -509,14 +493,14 @@ func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
 	}
 }
 
-func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ Type) (_ Expression, err error) {
+func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ types.Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
 	}()
 
-	switch typ := ResolveType(typ).(type) {
-	case *TupleType:
+	switch typ := types.Resolve(typ).(type) {
+	case *types.Tuple:
 		index, err := strconv.Atoi(expr.Key)
 		if err != nil {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot index tuple with %q", expr.Key)))
@@ -527,53 +511,53 @@ func (c *Compiler) resolveLHSDotExpressionReceiverTypes(expr *DotExpression, typ
 		}
 
 		return expr, nil
-	case *StructType:
+	case *types.Struct:
 		if !typ.HasField(expr.Key) {
 			errs.Add(expr.WrapError(fmt.Errorf("struct does not have field %q", expr.Key)))
 		}
 
 		return expr, nil
-	case *PointerType:
+	case *types.Pointer:
 		return c.resolveLHSDotExpressionReceiverTypes(expr, typ.Pointee())
 	default:
 		return expr, expr.WrapError(fmt.Errorf("cannot dot index assign receiver type: %s", expr.Receiver.Type()))
 	}
 }
 
-func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(expr *IndexExpression, typ Type) (_ Expression, err error) {
+func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(expr *IndexExpression, typ types.Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
 	}()
 
 	switch typ := typ.(type) {
-	case *ArrayType:
+	case *types.Array:
 		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		if index.Type().Kind() != KindInt {
+		if index.Type().Kind() != kinds.Int {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot index type %s with non-integer type %s", typ, index.Type())))
 		}
 
 		expr.Index = index
 
 		return expr, nil
-	case *SliceType:
+	case *types.Slice:
 		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		if index.Type().Kind() != KindInt {
+		if index.Type().Kind() != kinds.Int {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot index type %s with non-integer type %s", typ, index.Type())))
 		}
 
 		expr.Index = index
 
 		return expr, nil
-	case *MapType:
+	case *types.Map:
 		index, err := c.resolveExpressionTypes(expr.Index, typ.Key())
 		if err != nil {
 			errs.Add(err)
@@ -587,7 +571,7 @@ func (c *Compiler) resolveLHSIndexExpressionReceiverTypes(expr *IndexExpression,
 	}
 }
 
-func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expression, err error) {
+func (c *Compiler) resolveExpressionTypes(expr Expression, bound types.Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -596,9 +580,9 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 	switch expr := expr.(type) {
 	case *Literal:
 		switch val := expr.value.(type) {
-		case Int:
+		case air.Int:
 			if bound == nil {
-				if IsUnspecified(expr.Type()) {
+				if types.IsUnspecified(expr.Type()) {
 					return &Literal{
 						value: expr.value,
 						typ:   TypeInt,
@@ -611,20 +595,20 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			switch bound.Kind() {
-			case KindFloat:
-				if IsUnspecified(bound) {
+			case kinds.Float:
+				if types.IsUnspecified(bound) {
 					bound = TypeFloat
 				}
 
 				expr.typ = bound
 				return &Literal{
-					value: Float(expr.value.(Int)),
+					value: air.Float(expr.value.(air.Int)),
 					typ:   bound,
 
 					Position: expr.Position,
 				}, nil
-			case KindInt:
-				if IsUnspecified(bound) {
+			case kinds.Int:
+				if types.IsUnspecified(bound) {
 					bound = TypeInt
 				}
 
@@ -634,7 +618,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 					Position: expr.Position,
 				}, nil
-			case KindInterface:
+			case kinds.Interface:
 				err := c.checkInterfaceTypeCoercion(expr, bound)
 				if err != nil {
 					errs.Add(err)
@@ -649,9 +633,9 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			default:
 				return expr, expr.WrapError(fmt.Errorf("cannot coerce int literal into %s", bound))
 			}
-		case Float:
+		case air.Float:
 			if bound == nil {
-				if IsUnspecified(expr.Type()) {
+				if types.IsUnspecified(expr.Type()) {
 					return &Literal{
 						value: expr.value,
 						typ:   TypeFloat,
@@ -664,8 +648,8 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			switch bound.Kind() {
-			case KindFloat:
-				if IsUnspecified(bound) {
+			case kinds.Float:
+				if types.IsUnspecified(bound) {
 					bound = TypeFloat
 				}
 
@@ -676,18 +660,18 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 					Position: expr.Position,
 				}, nil
-			case KindInt:
-				if IsUnspecified(bound) {
+			case kinds.Int:
+				if types.IsUnspecified(bound) {
 					bound = TypeInt
 				}
 
 				return &Literal{
-					value: Int(expr.value.(Float)),
+					value: air.Int(expr.value.(air.Float)),
 					typ:   bound,
 
 					Position: expr.Position,
 				}, nil
-			case KindInterface:
+			case kinds.Interface:
 				err := c.checkInterfaceTypeCoercion(expr, bound)
 				if err != nil {
 					errs.Add(err)
@@ -702,9 +686,9 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			default:
 				return expr, expr.WrapError(fmt.Errorf("cannot coerce float literal into %s", bound))
 			}
-		case String:
+		case air.String:
 			if bound == nil {
-				if IsUnspecified(expr.Type()) {
+				if types.IsUnspecified(expr.Type()) {
 					return &Literal{
 						value: expr.value,
 						typ:   TypeString,
@@ -717,8 +701,8 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			switch bound.Kind() {
-			case KindString:
-				if IsUnspecified(bound) {
+			case kinds.String:
+				if types.IsUnspecified(bound) {
 					bound = TypeString
 				}
 
@@ -729,7 +713,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 					Position: expr.Position,
 				}, nil
-			case KindInterface:
+			case kinds.Interface:
 				err := c.checkInterfaceTypeCoercion(expr, bound)
 				if err != nil {
 					errs.Add(err)
@@ -744,9 +728,9 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			default:
 				return expr, expr.WrapError(fmt.Errorf("cannot coerce string literal into %s", bound))
 			}
-		case Bool:
+		case air.Bool:
 			if bound == nil {
-				if IsUnspecified(expr.Type()) {
+				if types.IsUnspecified(expr.Type()) {
 					return &Literal{
 						value: expr.value,
 						typ:   TypeBool,
@@ -759,8 +743,8 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			switch bound.Kind() {
-			case KindBool:
-				if IsUnspecified(bound) {
+			case kinds.Bool:
+				if types.IsUnspecified(bound) {
 					bound = TypeBool
 				}
 				expr.typ = bound
@@ -770,7 +754,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 					Position: expr.Position,
 				}, nil
-			case KindInterface:
+			case kinds.Interface:
 				err := c.checkInterfaceTypeCoercion(expr, bound)
 				if err != nil {
 					errs.Add(err)
@@ -789,7 +773,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			return expr, expr.WrapError(fmt.Errorf("unhandled literal type %T", val))
 		}
 	case *TypeExpression:
-		if expr.typ.Kind() == KindUnknown {
+		if expr.typ.Kind() == kinds.Unknown {
 			errs.Add(fmt.Errorf("type expression %s is unknown", expr.typ))
 		}
 
@@ -800,18 +784,21 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		switch sym := sym.(type) {
 		case nil:
 			return expr, expr.WrapError(fmt.Errorf("undefined name %s", expr.Name()))
-		case Nil:
-			if bound == nil {
-				bound = Nil{}
-			}
-			return &NilExpression{
-				typ: bound,
-
-				Position: expr.Position,
-			}, nil
 		case *Variable:
 			return expr, nil
-		case Type:
+		case types.Type:
+			if sym == TypeNil {
+				if bound == nil {
+					bound = TypeNil
+				}
+
+				return &NilExpression{
+					typ: bound,
+
+					Position: expr.Position,
+				}, nil
+			}
+
 			return &TypeExpression{
 				typ: sym,
 
@@ -858,7 +845,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		expr.Right = right
 
-		_, err = validateBinaryExpression(expr.Left.Type(), expr.Operator, expr.Right.Type())
+		_, err = air.ValidateBinaryExpression(expr.Left.Type(), expr.Operator, expr.Right.Type())
 		if err != nil {
 			errs.Add(expr.WrapError(err))
 		}
@@ -866,10 +853,10 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		return expr, nil
 	case *UnaryExpression:
 		switch expr.Operator {
-		case OperatorDereference:
-			bound = NewPointerType(bound)
-		case OperatorAddress:
-			if ptr, ok := bound.(*PointerType); ok {
+		case operators.Dereference:
+			bound = types.NewPointer(bound)
+		case operators.Address:
+			if ptr, ok := bound.(*types.Pointer); ok {
 				bound = ptr.Pointee()
 			}
 		}
@@ -880,20 +867,20 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		}
 
 		switch subType := subExpr.Type().(type) {
-		case *TypeType:
-			if expr.Operator != OperatorDereference {
+		case *types.TypeType:
+			if expr.Operator != operators.Dereference {
 				errs.Add(expr.WrapError(fmt.Errorf("invalid operator %s on type expression", expr.Operator)))
 			}
 
 			return &TypeExpression{
-				typ: NewPointerType(subType.Type),
+				typ: types.NewPointer(subType.Type),
 
 				Position: expr.Position,
 			}, nil
 		default:
 			expr.Expression = subExpr
 
-			_, err = validateUnaryExpression(expr.Expression.Type(), expr.Operator)
+			_, err = air.ValidateUnaryExpression(expr.Expression.Type(), expr.Operator)
 			if err != nil {
 				errs.Add(expr.WrapError(err))
 			}
@@ -908,12 +895,12 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		expr.Function = fExpr
 
-		switch ftype := ResolveType(expr.Function.Type()).(type) {
-		case *FunctionType:
-			var concreteParams []Type
-			var variadicParam *VariadicType
+		switch ftype := types.Resolve(expr.Function.Type()).(type) {
+		case *types.Function:
+			var concreteParams []types.Type
+			var variadicParam *types.Variadic
 			for _, param := range ftype.Parameters {
-				if varType, ok := param.(*VariadicType); ok {
+				if varType, ok := param.(*types.Variadic); ok {
 					variadicParam = varType
 				} else {
 					concreteParams = append(concreteParams, param)
@@ -932,13 +919,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 					errs.Add(err)
 				}
 
-				if !IsAssignableTo(arg.Type(), ftype.Parameters[i]) {
+				if !types.IsAssignableTo(arg.Type(), ftype.Parameters[i]) {
 					errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in argument %d in function call", arg.Type(), ftype.Parameters[i], i)))
 				}
 
-				if ftype.Parameters[i].Kind() == KindInterface && arg.Type().Kind() != KindInterface {
-					expr.Args[i] = &InterfaceTypeCoercionExpression{
-						Interface:  ResolveType(ftype.Parameters[i]).(*InterfaceType),
+				if ftype.Parameters[i].Kind() == kinds.Interface && arg.Type().Kind() != kinds.Interface {
+					expr.Args[i] = &InterfaceCoercionExpression{
+						Interface:  types.Resolve(ftype.Parameters[i]).(*types.Interface),
 						Expression: arg,
 					}
 				} else {
@@ -947,20 +934,20 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			if variadicParam != nil {
-				if len(expr.Args) > len(concreteParams) && expr.Args[len(concreteParams)].Type().Kind() == KindVariadic {
+				if len(expr.Args) > len(concreteParams) && expr.Args[len(concreteParams)].Type().Kind() == kinds.Variadic {
 					arg, err := c.resolveExpressionTypes(expr.Args[len(concreteParams)], variadicParam)
 					if err != nil {
 						errs.Add(err)
 					}
 
-					if !IsAssignableTo(arg.Type().(*VariadicType).AsSlice(), variadicParam.AsSlice()) {
-						errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in variadic spread argument in function call", arg.Type().(*VariadicType).AsSlice(), variadicParam.AsSlice())))
+					if !types.IsAssignableTo(arg.Type().(*types.Variadic).AsSlice(), variadicParam.AsSlice()) {
+						errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in variadic spread argument in function call", arg.Type().(*types.Variadic).AsSlice(), variadicParam.AsSlice())))
 					}
 
 					expr.Args[len(concreteParams)] = arg
 				} else {
 					for i := len(concreteParams); i < len(expr.Args); i++ {
-						if expr.Args[i].Type().Kind() == KindVariadic {
+						if expr.Args[i].Type().Kind() == kinds.Variadic {
 							errs.Add(expr.Args[i].WrapError(fmt.Errorf("cannot use variadic spread argument %s as invidiual variadic argument %d in function call", expr.Args[i], i)))
 						}
 
@@ -969,13 +956,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 							errs.Add(err)
 						}
 
-						if !IsAssignableTo(arg.Type(), variadicParam.Elem()) {
+						if !types.IsAssignableTo(arg.Type(), variadicParam.Elem()) {
 							errs.Add(arg.WrapError(fmt.Errorf("cannot use type %s as type %s in argument %d in function call", arg.Type(), variadicParam.Elem(), i)))
 						}
 
-						if variadicParam.Elem().Kind() == KindInterface && arg.Type().Kind() != KindInterface {
-							expr.Args[i] = &InterfaceTypeCoercionExpression{
-								Interface:  ResolveType(variadicParam.Elem()).(*InterfaceType),
+						if variadicParam.Elem().Kind() == kinds.Interface && arg.Type().Kind() != kinds.Interface {
+							expr.Args[i] = &InterfaceCoercionExpression{
+								Interface:  types.Resolve(variadicParam.Elem()).(*types.Interface),
 								Expression: arg,
 							}
 						} else {
@@ -986,30 +973,30 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			}
 
 			return expr, nil
-		case *TypeType:
+		case *types.TypeType:
 			if len(expr.Args) != 1 {
 				errs.Add(expr.WrapError(fmt.Errorf("type conversion expects 1 parameter, got %d", len(expr.Args))))
 			}
 
 			switch ftype.Type.Kind() {
-			case KindInterface:
+			case kinds.Interface:
 				arg, err := c.resolveExpressionTypes(expr.Args[0], nil)
 				if err != nil {
 					errs.Add(err)
 				}
 
-				return &InterfaceTypeCoercionExpression{
-					Interface:  ResolveType(ftype.Type).(*InterfaceType),
+				return &InterfaceCoercionExpression{
+					Interface:  types.Resolve(ftype.Type).(*types.Interface),
 					Expression: arg,
 					Position:   expr.Position,
 				}, nil
 			default:
-				arg, err := c.resolveExpressionTypes(expr.Args[0], TypeConversionBound(ftype.Type))
+				arg, err := c.resolveExpressionTypes(expr.Args[0], types.ConversionBound(ftype.Type))
 				if err != nil {
 					errs.Add(err)
 				}
 
-				if !IsConvertibleTo(arg.Type(), ftype.Type) {
+				if !types.IsConvertibleTo(arg.Type(), ftype.Type) {
 					errs.Add(arg.WrapError(fmt.Errorf("cannot convert type %v to %v", arg.Type(), ftype.Type)))
 				}
 
@@ -1039,7 +1026,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		return c.resolveIndexExpressionReceiverTypes(expr, expr.Receiver.Type(), bound)
 	case *TupleExpression:
-		tupleBound, ok := ResolveType(bound).(*TupleType)
+		tupleBound, ok := types.Resolve(bound).(*types.Tuple)
 		if !ok {
 			return expr, expr.WrapError(fmt.Errorf("cannot use tuple literal as %s", bound))
 		}
@@ -1049,7 +1036,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		}
 
 		for i, elem := range expr.Elems {
-			var elemBound Type = UnknownType
+			var elemBound types.Type = types.Unknown
 			if tupleBound != nil && i < len(tupleBound.Elems()) {
 				elemBound = tupleBound.Elems()[i]
 			}
@@ -1059,13 +1046,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				errs.Add(err)
 			}
 
-			if !IsAssignableTo(elem.Type(), elemBound) {
+			if !types.IsAssignableTo(elem.Type(), elemBound) {
 				errs.Add(elem.WrapError(fmt.Errorf("cannot use element of type %s at index %d in tuple literal as %s", elem.Type(), i, elemBound)))
 			}
 
-			if elemBound.Kind() == KindInterface && elem.Type().Kind() != KindInterface {
-				expr.Elems[i] = &InterfaceTypeCoercionExpression{
-					Interface:  ResolveType(elemBound).(*InterfaceType),
+			if elemBound.Kind() == kinds.Interface && elem.Type().Kind() != kinds.Interface {
+				expr.Elems[i] = &InterfaceCoercionExpression{
+					Interface:  types.Resolve(elemBound).(*types.Interface),
 					Expression: elem,
 				}
 			} else {
@@ -1075,14 +1062,6 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		return expr, nil
 	case *TypeLiteralExpression:
-		if arrayType, ok := DereferenceType(expr.Type()).(*ArrayType); ok {
-			numElems := len(expr.Elems)
-			err := arrayType.computeAndValidateLength(&numElems)
-			if err != nil {
-				errs.Add(expr.WrapError(err))
-			}
-		}
-
 		exprType, err := c.resolveTypes(expr.Position, expr.Type())
 		if err != nil {
 			errs.Add(err)
@@ -1090,13 +1069,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		expr.typ = exprType
 
-		var elemBound Type
-		if arrayBound, ok := ResolveType(bound).(*ArrayType); ok {
+		var elemBound types.Type
+		if arrayBound, ok := types.Resolve(bound).(*types.Array); ok {
 			elemBound = arrayBound.Elem()
-		} else if arrayExprType, ok := ResolveType(exprType).(*ArrayType); ok {
+		} else if arrayExprType, ok := types.Resolve(exprType).(*types.Array); ok {
 			elemBound = arrayExprType.Elem()
 		} else {
-			elemBound = UnknownType
+			elemBound = types.Unknown
 		}
 
 		for i, elem := range expr.Elems {
@@ -1105,13 +1084,13 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 				errs.Add(err)
 			}
 
-			if !IsAssignableTo(elem.Type(), elemBound) {
+			if !types.IsAssignableTo(elem.Type(), elemBound) {
 				errs.Add(elem.WrapError(fmt.Errorf("cannot use element of type %s at index %d in array literal as %s", elem.Type(), i, elemBound)))
 			}
 
-			if elemBound.Kind() == KindInterface && elem.Type().Kind() != KindInterface {
-				elem = &InterfaceTypeCoercionExpression{
-					Interface:  ResolveType(elemBound).(*InterfaceType),
+			if elemBound.Kind() == kinds.Interface && elem.Type().Kind() != kinds.Interface {
+				elem = &InterfaceCoercionExpression{
+					Interface:  types.Resolve(elemBound).(*types.Interface),
 					Expression: elem,
 				}
 			}
@@ -1128,10 +1107,10 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 
 		return expr, nil
 	case *SpreadExpression:
-		var subBound Type
+		var subBound types.Type
 		if bound != nil {
-			if bound.Kind() == KindVariadic {
-				subBound = bound.(*VariadicType).AsSlice()
+			if bound.Kind() == kinds.Variadic {
+				subBound = bound.(*types.Variadic).AsSlice()
 			} else {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot spread into non-variadic type %s", bound)))
 			}
@@ -1142,7 +1121,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			errs.Add(err)
 		}
 
-		if !IsAssignableTo(subExpr.Type(), subBound) {
+		if !types.IsAssignableTo(subExpr.Type(), subBound) {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot spread non-slice type %s", subExpr.Type())))
 		}
 
@@ -1151,15 +1130,15 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		return expr, nil
 	case *ErrorReturnExpression:
 		switch expr.Function.Return().Kind() {
-		case KindInterface:
+		case kinds.Interface:
 			if !TypeErrorInterface.ImplementedBy(expr.Function.Return()) {
 				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects function with error compatible return type, got %s", expr.Function.Return())))
 			}
-		case KindTuple:
-			tupleTyp := ResolveType(expr.Function.Return()).(*TupleType)
+		case kinds.Tuple:
+			tupleTyp := types.Resolve(expr.Function.Return()).(*types.Tuple)
 			if len(tupleTyp.Elems()) < 1 {
 				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects function with error compatible return type, got %s", expr.Function.Return())))
-			} else if tupleTyp.Elems()[len(tupleTyp.Elems())-1].Kind() != KindInterface || !TypeErrorInterface.ImplementedBy(tupleTyp.Elems()[len(tupleTyp.Elems())-1]) {
+			} else if tupleTyp.Elems()[len(tupleTyp.Elems())-1].Kind() != kinds.Interface || !TypeErrorInterface.ImplementedBy(tupleTyp.Elems()[len(tupleTyp.Elems())-1]) {
 				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects error-compatible interface type as last element, got %s", tupleTyp.Elems()[1])))
 			}
 		default:
@@ -1174,17 +1153,17 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 		expr.Expr = subExpr
 
 		switch subExpr.Type().Kind() {
-		case KindInterface:
+		case kinds.Interface:
 			if !TypeErrorInterface.ImplementedBy(subExpr.Type()) {
 				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects error type, got %s", subExpr.Type())))
 			}
-		case KindTuple:
-			tupleType, ok := subExpr.Type().(*TupleType)
+		case kinds.Tuple:
+			tupleType, ok := subExpr.Type().(*types.Tuple)
 			if !ok {
 				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects tuple type, got %s", subExpr.Type())))
 			}
 
-			if tupleType.Elems()[len(tupleType.Elems())-1].Kind() != KindInterface || !TypeErrorInterface.ImplementedBy(tupleType.Elems()[len(tupleType.Elems())-1]) {
+			if tupleType.Elems()[len(tupleType.Elems())-1].Kind() != kinds.Interface || !TypeErrorInterface.ImplementedBy(tupleType.Elems()[len(tupleType.Elems())-1]) {
 				errs.Add(expr.WrapError(fmt.Errorf("error return expression expects error-compatible interface type as last element, got %s", tupleType.Elems()[1])))
 			}
 		default:
@@ -1205,19 +1184,23 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound Type) (_ Expres
 			return expr, err
 		}
 
-		if !IsAssignableTo(handlerExpr.Type(), errorHandlerFunctionType) {
+		if !types.IsAssignableTo(handlerExpr.Type(), errorHandlerFunctionType) {
 			errs.Add(expr.WrapError(fmt.Errorf("error handler expression expects value of type %s, got %s", errorHandlerFunctionType, handlerExpr.Type())))
 		}
 
 		expr.Handler = handlerExpr
 
 		return expr, nil
+	case *MethodExpression:
+		return expr, nil
+	case *InterfaceCoercionExpression:
+		return expr, nil
 	default:
-		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker: %s", expr))
+		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker %T: %s", expr, expr))
 	}
 }
 
-func (c *Compiler) resolveCallExpressionReceiverTypes(expr Expression, bound Type) (_ Expression, err error) {
+func (c *Compiler) resolveCallExpressionReceiverTypes(expr Expression, bound types.Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -1249,7 +1232,7 @@ func (c *Compiler) resolveCallExpressionReceiverTypes(expr Expression, bound Typ
 	}
 }
 
-func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound Type) (_ Expression, err error) {
+func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound types.Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -1267,7 +1250,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 	}
 
 	var hasMethods bool
-	if typ, ok := DereferenceType(expr.Receiver.Type()).(*DerivedType); ok && !isNumeric {
+	if typ, ok := types.Dereference(expr.Receiver.Type()).(*types.Derived); ok && !isNumeric {
 		hasMethods = true
 
 		methods := typ.Methods(false)
@@ -1277,18 +1260,18 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 			receiver := expr.Receiver
 
 			for {
-				_, ok := receiver.Type().(*PointerType)
-				if !ok || TypesEqual(receiver.Type(), targetReceiverType) {
+				_, ok := receiver.Type().(*types.Pointer)
+				if !ok || types.Equal(receiver.Type(), targetReceiverType) {
 					break
 				}
 
 				receiver = &UnaryExpression{
 					Expression: receiver,
-					Operator:   OperatorDereference,
+					Operator:   operators.Dereference,
 				}
 			}
 
-			if !TypesEqual(receiver.Type(), targetReceiverType) {
+			if !types.Equal(receiver.Type(), targetReceiverType) {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot call method %q on type %s", expr.Key, typ)))
 			}
 
@@ -1304,10 +1287,10 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 			receiver := expr.Receiver
 			receiver = &UnaryExpression{
 				Expression: receiver,
-				Operator:   OperatorAddress,
+				Operator:   operators.Address,
 			}
 
-			if !TypesEqual(receiver.Type(), targetReceiverType) {
+			if !types.Equal(receiver.Type(), targetReceiverType) {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot call method %q on type %s", expr.Key, typ)))
 			}
 
@@ -1318,13 +1301,13 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 				Position: expr.Position,
 			}, nil
 		}
-	} else if typ, ok := DereferenceType(expr.Receiver.Type()).(*PointerType); ok {
-		if typ, ok := DereferenceType(typ.Pointee()).(*DerivedType); ok && typ.Methods(true).Has(expr.Key) {
+	} else if typ, ok := types.Dereference(expr.Receiver.Type()).(*types.Pointer); ok {
+		if typ, ok := types.Dereference(typ.Pointee()).(*types.Derived); ok && typ.Methods(true).Has(expr.Key) {
 			method, _ := typ.Methods(true).Get(expr.Key)
 			targetReceiverType := method.Receiver
 			receiver := expr.Receiver
 
-			if !TypesEqual(receiver.Type(), targetReceiverType) {
+			if !types.Equal(receiver.Type(), targetReceiverType) {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot call method %q on type %s", expr.Key, typ)))
 			}
 
@@ -1337,10 +1320,10 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 		}
 	}
 
-	switch typ := ResolveType(expr.Receiver.Type()).(type) {
-	case *TupleType:
+	switch typ := types.Resolve(expr.Receiver.Type()).(type) {
+	case *types.Tuple:
 		if isNumeric {
-			if !IsAssignableTo(typ.Elems()[numericKey], bound) {
+			if !types.IsAssignableTo(typ.Elems()[numericKey], bound) {
 				errs.Add(expr.WrapError(fmt.Errorf("cannot use tuple element of type %v at index %d as type %v", typ.Elems()[numericKey], numericKey, bound)))
 			}
 
@@ -1356,7 +1339,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 		}
 
 		return expr, nil
-	case *StructType:
+	case *types.Struct:
 		if !typ.HasField(expr.Key) {
 			if hasMethods {
 				errs.Add(expr.WrapError(fmt.Errorf("type %s no such field or method %q", expr.Type(), expr.Key)))
@@ -1366,11 +1349,11 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 		}
 
 		return expr, nil
-	case *PointerType:
-		switch typ := ResolveType(typ.Pointee()).(type) {
-		case *TupleType:
+	case *types.Pointer:
+		switch typ := types.Resolve(typ.Pointee()).(type) {
+		case *types.Tuple:
 			if isNumeric {
-				if !IsAssignableTo(typ.Elems()[numericKey], bound) {
+				if !types.IsAssignableTo(typ.Elems()[numericKey], bound) {
 					errs.Add(expr.WrapError(fmt.Errorf("cannot use tuple element of type %v at index %d as type %v", typ.Elems()[numericKey], numericKey, bound)))
 				}
 
@@ -1386,7 +1369,7 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 			}
 
 			return expr, nil
-		case *StructType:
+		case *types.Struct:
 			if !typ.HasField(expr.Key) {
 				if hasMethods {
 					errs.Add(expr.WrapError(fmt.Errorf("type %s no such field or method %q", expr.Type(), expr.Key)))
@@ -1399,14 +1382,14 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 		default:
 			return expr, expr.WrapError(fmt.Errorf("cannot dot index receiver type %s", expr.Receiver.Type()))
 		}
-	case *TypeType:
-		_, ok := TypeMethod(typ.Type, expr.Key)
+	case *types.TypeType:
+		_, ok := types.Methods(typ.Type).Get(expr.Key)
 		if !ok {
 			return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ.Type, expr.Key))
 		}
 
 		return expr, nil
-	case *InterfaceType:
+	case *types.Interface:
 		method, ok := typ.Methods().Get(expr.Key)
 		if !ok {
 			return expr, expr.WrapError(fmt.Errorf("type %s has no method %s", typ, expr.Key))
@@ -1423,40 +1406,40 @@ func (c *Compiler) resolveDotExpressionReceiverTypes(expr *DotExpression, bound 
 	}
 }
 
-func (c *Compiler) resolveIndexExpressionReceiverTypes(expr *IndexExpression, typ Type, bound Type) (_ Expression, err error) {
+func (c *Compiler) resolveIndexExpressionReceiverTypes(expr *IndexExpression, typ types.Type, bound types.Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
 	}()
 
-	switch typ := ResolveType(typ).(type) {
-	case *ArrayType:
+	switch typ := types.Resolve(typ).(type) {
+	case *types.Array:
 		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		if index.Type().Kind() != KindInt {
+		if index.Type().Kind() != kinds.Int {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot index type %s with non-integer type %s", typ, index.Type())))
 		}
 
 		expr.Index = index
 
 		return expr, nil
-	case *SliceType:
+	case *types.Slice:
 		index, err := c.resolveExpressionTypes(expr.Index, nil)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		if index.Type().Kind() != KindInt {
+		if index.Type().Kind() != kinds.Int {
 			errs.Add(expr.WrapError(fmt.Errorf("cannot index type %s with non-integer type %s", typ, index.Type())))
 		}
 
 		expr.Index = index
 
 		return expr, nil
-	case *MapType:
+	case *types.Map:
 		index, err := c.resolveExpressionTypes(expr.Index, typ.Key())
 		if err != nil {
 			errs.Add(err)
@@ -1470,13 +1453,13 @@ func (c *Compiler) resolveIndexExpressionReceiverTypes(expr *IndexExpression, ty
 	}
 }
 
-func (c *Compiler) checkInterfaceTypeCoercion(expr Expression, bound Type) (err error) {
+func (c *Compiler) checkInterfaceTypeCoercion(expr Expression, bound types.Type) (err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
 	}()
 
-	ifaceType, ok := ResolveType(bound).(*InterfaceType)
+	ifaceType, ok := types.Resolve(bound).(*types.Interface)
 	if !ok {
 		errs.Add(expr.WrapError(fmt.Errorf("cannot resolve interface %v", bound)))
 		return errs

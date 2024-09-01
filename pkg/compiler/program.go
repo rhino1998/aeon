@@ -4,19 +4,22 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+
+	"github.com/rhino1998/aeon/pkg/compiler/air"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
 )
 
 type Program struct {
 	root *SymbolScope
 
 	packages map[string]*Package
-	types    map[TypeName]Type
-	strings  map[String]struct{}
+	types    map[types.Name]types.Type
+	strings  map[air.String]struct{}
 
 	registers int
-	bytecode  BytecodeSnippet
+	bytecode  air.Snippet
 
-	stringOffset Addr
+	stringOffset air.Addr
 }
 
 func newProgram() *Program {
@@ -24,8 +27,8 @@ func newProgram() *Program {
 		root: BuiltinsSymbols(),
 
 		packages:  make(map[string]*Package),
-		types:     make(map[TypeName]Type),
-		strings:   make(map[String]struct{}),
+		types:     make(map[types.Name]types.Type),
+		strings:   make(map[air.String]struct{}),
 		registers: 0,
 	}
 
@@ -37,12 +40,12 @@ func (p *Program) Registers() int {
 	return p.registers + 3
 }
 
-func (p *Program) Bytecode() []Bytecode {
+func (p *Program) Instructions() air.Snippet {
 	return p.bytecode
 }
 
-func (p *Program) FrameSize() Size {
-	return Size(p.Registers())
+func (p *Program) FrameSize() air.Size {
+	return air.Size(p.Registers())
 }
 
 func (p *Program) AddPackage(name string) *Package {
@@ -83,73 +86,101 @@ func (p *Program) ExternFuncs() []*ExternFunction {
 	return externs
 }
 
-func (p *Program) Types() []Type {
+func (p *Program) Types() []types.Type {
 	return sortedMapByKey(p.types)
 }
 
-func (p *Program) Strings() []String {
+func (p *Program) Strings() []air.String {
 	return sortedMapKeysByKey(p.strings)
 }
 
-func (p *Program) GlobalSize() Size {
-	var size Size
+func (p *Program) GlobalSize() (air.Size, error) {
+	var size air.Size
 	for _, global := range p.Globals() {
-		size += global.Type().Size()
+		typSize, err := air.TypeSize(global.Type())
+		if err != nil {
+			return 0, fmt.Errorf("global %s: %w", global.Name(), err)
+		}
+
+		size += typSize
 	}
 
-	size += externType.Size() * Size(len(p.ExternFuncs()))
-	size += funcType.Size() * Size(len(p.Functions()))
-
-	for _, drv := range p.DerivedTypes() {
-		size += funcType.Size() * Size(len(drv.MethodFunctions()))
-		size += funcType.Size() * Size(len(drv.PtrMethodFunctions()))
+	externTypeSize, err := air.TypeSize(air.ExternFuncTuple)
+	if err != nil {
+		return 0, fmt.Errorf("extern func type: %w", err)
 	}
+
+	size += externTypeSize * air.Size(len(p.ExternFuncs()))
+
+	funcTypeSize, err := air.TypeSize(air.FuncTuple)
+	if err != nil {
+		return 0, fmt.Errorf("func type: %w", err)
+	}
+
+	size += funcTypeSize * air.Size(len(p.Functions()))
 
 	size += 1
 
-	return size
+	return size, nil
 }
 
-func (p *Program) registerType(t Type) {
+func (p *Program) registerType(t types.Type) {
 	p.types[t.GlobalName()] = t
-	p.strings[String(t.GlobalName())] = struct{}{}
+	p.strings[air.String(t.GlobalName())] = struct{}{}
 
 }
 
-func (p *Program) GlobalLayout() []TypeSlot {
+func (p *Program) GlobalLayout() ([]TypeSlot, error) {
 	layout := make([]TypeSlot, 0)
-	var offset Size
+	var offset air.Size
 
-	addLayout := func(t Type) {
+	addLayout := func(t types.Type) error {
 		layout = append(layout, TypeSlot{
 			Offset: offset,
 			Type:   t,
 		})
-		offset += t.Size()
+		typSize, err := air.TypeSize(t)
+		if err != nil {
+			return err
+		}
+		offset += typSize
+
+		return nil
 	}
 
 	for _, global := range p.Globals() {
-		addLayout(global.Type())
+		err := addLayout(global.Type())
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for range p.ExternFuncs() {
-		addLayout(externType)
+		err := addLayout(air.ExternFuncTuple)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for range p.Functions() {
-		addLayout(funcType)
+		err := addLayout(air.FuncTuple)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	for _, drv := range p.DerivedTypes() {
-		for range drv.MethodFunctions() {
-			addLayout(funcType)
-		}
-		for range drv.PtrMethodFunctions() {
-			addLayout(funcType)
-		}
+		var _ = drv
+		// TODO: resolve method functions
+		// for range drv.MethodFunctions() {
+		// 	addLayout(funcType)
+		// }
+		// for range drv.PtrMethodFunctions() {
+		// 	addLayout(funcType)
+		// }
 	}
 
-	return layout
+	return layout, nil
 }
 
 // TODO: topological sort by import
@@ -169,13 +200,15 @@ func (p *Program) AllFunctions() []*Function {
 	}
 
 	for _, typ := range p.DerivedTypes() {
-		for _, fun := range typ.MethodFunctions() {
-			ret = append(ret, fun)
-		}
-
-		for _, fun := range typ.PtrMethodFunctions() {
-			ret = append(ret, fun)
-		}
+		var _ = typ
+		// TODO: resolve method functions
+		// for _, fun := range typ.MethodFunctions() {
+		// 	ret = append(ret, fun)
+		// }
+		//
+		// for _, fun := range typ.PtrMethodFunctions() {
+		// 	ret = append(ret, fun)
+		// }
 	}
 
 	return ret
@@ -221,15 +254,15 @@ func (p *Program) Globals() []*Variable {
 	return ret
 }
 
-func (p *Program) DerivedTypes() []*DerivedType {
-	var ret []*DerivedType
+func (p *Program) DerivedTypes() []*types.Derived {
+	var ret []*types.Derived
 	for _, pkg := range p.Packages() {
 		ret = append(ret, pkg.DerivedTypes()...)
 	}
 
 	ret = append(ret, p.root.DerivedTypes()...)
 
-	slices.SortStableFunc(ret, func(a, b *DerivedType) int {
+	slices.SortStableFunc(ret, func(a, b *types.Derived) int {
 		return cmp.Compare(a.GlobalName(), b.GlobalName())
 	})
 
@@ -249,8 +282,8 @@ type Package struct {
 	initFuncs   []*Function
 	updateFuncs []*Function
 
-	addr     Addr
-	bytecode BytecodeSnippet
+	addr     air.Addr
+	bytecode air.Snippet
 }
 
 func NewPackage(prog *Program, name string) *Package {
@@ -352,31 +385,29 @@ func (p *Package) ExternFunctions() []*ExternFunction {
 	return p.scope.ExternFunctions()
 }
 
-func (p *Package) KnownTypes() []Type {
+func (p *Package) KnownTypes() []types.Type {
 	return p.values.Types()
 }
 
-func (p *Package) Addr() Addr {
-	return p.addr
-}
-
-func (p *Package) Bytecode() BytecodeSnippet {
+func (p *Package) Instructions() air.Snippet {
 	return p.bytecode
 }
 
-func (p *Package) OffsetAddr(addr Addr) {
+func (p *Package) OffsetAddr(addr air.Addr) {
 	p.addr = addr
 	for _, fun := range p.Functions() {
 		fun.OffsetAddr(addr)
 	}
 
 	for _, drv := range p.DerivedTypes() {
-		for _, met := range drv.MethodFunctions() {
-			met.OffsetAddr(addr)
+		for _, met := range drv.Methods(false) {
+			var _ = met // TODO: resolve methods
+			// met.OffsetAddr(addr)
 		}
 
-		for _, met := range drv.PtrMethodFunctions() {
-			met.OffsetAddr(addr)
+		for _, met := range drv.Methods(true) {
+			var _ = met // TODO: resolve methods
+			// met.OffsetAddr(addr)
 		}
 	}
 }
@@ -389,7 +420,7 @@ func (p *Package) Constants() []*Constant {
 	return p.scope.Constants()
 }
 
-func (p *Package) DerivedTypes() []*DerivedType {
+func (p *Package) DerivedTypes() []*types.Derived {
 	return p.scope.DerivedTypes()
 }
 
@@ -405,6 +436,6 @@ func (p *Package) UpdateFunctions() []*Function {
 	return p.updateFuncs
 }
 
-func (p *Package) Strings() []String {
+func (p *Package) Strings() []air.String {
 	return p.values.Strings()
 }

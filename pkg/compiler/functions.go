@@ -2,8 +2,11 @@ package compiler
 
 import (
 	"fmt"
-	"strings"
 
+	"github.com/rhino1998/aeon/pkg/compiler/air"
+	"github.com/rhino1998/aeon/pkg/compiler/kinds"
+	"github.com/rhino1998/aeon/pkg/compiler/operators"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
@@ -13,25 +16,25 @@ type Function struct {
 
 	receiver   *Variable
 	parameters []*Variable
-	ret        Type
+	ret        types.Type
 	body       []Statement
 
 	parser.Position
 
 	symbols *SymbolScope
 
-	bytecode BytecodeSnippet
+	bytecode air.Snippet
 
-	addr     Addr
-	addrOp   Operand
-	infoAddr Addr
+	addr       air.Addr
+	addrOp     air.Operand
+	infoAddrOp *air.Operand
 
-	locals []Type
+	locals []types.Type
 }
 
 type TypeSlot struct {
-	Offset Size
-	Type   Type
+	Offset air.Size
+	Type   types.Type
 }
 
 func newFunction(name string, pkg *Package) *Function {
@@ -41,10 +44,7 @@ func newFunction(name string, pkg *Package) *Function {
 
 		symbols: newScope(pkg.scope, name),
 
-		addrOp: Operand{
-			Kind:  OperandKindImmediate,
-			Value: Int(0),
-		},
+		addrOp: *air.IntOperand(0),
 	}
 	f.symbols.function = f
 
@@ -55,7 +55,7 @@ func (f *Function) withPointerReceiver() *Function {
 	symbols := newScope(f.symbols.parent, f.name)
 	ptrReceiver := &Variable{
 		name: "#recv",
-		typ:  NewPointerType(f.receiver.typ),
+		typ:  types.NewPointer(f.receiver.typ),
 	}
 	symbols.put(ptrReceiver)
 
@@ -80,10 +80,7 @@ func (f *Function) withPointerReceiver() *Function {
 		pkg:  f.pkg,
 
 		symbols: symbols,
-		addrOp: Operand{
-			Kind:  OperandKindImmediate,
-			Value: Int(0),
-		},
+		addrOp:  *air.IntOperand(0),
 
 		receiver:   ptrReceiver,
 		parameters: newParams,
@@ -98,7 +95,7 @@ func (f *Function) withPointerReceiver() *Function {
 			Expression: &CallExpression{
 				Function: &DotExpression{
 					Receiver: &UnaryExpression{
-						Operator: OperatorDereference,
+						Operator: operators.Dereference,
 						Expression: &SymbolReferenceExpression{
 							scope: symbols,
 							name:  ptrReceiver.name,
@@ -119,20 +116,32 @@ func (f *Function) withPointerReceiver() *Function {
 	return ptrF
 }
 
-func (f *Function) StackLayout() []TypeSlot {
+func (f *Function) StackLayout() ([]TypeSlot, error) {
 	frameSize := f.symbols.Package().prog.FrameSize()
 
 	layout := make([]TypeSlot, 0, len(f.parameters)+2+int(frameSize))
 
-	offset := -(f.ReturnArgSize() + frameSize) + 1
+	fStackSize, err := air.FunctionStackSize(f.Type().(*types.Function))
+	if err != nil {
+		return nil, err
+	}
 
-	addLayout := func(typ Type) {
-		if typ.Size() == 0 {
-			return
+	offset := -(fStackSize + frameSize) + 1
+
+	addLayout := func(typ types.Type) error {
+		typSize, err := air.TypeSize(typ)
+		if err != nil {
+			return err
+		}
+
+		if typSize == 0 {
+			return nil
 		}
 
 		layout = append(layout, TypeSlot{Offset: offset, Type: typ})
-		offset += typ.Size()
+		offset += typSize
+
+		return nil
 	}
 
 	addLayout(f.ret)
@@ -150,7 +159,7 @@ func (f *Function) StackLayout() []TypeSlot {
 		addLayout(local)
 	}
 
-	return layout
+	return layout, nil
 }
 
 func (f *Function) Package() *Package {
@@ -158,7 +167,7 @@ func (f *Function) Package() *Package {
 }
 
 func (f *Function) Name() string {
-	if f.receiver.Type() == TypeVoid {
+	if f.receiver.Type() == types.Void {
 		return f.name
 	}
 
@@ -169,23 +178,18 @@ func (f *Function) QualifiedName() string {
 	return fmt.Sprintf("%s.%s", f.pkg.QualifiedName(), f.Name())
 }
 
-func (f *Function) Type() Type {
-	var paramTypes []Type
+func (f *Function) Type() types.Type {
+	var paramTypes []types.Type
 	for _, param := range f.parameters {
 		if param.variadic {
-			paramTypes = append(paramTypes, param.Type().(*SliceType).AsVariadic())
+			paramTypes = append(paramTypes, param.Type().(*types.Slice).AsVariadic())
 		} else {
 			paramTypes = append(paramTypes, param.Type())
 		}
 	}
 
-	var receiverTyp Type = TypeVoid
-	if f.receiver != nil {
-		receiverTyp = f.receiver.Type()
-	}
-
-	return &FunctionType{
-		Receiver:   receiverTyp,
+	return &types.Function{
+		Receiver:   f.receiver.Type(),
 		Parameters: paramTypes,
 		Return:     f.ret,
 	}
@@ -199,7 +203,7 @@ func (f *Function) Parameters() []*Variable {
 	return f.parameters
 }
 
-func (f *Function) Return() Type {
+func (f *Function) Return() types.Type {
 	return f.ret
 }
 
@@ -207,44 +211,33 @@ func (f *Function) Body() []Statement {
 	return f.body
 }
 
-func (f *Function) Addr() Addr {
+func (f *Function) Addr() air.Addr {
 	return f.addr
 }
 
-func (f *Function) AddrRange() (Addr, Addr) {
-	return f.addr, f.addr + Addr(len(f.bytecode))
+func (f *Function) AddrRange() (air.Addr, air.Addr) {
+	return f.addr, f.addr + air.Addr(len(f.bytecode))
 }
 
-func (f *Function) OffsetAddr(addr Addr) {
+func (f *Function) OffsetAddr(addr air.Addr) {
 	f.addr += addr
-	f.addrOp.Value = f.addrOp.Value.(Int) + Int(addr)
+	f.addrOp.Value = f.addrOp.Value.(air.Int) + air.Int(addr)
 }
 
-func (f *Function) SetInfoAddr(addr Addr) {
-	f.infoAddr = addr
+func (f *Function) SetInfoAddr(op *air.Operand) {
+	f.infoAddrOp = op
 }
 
-func (f *Function) InfoAddr() Addr {
-	return f.infoAddr
+func (f *Function) InfoAddr() air.Addr {
+	return air.Addr(f.infoAddrOp.Value.(air.Int))
 }
 
-func (f *Function) AddrOp() *Operand {
+func (f *Function) AddrOp() *air.Operand {
 	return &f.addrOp
 }
 
-func (f *Function) Bytecode() BytecodeSnippet {
+func (f *Function) Instructions() air.Snippet {
 	return f.bytecode
-}
-
-func (f *Function) ReturnArgSize() Size {
-	var offset Size
-	offset += f.Return().Size()
-	offset += f.Receiver().Type().Size()
-	for _, param := range f.Parameters() {
-		offset += param.Type().Size()
-	}
-
-	return offset
 }
 
 type CallExpression struct {
@@ -254,14 +247,14 @@ type CallExpression struct {
 	parser.Position
 }
 
-func (e *CallExpression) Type() Type {
+func (e *CallExpression) Type() types.Type {
 	switch ftype := e.Function.Type().(type) {
-	case *FunctionType:
+	case *types.Function:
 		return ftype.Return
-	case *TypeType:
+	case *types.TypeType:
 		return ftype.Type
 	default:
-		return UnknownType
+		return types.Unknown
 	}
 }
 
@@ -277,10 +270,10 @@ type ExternFunction struct {
 	name string
 
 	parameters []*Variable
-	ret        Type
+	ret        types.Type
 }
 
-func NewExternFunction(name string, params []*Variable, ret Type) *ExternFunction {
+func NewExternFunction(name string, params []*Variable, ret types.Type) *ExternFunction {
 	return &ExternFunction{
 		name:       name,
 		parameters: params,
@@ -288,8 +281,8 @@ func NewExternFunction(name string, params []*Variable, ret Type) *ExternFunctio
 	}
 }
 
-func (f *ExternFunction) FlatParameterKinds() ([]Kind, error) {
-	var ret []Kind
+func (f *ExternFunction) FlatParameterKinds() ([]kinds.Kind, error) {
+	var ret []kinds.Kind
 	for _, param := range f.parameters {
 		flatParam, err := f.flattenParameters(param.Type())
 		if err != nil {
@@ -302,27 +295,23 @@ func (f *ExternFunction) FlatParameterKinds() ([]Kind, error) {
 	return ret, nil
 }
 
-func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
-	param = baseType(param)
+func (f *ExternFunction) flattenParameters(param types.Type) ([]kinds.Kind, error) {
+	param = types.Base(param)
 	kind := param.Kind()
 	switch kind {
-	case KindUnknown:
+	case kinds.Unknown:
 		return nil, fmt.Errorf("cannot pass unknown type to extern function")
-	case KindVoid:
+	case kinds.Void:
 		return nil, nil
-	case KindNil:
+	case kinds.Nil:
 		return nil, fmt.Errorf("cannot pass nil type to extern function")
-	case KindInt, KindFloat, KindBool, KindString, KindPointer, KindType:
-		return []Kind{kind}, nil
-	case KindArray:
-		var ret []Kind
-		array := param.(*ArrayType)
-		length := array.Length()
-		if length == nil {
-			return nil, fmt.Errorf("cannot pass array of unknown length to extern function")
-		}
+	case kinds.Int, kinds.Float, kinds.Bool, kinds.String, kinds.Pointer, kinds.Type:
+		return []kinds.Kind{kind}, nil
+	case kinds.Array:
+		var ret []kinds.Kind
+		array := param.(*types.Array)
 
-		for range *length {
+		for range array.Length() {
 			flatElem, err := f.flattenParameters(array.Elem())
 			if err != nil {
 				return nil, err
@@ -331,9 +320,9 @@ func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
 			ret = append(ret, flatElem...)
 		}
 		return ret, nil
-	case KindTuple:
-		var ret []Kind
-		tuple := param.(*TupleType)
+	case kinds.Tuple:
+		var ret []kinds.Kind
+		tuple := param.(*types.Tuple)
 		for _, elem := range tuple.Elems() {
 			flatElem, err := f.flattenParameters(elem)
 			if err != nil {
@@ -343,9 +332,9 @@ func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
 			ret = append(ret, flatElem...)
 		}
 		return ret, nil
-	case KindStruct:
-		var ret []Kind
-		struc := param.(*StructType)
+	case kinds.Struct:
+		var ret []kinds.Kind
+		struc := param.(*types.Struct)
 		for _, field := range struc.Fields() {
 			flatField, err := f.flattenParameters(field.Type)
 			if err != nil {
@@ -355,14 +344,14 @@ func (f *ExternFunction) flattenParameters(param Type) ([]Kind, error) {
 			ret = append(ret, flatField...)
 		}
 		return ret, nil
-	case KindInterface:
-		return []Kind{KindType, KindPointer}, nil
-	case KindFunction:
+	case kinds.Interface:
+		return []kinds.Kind{kinds.Type, kinds.Pointer}, nil
+	case kinds.Function:
 		return nil, fmt.Errorf("cannot pass function type %s to extern function", param)
-	case KindMap:
+	case kinds.Map:
 		return nil, fmt.Errorf("cannot pass map type %s to extern function (because it is unimplemented)", param)
-	case KindSlice:
-		return []Kind{KindPointer, KindInt, KindInt}, nil
+	case kinds.Slice:
+		return []kinds.Kind{kinds.Pointer, kinds.Int, kinds.Int}, nil
 	default:
 		return nil, fmt.Errorf("cannot pass unhandled type %s to extern function", param)
 	}
@@ -372,48 +361,29 @@ func (f *ExternFunction) Name() string {
 	return f.name
 }
 
-func (f *ExternFunction) Type() Type {
-	var paramTypes []Type
+func (f *ExternFunction) Type() types.Type {
+	var paramTypes []types.Type
 	for _, param := range f.parameters {
 		if param.variadic {
-			paramTypes = append(paramTypes, param.Type().(*SliceType).AsVariadic())
+			paramTypes = append(paramTypes, param.Type().(*types.Slice).AsVariadic())
 		} else {
 			paramTypes = append(paramTypes, param.Type())
 		}
 	}
 
-	return &FunctionType{
-		Receiver:   TypeVoid,
+	return &types.Function{
+		Receiver:   types.Void,
 		Parameters: paramTypes,
 		Return:     f.ret,
 	}
 }
 
-const (
-	ExternFuncKindInt Int = 0
-	FuncKindInt       Int = 1
-)
-
-var externType = NewTupleType(
-	TypeInt,
-	TypeString, // funcname
-	TypeString, // filename
-	TypeString,
-)
-
-var funcType = NewTupleType(
-	TypeInt,
-	TypeString, // funcname
-	TypeString, // filename
-	TypeInt,    // ptr into code segment
-)
-
 type CompilerFunctionReferenceExpression struct {
 	Function *Function
 }
 
-func (*CompilerFunctionReferenceExpression) Type() Type {
-	return TypeKind(KindInt)
+func (*CompilerFunctionReferenceExpression) Type() types.Type {
+	return types.Kind(kinds.Int)
 }
 
 func (*CompilerFunctionReferenceExpression) WrapError(err error) error {
@@ -423,26 +393,26 @@ func (*CompilerFunctionReferenceExpression) WrapError(err error) error {
 type BoundMethodExpression struct {
 	Receiver Expression
 
-	Method Method
+	Method types.Method
 
 	parser.Position
 }
 
-func (e *BoundMethodExpression) Type() Type {
-	return e.Method.BoundFunctionType()
+func (e *BoundMethodExpression) Type() types.Type {
+	return e.Method.BoundFunction()
 }
 
 type MethodExpression struct {
 	Receiver Expression
 
-	Method Method
+	Method types.Method
 
 	parser.Position
 }
 
-func (e *MethodExpression) Type() Type {
-	return &FunctionType{
-		Receiver:   DereferenceType(e.Receiver.Type()),
+func (e *MethodExpression) Type() types.Type {
+	return &types.Function{
+		Receiver:   types.Dereference(e.Receiver.Type()),
 		Parameters: e.Method.Parameters,
 		Return:     e.Method.Return,
 	}
@@ -454,90 +424,6 @@ type MethodFunctionExpression struct {
 	parser.Position
 }
 
-func (e *MethodFunctionExpression) Type() Type {
-	return e.Function.Type().(*FunctionType).ToFunction()
-}
-
-type FunctionType struct {
-	Receiver   Type
-	Parameters []Type
-	Return     Type
-}
-
-func NewFunctionType(recv Type, parameters []Type, ret Type) *FunctionType {
-	return &FunctionType{
-		Receiver:   recv,
-		Parameters: parameters,
-		Return:     ret,
-	}
-}
-
-func (t *FunctionType) ToFunction() *FunctionType {
-	if t.Receiver == TypeVoid {
-		return t
-	}
-
-	return &FunctionType{
-		Receiver:   TypeVoid,
-		Parameters: append([]Type{t.Receiver}, t.Parameters...),
-		Return:     TypeVoid,
-	}
-}
-
-func (t *FunctionType) MethodEqual(o *FunctionType) bool {
-	if len(t.Parameters) != len(o.Parameters) {
-		return false
-	}
-
-	for i := range len(t.Parameters) {
-		if !TypesEqual(t.Parameters[i], o.Parameters[i]) {
-			return false
-		}
-	}
-
-	return TypesEqual(t.Return, o.Return)
-}
-
-func (t *FunctionType) Kind() Kind { return KindFunction }
-
-func (t *FunctionType) String() string {
-	params := make([]string, 0, len(t.Parameters))
-	for _, param := range t.Parameters {
-		params = append(params, string(param.GlobalName()))
-	}
-
-	var recvStr string
-	if t.Receiver != TypeVoid {
-		recvStr = fmt.Sprintf("(%s) ", t.Receiver)
-	}
-
-	var retStr string
-	if t.Return != TypeVoid {
-		retStr = fmt.Sprintf(" %s", t.Return)
-	}
-
-	return fmt.Sprintf("%sfunc(%s)%s", recvStr, strings.Join(params, ", "), retStr)
-}
-
-func (t *FunctionType) GlobalName() TypeName {
-	params := make([]string, 0, len(t.Parameters))
-	for _, param := range t.Parameters {
-		params = append(params, string(param.GlobalName()))
-	}
-
-	var recvStr string
-	if t.Receiver != TypeVoid {
-		recvStr = fmt.Sprintf("(%s) ", string(t.Receiver.GlobalName()))
-	}
-
-	var retStr string
-	if t.Return != TypeVoid {
-		retStr = fmt.Sprintf(" %s", string(t.Return.GlobalName()))
-	}
-
-	return TypeName(fmt.Sprintf("%sfunc(%s)%s", recvStr, strings.Join(params, ", "), retStr))
-}
-
-func (FunctionType) Size() Size {
-	return 1
+func (e *MethodFunctionExpression) Type() types.Type {
+	return e.Function.Type().(*types.Function).ToFunction()
 }

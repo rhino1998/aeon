@@ -1,6 +1,10 @@
 package parser
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/rhino1998/aeon/pkg/compiler/operators"
+)
 
 type Keyword string
 
@@ -260,7 +264,7 @@ type AssignmentOperatorStatement struct {
 	baseStatement
 
 	Left     Expr
-	Operator Operator
+	Operator operators.Operator
 	Right    Expr
 
 	Position
@@ -278,7 +282,7 @@ type PostfixStatement struct {
 	baseStatement
 
 	Expr     Expr
-	Operator Operator
+	Operator operators.Operator
 
 	Position
 }
@@ -429,13 +433,11 @@ type IndexExpr struct {
 	Position
 }
 
-type Operator string
-
 type BinaryExpr struct {
 	baseExpr
 
 	Left     Expr
-	Operator Operator
+	Operator operators.Operator
 	Right    Expr
 
 	Position
@@ -444,7 +446,7 @@ type BinaryExpr struct {
 type UnaryExpr struct {
 	baseExpr
 
-	Operator Operator
+	Operator operators.Operator
 	Expr     Expr
 
 	Position

@@ -4,8 +4,11 @@ import (
 	"cmp"
 	"fmt"
 	"maps"
-	"reflect"
 	"slices"
+
+	"github.com/rhino1998/aeon/pkg/compiler/air"
+	"github.com/rhino1998/aeon/pkg/compiler/kinds"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
 )
 
 type SymbolStub string
@@ -18,9 +21,14 @@ type Symbol interface {
 	Name() string
 }
 
+type QualifiedSymbol interface {
+	Symbol
+	QualifiedName() string
+}
+
 type TypedSymbol interface {
 	Symbol
-	Type() Type
+	Type() types.Type
 }
 
 type SymbolScope struct {
@@ -45,16 +53,29 @@ func (s *SymbolScope) Name() string {
 	return s.name
 }
 
+func (s *SymbolScope) Parent() *SymbolScope {
+	return s.parent
+}
+
+func (s *SymbolScope) SymbolNames() []string {
+	if s == nil {
+		return nil
+	}
+
+	ret := make([]string, 0, len(s.scope))
+	ret = append(ret, slices.Collect(maps.Keys(s.scope))...)
+	ret = append(ret, s.parent.SymbolNames()...)
+
+	slices.Sort(ret)
+	return ret
+}
+
 func (s *SymbolScope) Functions() []*Function {
 	var funcs []*Function
 	for _, val := range s.scope {
 		switch val := val.(type) {
 		case *Function:
 			funcs = append(funcs, val)
-		case *SymbolScope:
-			funcs = append(funcs, val.Functions()...)
-		case *Package:
-			funcs = append(funcs, val.Functions()...)
 		}
 	}
 
@@ -149,16 +170,16 @@ func (s *SymbolScope) Constants() []*Constant {
 	return funcs
 }
 
-func (s *SymbolScope) DerivedTypes() []*DerivedType {
-	var funcs []*DerivedType
+func (s *SymbolScope) DerivedTypes() []*types.Derived {
+	var funcs []*types.Derived
 	for _, val := range s.scope {
 		switch val := val.(type) {
-		case *DerivedType:
+		case *types.Derived:
 			funcs = append(funcs, val)
 		}
 	}
 
-	slices.SortFunc(funcs, func(a, b *DerivedType) int {
+	slices.SortFunc(funcs, func(a, b *types.Derived) int {
 		return cmp.Compare(a.Name(), b.Name())
 	})
 
@@ -196,13 +217,13 @@ func (s *SymbolScope) next() *SymbolScope {
 	return newScope(s, "")
 }
 
-func (s *SymbolScope) getType(name string) (Type, bool) {
+func (s *SymbolScope) ResolveType(name string) (types.Type, bool) {
 	v, ok := s.get(name)
 	if !ok {
 		return nil, false
 	}
 
-	t, ok := v.(Type)
+	t, ok := v.(types.Type)
 	if !ok {
 		return nil, false
 	}
@@ -252,224 +273,6 @@ func (s *SymbolScope) getTypedSymbol(name string) (TypedSymbol, bool) {
 	return t, true
 }
 
-type LocationKind int
-
-const (
-	LocationKindConstant LocationKind = iota
-	LocationKindRegister
-	LocationKindGlobal
-	LocationKindLocal
-	LocationKindArg
-	LocationKindParam
-	LocationKindHeap
-	LocationKindVTable
-)
-
-type Location struct {
-	Kind    LocationKind
-	Name    string
-	Type    Type
-	Operand *Operand
-}
-
-func (l *Location) String() string {
-	return l.Operand.String()
-}
-
-func (l *Location) Equal(o *Location) bool {
-	// TOOD: non-reflect
-	return reflect.DeepEqual(l, o)
-}
-
-func (l *Location) SameMemory(o *Location) bool {
-	return reflect.DeepEqual(l.Type, o.Type) && l.Operand.Equal(o.Operand)
-}
-
-func (l *Location) AddConst(size Size) *Location {
-	return &Location{
-		Kind:    l.Kind,
-		Name:    l.Name,
-		Type:    l.Type,
-		Operand: l.Operand.ConstOffset(size),
-	}
-}
-
-func (l *Location) Add(o *Location) *Location {
-	return &Location{
-		Kind:    l.Kind,
-		Name:    l.Name,
-		Type:    l.Type,
-		Operand: l.Operand.Offset(o.Operand),
-	}
-}
-
-func (l *Location) Mul(o *Location) *Location {
-	return &Location{
-		Kind:    l.Kind,
-		Name:    l.Name,
-		Type:    l.Type,
-		Operand: l.Operand.Stride(o.Operand),
-	}
-}
-
-func (l *Location) AsType(typ Type) *Location {
-	return &Location{
-		Kind:    l.Kind,
-		Name:    l.Name,
-		Type:    DereferenceType(typ),
-		Operand: l.Operand,
-	}
-}
-
-func (l *Location) InterfaceType() (*Location, error) {
-	return l.AsType(interfaceTuple).IndexTuple(0)
-}
-
-func (l *Location) AddressOf() *Location {
-	return &Location{
-		Kind:    l.Kind,
-		Name:    fmt.Sprintf("&%s", l.Name),
-		Type:    NewPointerType(l.Type),
-		Operand: l.Operand.AddressOf(),
-	}
-}
-
-func (l *Location) Value() *Location {
-	return &Location{
-		Kind:    l.Kind,
-		Name:    fmt.Sprintf("*%s", l.Name),
-		Type:    DereferenceType(l.Type),
-		Operand: l.Operand.Dereference(),
-	}
-}
-
-func (l *Location) Dereference() (*Location, error) {
-	typ, ok := ResolveType(l.Type).(*PointerType)
-	if !ok {
-		return nil, fmt.Errorf("cannot dereference non-pointer type %s", l.Type)
-	}
-
-	return &Location{
-		Kind: l.Kind,
-
-		Name:    fmt.Sprintf("*%s", l.Name),
-		Type:    typ.Pointee(),
-		Operand: l.Operand.Dereference(),
-	}, nil
-}
-
-func (l *Location) IndexTuple(index int) (*Location, error) {
-	typ := ResolveType(l.Type).(*TupleType)
-
-	if index >= len(typ.Elems()) {
-		return nil, fmt.Errorf("compile-time tuple index %d out of bounds", index)
-	}
-
-	return &Location{
-		Kind:    l.Kind,
-		Name:    fmt.Sprintf("%s.%d", l.Name, index),
-		Type:    DereferenceType(typ.Elems()[index]),
-		Operand: l.Operand.AddressOf().ConstOffset(typ.ElemOffset(index)).Dereference(),
-	}, nil
-}
-
-func (l *Location) IndexArrayConst(index int) (*Location, error) {
-	typ := ResolveType(l.Type).(*ArrayType)
-
-	length := typ.Length()
-	if length == nil {
-		return nil, fmt.Errorf("cannot index array type %s of unknown length", l.Type)
-	}
-
-	if index >= *length {
-		return nil, fmt.Errorf("compile-time array index %d out of bounds", index)
-	}
-
-	return &Location{
-		Kind:    l.Kind,
-		Name:    fmt.Sprintf("%s.%d", l.Name, index),
-		Type:    DereferenceType(typ.Elem()),
-		Operand: l.Operand.AddressOf().ConstOffset(typ.Elem().Size() * Size(index)).Dereference(),
-	}, nil
-}
-
-func (l *Location) IndexArray(index *Location) (*Location, error) {
-	typ := ResolveType(l.Type).(*ArrayType)
-
-	length := typ.Length()
-	if length == nil {
-		return nil, fmt.Errorf("cannot index array type %s of unknown length", l.Type)
-	}
-
-	return &Location{
-		Kind: l.Kind,
-		Name: fmt.Sprintf("%s[%s]", l.Name, index),
-		Type: DereferenceType(typ.Elem()),
-		Operand: l.Operand.AddressOf().Offset(
-			index.Operand.
-				Bound(ImmediateOperand(Int(*length))).
-				Stride(ImmediateOperand(Int(typ.Elem().Size())))).Dereference(),
-	}, nil
-}
-
-func (l *Location) IndexSlice(index *Location) (*Location, error) {
-	typ := ResolveType(l.Type).(*SliceType)
-
-	if index.Type.Kind() != KindInt {
-		return nil, fmt.Errorf("invalid type for slice index %s", index.Type)
-	}
-
-	return &Location{
-		Kind:    LocationKindHeap,
-		Name:    fmt.Sprintf("%s[%s]", l.Name, index.Name),
-		Type:    DereferenceType(typ.Elem()),
-		Operand: l.Operand.Offset(index.Operand.Bound(l.Operand.ConstOffset(1)).Stride(ImmediateOperand(Int(typ.Elem().Size())))).Dereference(),
-	}, nil
-}
-
-func (l *Location) LenSlice() (*Location, error) {
-	typ := ResolveType(l.Type).(*SliceType)
-
-	return &Location{
-		Kind:    LocationKindHeap,
-		Name:    fmt.Sprintf("len(%s)", l.Name),
-		Type:    DereferenceType(typ.Elem()),
-		Operand: l.Operand.OffsetReference(1),
-	}, nil
-}
-
-func (l *Location) CapSlice() (*Location, error) {
-	typ := ResolveType(l.Type).(*SliceType)
-
-	return &Location{
-		Kind:    LocationKindHeap,
-		Name:    fmt.Sprintf("cap(%s)", l.Name),
-		Type:    DereferenceType(typ.Elem()),
-		Operand: l.Operand.OffsetReference(2),
-	}, nil
-}
-
-func (l *Location) IndexFieldConst(name string) (*Location, error) {
-	typ := ResolveType(l.Type).(*StructType)
-
-	field, ok := typ.GetField(name)
-	if !ok {
-		return nil, fmt.Errorf("struct field %q does not exist", name)
-	}
-
-	offset, err := typ.FieldOffset(name)
-	if err != nil {
-		return nil, err
-	}
-
-	return &Location{
-		Kind:    l.Kind,
-		Name:    fmt.Sprintf("%s.%s", l.Name, name),
-		Type:    DereferenceType(field.Type),
-		Operand: l.Operand.AddressOf().ConstOffset(offset).Dereference(),
-	}, nil
-}
-
 type ValueScope struct {
 	parent  *ValueScope
 	name    string
@@ -477,44 +280,43 @@ type ValueScope struct {
 
 	function *Function
 	symbols  *SymbolScope
-	types    map[TypeName]Type
-	strings  map[String]struct{}
+	types    map[types.Name]types.Type
+	strings  map[air.String]struct{}
 
-	nextGlobal Size
+	variables map[string]*air.Value
 
-	variables map[string]*Location
-	nextLocal Size
-	maxLocal  *Size
-
-	usedRegisters map[Register]bool
+	usedRegisters map[air.Register]bool
 	numRegisters  int
 }
 
 func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
-	types := make(map[TypeName]Type)
+	types := make(map[types.Name]types.Type)
 	for _, typ := range symbols.DerivedTypes() {
 		types[typ.GlobalName()] = typ
 	}
-	types[Nil{}.GlobalName()] = Nil{}
+	types[TypeNil.GlobalName()] = TypeNil
 
-	strings := make(map[String]struct{})
+	strings := make(map[air.String]struct{})
 	strings[""] = struct{}{}
+	for _, name := range symbols.SymbolNames() {
+		strings[air.String(name)] = struct{}{}
+	}
 	return &ValueScope{
 		symbols:       symbols,
 		function:      symbols.function,
-		variables:     make(map[string]*Location),
+		variables:     make(map[string]*air.Value),
 		types:         types,
 		strings:       strings,
-		nextGlobal:    1,
-		nextLocal:     1,
-		maxLocal:      new(Size),
-		usedRegisters: make(map[Register]bool),
+		usedRegisters: make(map[air.Register]bool),
 		numRegisters:  regs,
 	}
 }
 
 func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 	vs.nextSub++
+	for _, name := range scope.SymbolNames() {
+		vs.strings[air.String(name)] = struct{}{}
+	}
 	return &ValueScope{
 		parent:  vs,
 		symbols: scope,
@@ -523,8 +325,6 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 		variables: maps.Clone(vs.variables),
 		types:     vs.types,
 		strings:   vs.strings,
-		maxLocal:  vs.maxLocal,
-		nextLocal: vs.nextLocal,
 
 		usedRegisters: maps.Clone(vs.usedRegisters),
 		numRegisters:  vs.numRegisters,
@@ -532,6 +332,9 @@ func (vs *ValueScope) sub(scope *SymbolScope) *ValueScope {
 }
 
 func (vs *ValueScope) fun(scope *SymbolScope) *ValueScope {
+	for _, name := range scope.SymbolNames() {
+		vs.strings[air.String(name)] = struct{}{}
+	}
 	return &ValueScope{
 		parent:  vs,
 		symbols: scope,
@@ -540,83 +343,72 @@ func (vs *ValueScope) fun(scope *SymbolScope) *ValueScope {
 		variables: maps.Clone(vs.variables),
 		types:     vs.types,
 		strings:   vs.strings,
-		nextLocal: 1,
-		maxLocal:  new(Size),
 
 		usedRegisters: maps.Clone(vs.usedRegisters),
 		numRegisters:  vs.numRegisters,
 	}
 }
 
-func (vs *ValueScope) newFunctionRef(fun *Function) *Location {
-	return &Location{
-		Kind:    LocationKindConstant,
-		Name:    fun.QualifiedName(),
-		Type:    TypeKind(KindInt),
+func (vs *ValueScope) newFunctionRef(fun *Function) *air.Value {
+	return &air.Value{
+		Type:    types.Kind(kinds.Int),
 		Operand: fun.AddrOp(),
 	}
 }
 
-func (vs *ValueScope) newImmediate(imm Immediate) *Location {
-	return &Location{
-		Kind:    LocationKindConstant,
-		Operand: ImmediateOperand(imm),
-		Type:    TypeKind(imm.Kind()),
+func (vs *ValueScope) newImmediate(imm air.Immediate) *air.Value {
+	return &air.Value{
+		Operand: air.ImmediateOperand(imm),
+		Type:    types.Kind(imm.Kind()),
 	}
 }
 
-func (vs *ValueScope) newConstant(name string, typ Type, op *Operand) {
-	vs.variables[name] = &Location{
-		Kind:    LocationKindConstant,
-		Name:    name,
+func (vs *ValueScope) newConstant(name string, typ types.Type, op *air.Operand) {
+	vs.variables[name] = &air.Value{
 		Type:    typ,
 		Operand: op,
 	}
 }
 
-func (vs *ValueScope) newGlobal(name string, typ Type) *Location {
+func (vs *ValueScope) newGlobal(v *Variable) *air.Value {
 	if vs.parent != nil {
-		return vs.parent.newGlobal(name, typ)
-	}
-	loc := &Location{
-		Kind:    LocationKindGlobal,
-		Name:    name,
-		Type:    typ,
-		Operand: ImmediateOperand(Int(vs.nextGlobal)).Dereference(),
+		return vs.parent.newGlobal(v)
 	}
 
-	vs.variables[name] = loc
+	loc := &air.Value{
+		Type:    types.NewPointer(types.Dereference(v.Type())),
+		Operand: air.GlobalOperand(v),
+	}
 
-	vs.nextGlobal += Size(typ.Size())
-	return loc
+	globVal := loc.Value()
+
+	vs.variables[v.Name()] = globVal
+
+	vs.registerType(v.Type())
+
+	return globVal
 }
 
-func (vs *ValueScope) newArg(name string, typ Type) *Location {
-	loc := &Location{
-		Kind:    LocationKindArg,
-		Name:    fmt.Sprintf("arg_%s", name),
+func (vs *ValueScope) newArg(name string, typ types.Type) *air.Value {
+	val := &air.Value{
 		Type:    typ,
-		Operand: OperandRegisterSP.Dereference(),
+		Operand: air.OperandRegisterSP.Dereference(),
 	}
-	vs.variables[loc.Name] = loc
-	return loc
+	vs.variables[name] = val
+	return val
 }
 
-func (vs *ValueScope) newParam(name string, offset Size, typ Type) {
-	vs.variables[name] = &Location{
-		Name:    name,
-		Kind:    LocationKindParam,
+func (vs *ValueScope) newParam(name string, offset air.Size, typ types.Type) {
+	vs.variables[name] = &air.Value{
 		Type:    typ,
-		Operand: OperandRegisterFP.ConstOffset(offset).Dereference(),
+		Operand: air.OperandRegisterFP.AddConst(offset).Dereference(),
 	}
 }
 
-func (vs *ValueScope) newLocal(v *Variable) *Location {
-	loc := &Location{
-		Kind:    LocationKindLocal,
-		Name:    v.Name(),
-		Type:    DereferenceType(v.Type()),
-		Operand: LocalOperand(v),
+func (vs *ValueScope) newLocal(v *Variable) *air.Value {
+	loc := &air.Value{
+		Type:    types.NewPointer(types.Dereference(v.Type())),
+		Operand: air.LocalOperand(v),
 	}
 
 	locVal := loc.Value()
@@ -628,57 +420,27 @@ func (vs *ValueScope) newLocal(v *Variable) *Location {
 	return locVal
 }
 
-func (vs *ValueScope) allocTemp(typ Type) *Location {
-	if typ.Size() == 1 {
-		for reg := range Register(vs.numRegisters) {
-			switch reg {
-			case RegisterPC, RegisterFP, RegisterSP:
-				continue
-			default:
-				if !vs.usedRegisters[reg] {
-					vs.usedRegisters[reg] = true
-
-					vs.registerType(typ)
-
-					return &Location{
-						Kind: LocationKindRegister,
-						Name: reg.String(),
-						Type: DereferenceType(typ),
-						Operand: &Operand{
-							Kind:  OperandKindRegister,
-							Value: reg,
-						},
-					}
-				}
-			}
-		}
-	}
-
-	tmpVar := &Variable{
+func (vs *ValueScope) allocTemp(typ types.Type) *air.Value {
+	v := &Variable{
 		name: "__local_tmp",
 		typ:  typ,
 	}
 
-	// all registers are used or type is too large
-	return vs.newLocal(tmpVar)
-}
-
-func (vs *ValueScope) deallocTemp(l *Location) {
-	switch l.Kind {
-	case LocationKindRegister:
-		vs.usedRegisters[l.Operand.Value.(Register)] = false
+	tmp := &air.Value{
+		Type:    types.NewPointer(types.Dereference(v.Type())),
+		Operand: air.TempOperand(v),
 	}
+
+	tmpVal := tmp.Value()
+
+	vs.variables[v.Name()] = tmpVal
+
+	vs.registerType(v.Type())
+
+	return tmpVal
 }
 
-func (vs *ValueScope) Mov(src, dst *Location) Mov {
-	return Mov{
-		Src:  src.Operand,
-		Dst:  dst.Operand,
-		Size: min(src.Type.Size(), dst.Type.Size()),
-	}
-}
-
-func (vs *ValueScope) Get(name string) (*Location, bool) {
+func (vs *ValueScope) Get(name string) (*air.Value, bool) {
 	if vs == nil {
 		return nil, false
 	}
@@ -691,33 +453,31 @@ func (vs *ValueScope) Get(name string) (*Location, bool) {
 	return op, true
 }
 
-func (vs *ValueScope) typeName(typ Type) (*Location, error) {
+func (vs *ValueScope) typeName(typ types.Type) (*air.Value, error) {
 	name, err := vs.registerType(typ)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Location{
-		Kind:    LocationKindConstant,
-		Name:    fmt.Sprintf("type %s", name),
-		Type:    TypeKind(KindType),
-		Operand: TypeOperand(name),
+	return &air.Value{
+		Type:    types.Kind(kinds.Type),
+		Operand: air.TypeOperand(name),
 	}, nil
 }
 
-func (vs *ValueScope) Types() []Type {
+func (vs *ValueScope) Types() []types.Type {
 	return sortedMapByKey(vs.types)
 }
 
-func (vs *ValueScope) registerType(typ Type) (TypeName, error) {
-	if typ == UnknownType {
+func (vs *ValueScope) registerType(typ types.Type) (types.Name, error) {
+	if typ == types.Unknown {
 		return "", fmt.Errorf("cannot register unknown type")
 	}
 
-	typ = DereferenceType(typ)
+	typ = types.Dereference(typ)
 	name := typ.GlobalName()
 	if other, ok := vs.types[name]; ok {
-		if !TypesEqual(typ, other) {
+		if !types.Equal(typ, other) {
 			return "", fmt.Errorf("duplicate non-equal types %s %s", typ, other)
 		}
 	}
@@ -732,34 +492,28 @@ const (
 	errorHandlerSymbolName = "#error_handler"
 )
 
-func (vs *ValueScope) getString(s String) *Location {
+func (vs *ValueScope) getString(s air.String) *air.Value {
 	vs.strings[s] = struct{}{}
-	return &Location{
-		Kind:    LocationKindConstant,
-		Name:    fmt.Sprintf("string %q", string(s)),
-		Type:    TypeKind(KindString),
-		Operand: StringOperand(s),
+	return &air.Value{
+		Type:    types.Kind(kinds.String),
+		Operand: air.StringOperand(s),
 	}
 }
 
-func (vs *ValueScope) Strings() []String {
+func (vs *ValueScope) Strings() []air.String {
 	return sortedMapKeysByKey(vs.strings)
 }
 
-func (vs *ValueScope) SP() *Location {
-	return &Location{
-		Kind:    LocationKindRegister,
-		Name:    "sp",
-		Type:    TypeKind(KindInt),
-		Operand: OperandRegisterSP,
+func (vs *ValueScope) SP() *air.Value {
+	return &air.Value{
+		Type:    types.Kind(kinds.Int),
+		Operand: air.OperandRegisterSP,
 	}
 }
 
-func (vs *ValueScope) vtableLookup(typ *Location, method Method) *Location {
-	return &Location{
-		Kind:    LocationKindGlobal,
-		Name:    fmt.Sprintf("vtable %s", method.Name),
-		Type:    method.BoundFunctionType(),
-		Operand: NewVTableLookup(typ.Operand, vs.getString(String(method.String())).Operand),
+func (vs *ValueScope) vtableLookup(typ *air.Value, method types.Method) *air.Value {
+	return &air.Value{
+		Type:    method.BoundFunction(),
+		Operand: air.NewVTableLookup(typ.Operand, vs.getString(air.String(method.Name)).Operand),
 	}
 }

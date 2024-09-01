@@ -11,6 +11,10 @@ import (
 	"strings"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
+	"github.com/rhino1998/aeon/pkg/compiler/air"
+	"github.com/rhino1998/aeon/pkg/compiler/kinds"
+	"github.com/rhino1998/aeon/pkg/compiler/operators"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
 )
 
 const (
@@ -221,7 +225,7 @@ type Runtime struct {
 
 	debug bool
 
-	codePages  [][PageSize]compiler.Bytecode
+	codePages  [][PageSize]air.Instruction
 	heapAllocs []Addr
 	heapStart  Addr
 	heapEnd    Addr
@@ -253,7 +257,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 		debug: debug,
 
-		codePages: make([][PageSize]compiler.Bytecode, (len(prog.Bytecode())+PageSize-1)/PageSize),
+		codePages: make([][PageSize]air.Instruction, (len(prog.Instructions())+PageSize-1)/PageSize),
 		memPages:  make([][PageSize]float64, memPages),
 		strPages:  make([][PageSize]String, strPages),
 		registers: make([]float64, prog.Registers()),
@@ -274,27 +278,40 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	strMap := make(map[String]Addr)
 	for i, str := range prog.Strings() {
 		strMap[str] = Addr(Addr(i))
-		page, pageAddr := r.splitAddr(compiler.Addr(i))
+		page, pageAddr := r.splitAddr(Addr(i))
 		r.strPages[page][pageAddr] = str
 		r.strHeapIndex++
+
+		// log.Printf("str %d: %s", i, str)
 	}
 
 	r.strHeapStart = r.strHeapIndex
 	r.strHeapEnd = Addr(strPages * PageSize)
 
-	for i, code := range prog.Bytecode() {
-		page, pageAddr := r.splitAddr(compiler.Addr(i))
+	for i, code := range prog.Instructions() {
+		page, pageAddr := r.splitAddr(Addr(i))
 		r.codePages[page][pageAddr] = code
 	}
 
-	typeIDFromName := make(map[compiler.TypeName]int)
+	typeIDFromName := make(map[types.Name]int)
+
+	allFuncs := make(map[string]float64)
+
+	for _, fun := range prog.AllFunctions() {
+		allFuncs[fun.QualifiedName()] = float64(fun.InfoAddr())
+	}
 
 	for typeID, typ := range prog.Types() {
 		r.vtables[typeID] = make(map[string]float64)
 		if debug {
 			log.Printf("type %v: %d", typ, typeID)
 		}
-		r.vtables[typeID]["#size"] = float64(typ.Size())
+		typSize, err := air.TypeSize(typ)
+		if err != nil {
+			return nil, err
+		}
+
+		r.vtables[typeID]["#size"] = float64(typSize)
 		r.vtables[typeID]["#kind"] = float64(typ.Kind())
 		r.vtables[typeID]["#name"] = float64(strMap[String(typ.GlobalName())])
 
@@ -302,47 +319,50 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 		r.typeMap[typeID] = make([]RuntimeTypeSlot, 0)
 
-		switch typ := compiler.DereferenceType(typ).(type) {
-		case *compiler.DerivedType:
+		// TODO: method resolution
+		switch typ := types.Dereference(typ).(type) {
+		case *types.Derived:
 			for _, method := range typ.Methods(false) {
-				fun := typ.Method(method.Name, false)
-				if fun == nil {
-					return nil, fmt.Errorf("failed to resolve method %s on type %s", method.Name, typ)
+				methodName := typ.MethodQualifiedName(false, method.Name)
+				funAddr, ok := allFuncs[methodName]
+				if !ok {
+					return nil, fmt.Errorf("method %s not found", methodName)
 				}
-				r.vtables[typeID][method.String()] = float64(fun.InfoAddr())
+				r.vtables[typeID][method.Name] = funAddr
 			}
-		case *compiler.PointerType:
-			switch typ := compiler.DereferenceType(typ.Pointee()).(type) {
-			case *compiler.DerivedType:
+		case *types.Pointer:
+			switch typ := types.Dereference(typ.Pointee()).(type) {
+			case *types.Derived:
 				for _, method := range typ.Methods(true) {
-					fun := typ.Method(method.Name, true)
-					if fun == nil {
-						return nil, fmt.Errorf("failed to resolve method %s on type %s", method.Name, typ)
+					methodName := typ.MethodQualifiedName(true, method.Name)
+					funAddr, ok := allFuncs[methodName]
+					if !ok {
+						return nil, fmt.Errorf("method %s not found", methodName)
 					}
-					r.vtables[typeID][method.String()] = float64(fun.InfoAddr())
+					r.vtables[typeID][method.Name] = funAddr
 				}
 			}
 		}
 	}
 
 	for typeID, typ := range prog.Types() {
-		switch typ := compiler.ResolveType(typ).(type) {
-		case *compiler.PointerType:
+		switch typ := types.Resolve(typ).(type) {
+		case *types.Pointer:
 			r.vtables[typeID]["#pointee"] = float64(typeIDFromName[typ.Pointee().GlobalName()])
 			// TODO: product types somehow
-		case *compiler.ArrayType:
-			r.vtables[typeID]["#length"] = float64(*typ.Length())
+		case *types.Array:
+			r.vtables[typeID]["#length"] = float64(typ.Length())
 			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
-		case *compiler.TupleType:
+		case *types.Tuple:
 			r.vtables[typeID]["#elems"] = float64(len(typ.Elems()))
 			for i, elem := range typ.Elems() {
 				r.vtables[typeID][fmt.Sprintf("#elem.%d", i)] = float64(typeIDFromName[elem.GlobalName()])
 			}
-		case *compiler.SliceType:
+		case *types.Slice:
 			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
-		case *compiler.VariadicType:
+		case *types.Variadic:
 			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
-		case *compiler.StructType:
+		case *types.Struct:
 			r.vtables[typeID]["#fields"] = float64(len(typ.Fields()))
 			for i, field := range typ.Fields() {
 				r.vtables[typeID][fmt.Sprintf("#field.%d", i)] = float64(typeIDFromName[field.Type.GlobalName()])
@@ -352,19 +372,35 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	}
 
 	// r.printVTables()
+	//
+	globalLayout, err := prog.GlobalLayout()
+	if err != nil {
+		return nil, err
+	}
 
-	for _, slot := range prog.GlobalLayout() {
+	for _, slot := range globalLayout {
+		typSize, err := air.TypeSize(slot.Type)
+		if err != nil {
+			return nil, err
+		}
 		r.globalMap = append(r.globalMap,
-			RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Size: slot.Type.Size()})
+			RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Size: typSize})
 	}
 
 	for _, fun := range prog.AllFunctions() {
-		layout := fun.StackLayout()
+		stackLayout, err := fun.StackLayout()
+		if err != nil {
+			return nil, err
+		}
 		funLayout := make([]RuntimeTypeSlot, 0)
 
-		for _, slot := range layout {
+		for _, slot := range stackLayout {
+			typSize, err := air.TypeSize(slot.Type)
+			if err != nil {
+				return nil, err
+			}
 			funLayout = append(funLayout,
-				RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Size: slot.Type.Size()})
+				RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Size: typSize})
 		}
 
 		r.funcMap[int(fun.Addr())] = funLayout
@@ -378,20 +414,20 @@ func (r *Runtime) toNative(typ float64, value float64) (any, error) {
 	if !ok {
 		panic(fmt.Sprintf("runtime: could not resolve kind %d", int(typ)))
 	}
-	switch compiler.Kind(kind) {
-	case compiler.KindNil:
+	switch kinds.Kind(kind) {
+	case kinds.Nil:
 		return nil, nil
-	case compiler.KindBool:
+	case kinds.Bool:
 		if value == 0 {
 			return false, nil
 		} else {
 			return true, nil
 		}
-	case compiler.KindInt:
+	case kinds.Int:
 		return int(value), nil
-	case compiler.KindFloat:
+	case kinds.Float:
 		return value, nil
-	case compiler.KindString:
+	case kinds.String:
 		str, err := r.LoadString(Addr(value))
 		if err != nil {
 			return "", err
@@ -502,7 +538,7 @@ func (gc *gcState) scanPointers(r *Runtime) error {
 		if err != nil {
 			return err
 		}
-		base += compiler.Addr(slot.Size)
+		base += Addr(slot.Size)
 	}
 
 	for i := 1; i < len(r.funcTrace); i += 2 {
@@ -554,7 +590,7 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 	for len(slots) > 0 {
 		slot := slots[len(slots)-1]
 		slots = slots[:len(slots)-1]
-		kind := compiler.Kind(r.vtables[slot.Type]["#kind"])
+		kind := kinds.Kind(r.vtables[slot.Type]["#kind"])
 
 		// val, err := r.loadAddr(slot.Addr)
 		// if err != nil {
@@ -569,8 +605,8 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 		// log.Printf("%v %s = %v", slot.Addr, string(name), val)
 
 		switch kind {
-		case compiler.KindNil, compiler.KindVoid, compiler.KindInt, compiler.KindBool, compiler.KindFloat:
-		case compiler.KindString:
+		case kinds.Nil, kinds.Void, kinds.Int, kinds.Bool, kinds.Float:
+		case kinds.String:
 			val, err := r.loadAddr(slot.Addr)
 			if err != nil {
 				return err
@@ -583,7 +619,7 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 			// log.Printf("%s = %s", slot.Addr, str)
 
 			gc.addStrVar(slot.Addr, Addr(val))
-		case compiler.KindPointer:
+		case kinds.Pointer:
 			val, err := r.loadAddr(slot.Addr)
 			if err != nil {
 				return err
@@ -592,7 +628,7 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 			gc.addHeapVar(slot.Addr, Addr(val))
 
 			slots = append(slots, RuntimeTypeAddr{Type: int(r.vtables[slot.Type]["#pointee"]), Addr: Addr(val)})
-		case compiler.KindArray:
+		case kinds.Array:
 			length := int(r.vtables[slot.Type]["#length"])
 			elem := int(r.vtables[slot.Type]["#elem"])
 			elemSize := Size(r.vtables[elem]["#size"])
@@ -600,7 +636,7 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 			for i := 0; i < length; i++ {
 				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(elemSize * Size(i))})
 			}
-		case compiler.KindTuple:
+		case kinds.Tuple:
 			var totalOffset Size
 			elems := int(r.vtables[slot.Type]["#elems"])
 			for i := 0; i < elems; i++ {
@@ -611,14 +647,14 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 
 				totalOffset += elemSize
 			}
-		case compiler.KindInterface:
+		case kinds.Interface:
 			typ, err := r.loadAddr(slot.Addr)
 			if err != nil {
 				return err
 			}
 
 			slots = append(slots, RuntimeTypeAddr{Type: int(typ), Addr: slot.Addr.Offset(1)})
-		case compiler.KindSlice, compiler.KindVariadic:
+		case kinds.Slice, kinds.Variadic:
 			sliceData, err := r.loadAddr(slot.Addr)
 			if err != nil {
 				return err
@@ -637,7 +673,7 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 			for i := 0; i < int(sliceCap); i++ {
 				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: Addr(sliceData).Offset(elemSize * Size(i))})
 			}
-		case compiler.KindStruct:
+		case kinds.Struct:
 			var totalOffset Size
 			elems := int(r.vtables[slot.Type]["#fields"])
 			for i := 0; i < elems; i++ {
@@ -758,27 +794,27 @@ func (r *Runtime) toString(typ float64, value float64) (string, error) {
 		panic(fmt.Sprintf("runtime: could not resolve kind for type %d", int(typ)))
 	}
 
-	switch compiler.Kind(kind) {
-	case compiler.KindNil:
+	switch kinds.Kind(kind) {
+	case kinds.Nil:
 		return "<nil>", nil
-	case compiler.KindBool:
+	case kinds.Bool:
 		if value == 0 {
 			return "false", nil
 		} else {
 			return "true", nil
 		}
-	case compiler.KindInt:
+	case kinds.Int:
 		return fmt.Sprintf("%d", int(value)), nil
-	case compiler.KindFloat:
+	case kinds.Float:
 		return fmt.Sprintf("%f", value), nil
-	case compiler.KindString:
+	case kinds.String:
 		str, err := r.LoadString(Addr(value))
 		if err != nil {
 			return "", err
 		}
 
 		return string(str), nil
-	case compiler.KindPointer:
+	case kinds.Pointer:
 		return fmt.Sprintf("%d", int(value)), nil
 	default:
 		return fmt.Sprintf("<unhandled type: %d>", int(typ)), nil
@@ -797,15 +833,15 @@ func (r *Runtime) printVTable(typeID int) {
 	kind := r.vtables[typeID]["#kind"]
 	fmt.Fprintf(r.stdout, "Type %q %d (%d) %d\n", string(r.prog.Strings()[int(name)]), typeID, int(size), int(kind))
 
-	switch kind := compiler.Kind(kind); kind {
-	case compiler.KindPointer:
+	switch kind := kinds.Kind(kind); kind {
+	case kinds.Pointer:
 		underlying := int(r.vtables[typeID]["#pointee"])
 		fmt.Fprintf(r.stdout, "  Pointer to %d %q\n", underlying, string(r.prog.Strings()[int(r.vtables[underlying]["#name"])]))
-	case compiler.KindArray:
+	case kinds.Array:
 		elem := int(r.vtables[typeID]["#elem"])
 		length := int(r.vtables[typeID]["#length"])
 		fmt.Fprintf(r.stdout, "  Array length %d of %d %q\n", length, elem, string(r.prog.Strings()[int(r.vtables[elem]["#name"])]))
-	case compiler.KindTuple:
+	case kinds.Tuple:
 		elems := int(r.vtables[typeID]["#elems"])
 		for i := range elems {
 			elem := int(r.vtables[typeID][fmt.Sprintf("#elem.%d", i)])
@@ -821,31 +857,31 @@ func (r *Runtime) printVTable(typeID int) {
 	}
 }
 
-func (r *Runtime) pc() compiler.Addr {
-	return Addr(r.registers[compiler.RegisterPC])
+func (r *Runtime) pc() Addr {
+	return Addr(r.registers[air.RegisterPC])
 }
 
-func (r *Runtime) setPC(addr compiler.Addr) {
-	r.registers[compiler.RegisterPC] = float64(addr)
+func (r *Runtime) setPC(addr Addr) {
+	r.registers[air.RegisterPC] = float64(addr)
 }
 
-func (r *Runtime) fp() compiler.Addr {
-	return Addr(r.registers[compiler.RegisterFP])
+func (r *Runtime) fp() Addr {
+	return Addr(r.registers[air.RegisterFP])
 }
 
-func (r *Runtime) setFP(addr compiler.Addr) {
-	r.registers[compiler.RegisterFP] = float64(addr)
+func (r *Runtime) setFP(addr Addr) {
+	r.registers[air.RegisterFP] = float64(addr)
 }
 
-func (r *Runtime) sp() compiler.Addr {
-	return Addr(r.registers[compiler.RegisterSP])
+func (r *Runtime) sp() Addr {
+	return Addr(r.registers[air.RegisterSP])
 }
 
-func (r *Runtime) setSP(addr compiler.Addr) {
-	r.registers[compiler.RegisterSP] = float64(addr)
+func (r *Runtime) setSP(addr Addr) {
+	r.registers[air.RegisterSP] = float64(addr)
 }
 
-func (r *Runtime) splitAddr(addr compiler.Addr) (uint64, uint64) {
+func (r *Runtime) splitAddr(addr Addr) (uint64, uint64) {
 	return uint64(addr / PageSize), uint64(addr % PageSize)
 }
 
@@ -860,7 +896,7 @@ func (r *Runtime) CallExtern(name string, ret []float64, args ...float64) error 
 	return extern.Func(r, ret...)
 }
 
-func (r *Runtime) fetch(addr compiler.Addr) (compiler.Bytecode, error) {
+func (r *Runtime) fetch(addr Addr) (air.Instruction, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.codePages)) {
@@ -874,7 +910,7 @@ func (r *Runtime) fetch(addr compiler.Addr) (compiler.Bytecode, error) {
 	return r.codePages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadAddr(addr compiler.Addr) (float64, error) {
+func (r *Runtime) loadAddr(addr Addr) (float64, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
@@ -888,7 +924,7 @@ func (r *Runtime) loadAddr(addr compiler.Addr) (float64, error) {
 	return r.memPages[page][pageAddr], nil
 }
 
-func (r *Runtime) LoadString(addr compiler.Addr) (String, error) {
+func (r *Runtime) LoadString(addr Addr) (String, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.strPages)) {
@@ -902,7 +938,7 @@ func (r *Runtime) LoadString(addr compiler.Addr) (String, error) {
 	return r.strPages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]float64, error) {
+func (r *Runtime) loadArgs(sp Addr, size Size) ([]float64, error) {
 	var args []float64
 	for offset := Size(0); offset < size; offset++ {
 		arg, err := r.loadAddr(sp.Offset(offset - size))
@@ -916,7 +952,7 @@ func (r *Runtime) loadArgs(sp compiler.Addr, size Size) ([]float64, error) {
 	return args, nil
 }
 
-func (r *Runtime) storeAddr(addr compiler.Addr, val float64) error {
+func (r *Runtime) storeAddr(addr Addr, val float64) error {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
@@ -932,7 +968,7 @@ func (r *Runtime) storeAddr(addr compiler.Addr, val float64) error {
 	return nil
 }
 
-func (r *Runtime) storeStr(addr compiler.Addr, val String) error {
+func (r *Runtime) storeStr(addr Addr, val String) error {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.strPages)) {
@@ -1003,7 +1039,7 @@ func (r *Runtime) pop() (float64, error) {
 	return val, err
 }
 
-func (r *Runtime) loadImmediate(imm compiler.Immediate) loadFunc {
+func (r *Runtime) loadImmediate(imm air.Immediate) loadFunc {
 	return loadFunc(func() (float64, error) {
 		switch imm := imm.(type) {
 		case Int:
@@ -1021,11 +1057,11 @@ func (r *Runtime) loadImmediate(imm compiler.Immediate) loadFunc {
 	})
 }
 
-func (r *Runtime) loadIndirect(indirect compiler.Indirect) loadFunc {
+func (r *Runtime) loadIndirect(indirect air.Indirect) loadFunc {
 	return r.loadIndirectWithOffset(indirect.Ptr, 0)
 }
 
-func (r *Runtime) loadBinary(binop compiler.BinaryOperand) loadFunc {
+func (r *Runtime) loadBinary(binop air.BinaryOperand) loadFunc {
 	return loadFunc(func() (float64, error) {
 		a, err := r.load(binop.Left)()
 		if err != nil {
@@ -1080,7 +1116,7 @@ func (r *Runtime) loadBinary(binop compiler.BinaryOperand) loadFunc {
 	})
 }
 
-func (r *Runtime) loadUnary(not compiler.UnaryOperand) loadFunc {
+func (r *Runtime) loadUnary(not air.UnaryOperand) loadFunc {
 	return loadFunc(func() (float64, error) {
 		a, err := r.load(not.A)()
 		if err != nil {
@@ -1088,7 +1124,7 @@ func (r *Runtime) loadUnary(not compiler.UnaryOperand) loadFunc {
 		}
 
 		switch not.Op {
-		case compiler.OperatorNot:
+		case operators.Not:
 			if a == 0 {
 				return 1, nil
 			}
@@ -1101,7 +1137,7 @@ func (r *Runtime) loadUnary(not compiler.UnaryOperand) loadFunc {
 	})
 }
 
-func (r *Runtime) loadIndirectWithOffset(indirect *compiler.Operand, offset Size) loadFunc {
+func (r *Runtime) loadIndirectWithOffset(indirect *air.Operand, offset Size) loadFunc {
 	return loadFunc(func() (float64, error) {
 		base, err := r.load(indirect)()
 		if err != nil {
@@ -1112,13 +1148,13 @@ func (r *Runtime) loadIndirectWithOffset(indirect *compiler.Operand, offset Size
 	})
 }
 
-func (r *Runtime) loadRegister(reg compiler.Register) loadFunc {
+func (r *Runtime) loadRegister(reg air.Register) loadFunc {
 	return loadFunc(func() (float64, error) {
 		return r.registers[reg], nil
 	})
 }
 
-func (r *Runtime) loadVTable(lookup compiler.VTableLookup) loadFunc {
+func (r *Runtime) loadVTable(lookup air.VTableLookup) loadFunc {
 	return loadFunc(func() (float64, error) {
 		typeID, err := r.load(lookup.Type)()
 		if err != nil {
@@ -1155,20 +1191,20 @@ func (r *Runtime) loadVTable(lookup compiler.VTableLookup) loadFunc {
 	})
 }
 
-func (r *Runtime) load(operand *compiler.Operand) loadFunc {
+func (r *Runtime) load(operand *air.Operand) loadFunc {
 	switch operand.Kind {
-	case compiler.OperandKindImmediate:
-		return r.loadImmediate(operand.Value.(compiler.Immediate))
-	case compiler.OperandKindIndirect:
-		return r.loadIndirect(operand.Value.(compiler.Indirect))
-	case compiler.OperandKindRegister:
-		return r.loadRegister(operand.Value.(compiler.Register))
-	case compiler.OperandKindBinary:
-		return r.loadBinary(operand.Value.(compiler.BinaryOperand))
-	case compiler.OperandKindUnary:
-		return r.loadUnary(operand.Value.(compiler.UnaryOperand))
-	case compiler.OperandKindVTableLookup:
-		return r.loadVTable(operand.Value.(compiler.VTableLookup))
+	case air.OperandKindImmediate:
+		return r.loadImmediate(operand.Value.(air.Immediate))
+	case air.OperandKindIndirect:
+		return r.loadIndirect(operand.Value.(air.Indirect))
+	case air.OperandKindRegister:
+		return r.loadRegister(operand.Value.(air.Register))
+	case air.OperandKindBinary:
+		return r.loadBinary(operand.Value.(air.BinaryOperand))
+	case air.OperandKindUnary:
+		return r.loadUnary(operand.Value.(air.UnaryOperand))
+	case air.OperandKindVTableLookup:
+		return r.loadVTable(operand.Value.(air.VTableLookup))
 	default:
 		return func() (float64, error) {
 			return 0, fmt.Errorf("bad %s operand in runtime", operand.Kind)
@@ -1176,7 +1212,7 @@ func (r *Runtime) load(operand *compiler.Operand) loadFunc {
 	}
 }
 
-func (r *Runtime) storeIndirect(indirect compiler.Indirect) storeFunc {
+func (r *Runtime) storeIndirect(indirect air.Indirect) storeFunc {
 	return storeFunc(func(val float64, err error) error {
 		if err != nil {
 			return err
@@ -1191,7 +1227,7 @@ func (r *Runtime) storeIndirect(indirect compiler.Indirect) storeFunc {
 	})
 }
 
-func (r *Runtime) storeRegister(reg compiler.Register) storeFunc {
+func (r *Runtime) storeRegister(reg air.Register) storeFunc {
 	return storeFunc(func(val float64, err error) error {
 		if err != nil {
 			return err
@@ -1202,12 +1238,12 @@ func (r *Runtime) storeRegister(reg compiler.Register) storeFunc {
 	})
 }
 
-func (r *Runtime) store(operand *compiler.Operand) storeFunc {
+func (r *Runtime) store(operand *air.Operand) storeFunc {
 	switch operand.Kind {
-	case compiler.OperandKindIndirect:
-		return r.storeIndirect(operand.Value.(compiler.Indirect))
-	case compiler.OperandKindRegister:
-		return r.storeRegister(operand.Value.(compiler.Register))
+	case air.OperandKindIndirect:
+		return r.storeIndirect(operand.Value.(air.Indirect))
+	case air.OperandKindRegister:
+		return r.storeRegister(operand.Value.(air.Register))
 	default:
 		return func(_ float64, err error) error {
 			if err != nil {
@@ -1295,7 +1331,12 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 		r.registers[reg] = 0
 	}
 
-	r.setSP(Addr(r.prog.GlobalSize()))
+	globalSize, err := r.prog.GlobalSize()
+	if err != nil {
+		return err
+	}
+
+	r.setSP(Addr(globalSize))
 	for range len(r.registers) {
 		r.push(0)
 	}
@@ -1322,7 +1363,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 
 		if r.debug {
 			log.Println("--------------")
-			log.Printf("%s", code)
+			log.Printf("%v", code)
 			log.Printf("fp: %v", r.fp())
 			log.Printf("sp: %v", r.sp())
 			log.Printf("pc: %v", r.pc())
@@ -1335,8 +1376,8 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 		switch code := code.(type) {
 		case nil:
 			return fmt.Errorf("invalid nil bytecode: %w", err)
-		case compiler.Nop:
-		case compiler.Mov:
+		case air.Nop:
+		case air.Mov:
 			tmp := make([]float64, code.Size)
 			for i := Size(0); i < code.Size; i++ {
 				tmp[i], err = r.load(code.Src.OffsetReference(i))()
@@ -1351,7 +1392,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 					return err
 				}
 			}
-		case compiler.Cal:
+		case air.Cal:
 			funcInfoAddr, err := r.load(code.Func)()
 			if err != nil {
 				return fmt.Errorf("could not resolve function info: %w", err)
@@ -1360,6 +1401,20 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			funcType, err := r.loadAddr(Addr(funcInfoAddr))
 			if err != nil {
 				return fmt.Errorf("could not resolve function addr: %w", err)
+			}
+
+			if r.debug {
+				fNameAddr, err := r.loadAddr(Addr(funcInfoAddr) + 1)
+				if err != nil {
+					return err
+				}
+
+				fName, err := r.LoadString(Addr(fNameAddr))
+				if err != nil {
+					return err
+				}
+
+				log.Printf("call %s", string(fName))
 			}
 
 			r.funcTrace = append(r.funcTrace, float64(code.Line), funcInfoAddr)
@@ -1416,7 +1471,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 					log.Printf("extern call %s(%s) = %v", string(externNameStr), strings.Join(argStrs, ", "), strings.Join(retStrs, ", "))
 				}
 
-				r.setSP(r.sp() - compiler.Addr(entry.ArgSize+entry.ReturnSize))
+				r.setSP(r.sp() - Addr(entry.ArgSize+entry.ReturnSize))
 
 				continue
 			case RuntimeFuncTypeFunc:
@@ -1430,7 +1485,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				for reg := range Register(len(r.registers)) {
 					err := r.storeAddr(r.sp()+frameSize-Addr(reg)-1, r.registers[reg])
 					if err != nil {
-						return fmt.Errorf("failed to push %s", compiler.Register(reg))
+						return fmt.Errorf("failed to push %s", air.Register(reg))
 					}
 				}
 
@@ -1441,11 +1496,11 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			default:
 				return fmt.Errorf("unhandled function type %d", int(funcType))
 			}
-		case compiler.Ret:
+		case air.Ret:
 			fp := r.fp()
 
 			for reg := range r.registers {
-				r.registers[reg], err = r.loadAddr(fp.Offset(-compiler.Size(reg)))
+				r.registers[reg], err = r.loadAddr(fp.Offset(-air.Size(reg)))
 				if err != nil {
 					return fmt.Errorf("failed to push %s", Register(reg))
 				}
@@ -1468,7 +1523,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				}
 				return nil
 			}
-		case compiler.Jmp:
+		case air.Jmp:
 			cond, err := r.load(code.Cond)()
 			if err != nil {
 				return err
@@ -1482,34 +1537,24 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 
 				r.setPC(Addr(val))
 			}
-		case compiler.BinOp:
+		case air.BinOp:
 			err = r.store(code.Dst)(
 				binaryOp(
 					r,
-					binaryOperatorFuncs[compiler.BinaryOperation(code.Kind, code.Op, code.Kind)],
+					binaryOperation(code.Kind, code.Op, code.Kind),
 					r.load(code.Left),
 					r.load(code.Right),
 				),
 			)
-		case compiler.UnOp:
+		case air.UnOp:
 			err = r.store(code.Dst)(
 				unaryOp(
 					r,
-					unaryOperatorFuncs[code.Op],
+					unaryOperation(code.Op, code.Kind),
 					r.load(code.Src),
 				),
 			)
-		case compiler.Str:
-			addr, err := r.allocStr(code.Str)
-			if err != nil {
-				return err
-			}
-
-			err = r.store(code.Dst)(float64(addr), nil)
-			if err != nil {
-				return err
-			}
-		case compiler.Alc:
+		case air.Alc:
 			size, err := r.load(code.Size)()
 			if err != nil {
 				return err
@@ -1524,7 +1569,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			if err != nil {
 				return err
 			}
-		case compiler.App:
+		case air.App:
 			sliceData, err := r.load(code.Src.OffsetReference(0))()
 			if err != nil {
 				return err
@@ -1611,9 +1656,10 @@ type storeFunc func(float64, error) error
 
 type binaryOperatorFunc func(*Runtime, float64, float64) (float64, error)
 
-func binaryOp(r *Runtime, op binaryOperatorFunc, loadA, loadB loadFunc) (float64, error) {
-	if op == nil {
-		return 0, fmt.Errorf("invalid binary operation")
+func binaryOp(r *Runtime, opStr string, loadA, loadB loadFunc) (float64, error) {
+	op, ok := binaryOperatorFuncs[opStr]
+	if !ok {
+		return 0, fmt.Errorf("invalid binary operation %q", opStr)
 	}
 
 	a, err := loadA()
@@ -1631,9 +1677,10 @@ func binaryOp(r *Runtime, op binaryOperatorFunc, loadA, loadB loadFunc) (float64
 
 type unaryOperatorFunc func(*Runtime, float64) (float64, error)
 
-func unaryOp(r *Runtime, op unaryOperatorFunc, loadA loadFunc) (float64, error) {
-	if op == nil {
-		return 0, fmt.Errorf("invalid unary operation")
+func unaryOp(r *Runtime, opStr string, loadA loadFunc) (float64, error) {
+	op, ok := unaryOperatorFuncs[opStr]
+	if !ok {
+		return 0, fmt.Errorf("invalid unary operation %q", opStr)
 	}
 
 	a, err := loadA()
@@ -1644,16 +1691,15 @@ func unaryOp(r *Runtime, op unaryOperatorFunc, loadA loadFunc) (float64, error) 
 	return op(r, a)
 }
 
-type Float = compiler.Float
-type Int = compiler.Int
-type String = compiler.String
-type Nil = compiler.Nil
-type Bool = compiler.Bool
-type Addr = compiler.Addr
-type Size = compiler.Size
-type Register = compiler.Register
+type Float = air.Float
+type Int = air.Int
+type String = air.String
+type Bool = air.Bool
+type Addr = air.Addr
+type Size = air.Size
+type Register = air.Register
 
-var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{
+var binaryOperatorFuncs = map[string]binaryOperatorFunc{
 	"I**I": mathBinOp(opExp[Int]),
 	"F**F": mathBinOp(opExp[Float]),
 
@@ -1702,13 +1748,40 @@ var binaryOperatorFuncs = map[compiler.Operation]binaryOperatorFunc{
 	"P!=P": mathBinOp(opNE[Int]),
 }
 
+func binaryOperation(a kinds.Kind, op operators.Operator, b kinds.Kind) string {
+	return fmt.Sprintf("%s%s%s", shortKind(a), op, shortKind(b))
+}
+
+func unaryOperation(op operators.Operator, a kinds.Kind) string {
+	return fmt.Sprintf("%s%s", op, shortKind(a))
+}
+
+func shortKind(kind kinds.Kind) string {
+	switch kind {
+	case kinds.Int:
+		return "I"
+	case kinds.Float:
+		return "F"
+	case kinds.String:
+		return "S"
+	case kinds.Bool:
+		return "B"
+	case kinds.Pointer:
+		return "P"
+	case kinds.Type:
+		return "T"
+	default:
+		return "?"
+	}
+}
+
 func mathBinOp(f func(a, b float64) float64) binaryOperatorFunc {
 	return binaryOperatorFunc(func(_ *Runtime, a, b float64) (float64, error) {
 		return f(a, b), nil
 	})
 }
 
-var unaryOperatorFuncs = map[compiler.Operation]unaryOperatorFunc{
+var unaryOperatorFuncs = map[string]unaryOperatorFunc{
 	"-I": mathUnOp(opNeg[Int]),
 	"-F": mathUnOp(opNeg[Float]),
 }
@@ -1882,7 +1955,7 @@ func (r *Runtime) printStack() {
 			return
 		}
 
-		log.Printf("%s - 0x%04x", addr, int(val))
+		log.Printf("%v - 0x%04x", addr, int(val))
 
 		addr++
 	}

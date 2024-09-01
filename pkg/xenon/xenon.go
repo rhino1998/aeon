@@ -10,6 +10,10 @@ import (
 	"text/template"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
+	"github.com/rhino1998/aeon/pkg/compiler/air"
+	"github.com/rhino1998/aeon/pkg/compiler/kinds"
+	"github.com/rhino1998/aeon/pkg/compiler/operators"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
 )
 
 //go:embed main.xc.tmpl
@@ -82,24 +86,26 @@ func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Functi
 func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *compiler.Program) error {
 	var xeCtx xenonContext
 	xeCtx.PageSize = 65535
-	xeCtx.NumCodePages = (len(prog.Bytecode()) + xeCtx.PageSize) / xeCtx.PageSize
+	xeCtx.NumCodePages = (len(prog.Instructions()) + xeCtx.PageSize) / xeCtx.PageSize
 	xeCtx.NumMemPages = 1
 	xeCtx.NumStrPages = 1
 	xeCtx.NumRegisters = prog.Registers()
 	xeCtx.MaxLoadDepth = 5
-	xeCtx.GlobalSize = int(prog.GlobalSize())
+	globalSize, err := prog.GlobalSize()
+	if err != nil {
+		return err
+	}
+	xeCtx.GlobalSize = int(globalSize)
 	xeCtx.VTable = make(VTable)
 	xeCtx.Debug = logger.Handler().Enabled(ctx, slog.LevelDebug)
 	xeCtx.OPSep = "\x9B"
 
-	xeCtx.KindNil = int(compiler.KindNil)
-	xeCtx.KindInt = int(compiler.KindInt)
-	xeCtx.KindFloat = int(compiler.KindFloat)
-	xeCtx.KindBool = int(compiler.KindBool)
-	xeCtx.KindString = int(compiler.KindString)
-	xeCtx.KindPointer = int(compiler.KindPointer)
-
-	var err error
+	xeCtx.KindNil = int(kinds.Nil)
+	xeCtx.KindInt = int(kinds.Int)
+	xeCtx.KindFloat = int(kinds.Float)
+	xeCtx.KindBool = int(kinds.Bool)
+	xeCtx.KindString = int(kinds.String)
+	xeCtx.KindPointer = int(kinds.Pointer)
 
 	for _, str := range prog.Strings() {
 		xeCtx.Strings = append(xeCtx.Strings, string(str))
@@ -117,22 +123,40 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		xeCtx.UpdateFuncs = append(xeCtx.UpdateFuncs, int(f.Addr()))
 	}
 
+	allFuncs := make(map[string]int)
+
+	for _, fun := range prog.AllFunctions() {
+		allFuncs[fun.QualifiedName()] = int(fun.InfoAddr())
+	}
+
 	for i, typ := range prog.Types() {
 		xeCtx.VTable[i] = make(map[string]int)
-		xeCtx.VTable[i]["#size"] = int(typ.Size())
+		typSize, err := air.TypeSize(typ)
+		if err != nil {
+			return fmt.Errorf("failed to get type size: %w", err)
+		}
+		xeCtx.VTable[i]["#size"] = int(typSize)
 		xeCtx.VTable[i]["#kind"] = int(typ.Kind())
 		switch typ := typ.(type) {
-		case *compiler.DerivedType:
+		case *types.Derived:
 			for _, method := range typ.Methods(false) {
-				methodFunc := typ.Method(method.Name, false)
-				xeCtx.VTable[i][method.String()] = int(methodFunc.InfoAddr())
+				methodName := typ.MethodQualifiedName(false, method.Name)
+				funAddr, ok := allFuncs[methodName]
+				if !ok {
+					return fmt.Errorf("method %s not found", methodName)
+				}
+				xeCtx.VTable[i][method.Name] = funAddr
 			}
-		case *compiler.PointerType:
-			switch typ := compiler.DereferenceType(typ.Pointee()).(type) {
-			case *compiler.DerivedType:
+		case *types.Pointer:
+			switch typ := types.Dereference(typ.Pointee()).(type) {
+			case *types.Derived:
 				for _, method := range typ.Methods(true) {
-					methodFunc := typ.Method(method.Name, true)
-					xeCtx.VTable[i][method.String()] = int(methodFunc.InfoAddr())
+					methodName := typ.MethodQualifiedName(true, method.Name)
+					funAddr, ok := allFuncs[methodName]
+					if !ok {
+						return fmt.Errorf("method %s not found", methodName)
+					}
+					xeCtx.VTable[i][method.Name] = funAddr
 				}
 			}
 		}
@@ -145,23 +169,27 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		slog.Int("code_pages", xeCtx.NumCodePages),
 		slog.Int("mem_pages", xeCtx.NumMemPages),
 		slog.Int("str_pages", xeCtx.NumStrPages),
-		slog.Int("instructions", len(prog.Bytecode())),
+		slog.Int("instructions", len(prog.Instructions())),
 	)
 
 	for _, extern := range prog.ExternFuncs() {
-		ftype := extern.Type().(*compiler.FunctionType)
+		ftype := extern.Type().(*types.Function)
 		argTypes := make([]ArgWrapper, 0)
 		var size Size
-		size += ftype.Return.Size()
+		retSize, err := air.TypeSize(ftype.Return)
+		if err != nil {
+			return fmt.Errorf("failed to get return size: %w", err)
+		}
+		size += retSize
 
-		kinds, err := extern.FlatParameterKinds()
+		flatKinds, err := extern.FlatParameterKinds()
 		if err != nil {
 			return fmt.Errorf("failed to get flat parameter kinds: %w", err)
 		}
 
-		for _, kind := range kinds {
+		for _, kind := range flatKinds {
 			var wrapper ArgWrapper
-			if kind == compiler.KindString {
+			if kind == kinds.String {
 				wrapper.Prefix = "@aeon_str_load("
 				wrapper.Suffix = ")"
 			}
@@ -172,13 +200,13 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		}
 		xeCtx.ExternFuncs = append(xeCtx.ExternFuncs, ExternFuncEntry{
 			ArgTypes:  argTypes,
-			HasReturn: ftype.Return.Kind() != compiler.KindVoid,
+			HasReturn: ftype.Return.Kind() != kinds.Void,
 			Size:      int(size),
 			Name:      extern.Name(),
 		})
 	}
 
-	for i, bc := range prog.Bytecode() {
+	for i, bc := range prog.Instructions() {
 		var buf bytes.Buffer
 		err := xeCtx.marshalByteCode(&buf, bc)
 		if err != nil {
@@ -226,12 +254,12 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	return tmpl.Execute(w, &xeCtx)
 }
 
-func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error {
+func (x *xenonContext) marshalByteCode(w io.Writer, bc air.Instruction) error {
 	fmt.Fprintf(w, "%s%s", bc.Name(), x.OPSep)
 
 	switch bc := bc.(type) {
-	case compiler.Nop:
-	case compiler.Mov:
+	case air.Nop:
+	case air.Mov:
 		err := x.marshalOperand(w, bc.Dst)
 		if err != nil {
 			return err
@@ -244,7 +272,7 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 		}
 
 		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Size))
-	case compiler.Alc:
+	case air.Alc:
 		err := x.marshalOperand(w, bc.Dst)
 		if err != nil {
 			return err
@@ -255,7 +283,7 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 		if err != nil {
 			return err
 		}
-	case compiler.App:
+	case air.App:
 		err := x.marshalOperand(w, bc.Dst)
 		if err != nil {
 			return err
@@ -272,7 +300,7 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 			return err
 		}
 		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Size))
-	case compiler.BinOp:
+	case air.BinOp:
 		err := x.marshalOperand(w, bc.Dst)
 		if err != nil {
 			return err
@@ -292,12 +320,13 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 		if err != nil {
 			return err
 		}
-	case compiler.UnOp:
+	case air.UnOp:
 		err := x.marshalOperand(w, bc.Dst)
 		if err != nil {
 			return err
 		}
 
+		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Kind))
 		fmt.Fprintf(w, "%s%s", x.OPSep, bc.Op)
 
 		fmt.Fprintf(w, "%s", x.OPSep)
@@ -305,7 +334,7 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 		if err != nil {
 			return err
 		}
-	case compiler.Jmp:
+	case air.Jmp:
 		err := x.marshalOperand(w, bc.Cond)
 		if err != nil {
 			return err
@@ -316,15 +345,9 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 		if err != nil {
 			return err
 		}
-	case compiler.Ret:
+	case air.Ret:
 		fmt.Fprintf(w, "%d", int(bc.Args))
-	case compiler.Str:
-		err := x.marshalOperand(w, bc.Dst)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(w, "%s%s", x.OPSep, string(bc.Str))
-	case compiler.Cal:
+	case air.Cal:
 		err := x.marshalOperand(w, bc.Func)
 		if err != nil {
 			return err
@@ -334,9 +357,9 @@ func (x *xenonContext) marshalByteCode(w io.Writer, bc compiler.Bytecode) error 
 	return nil
 }
 
-func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
+func (x *xenonContext) marshalOperand(w io.Writer, op *air.Operand) error {
 	switch op.Kind {
-	case compiler.OperandKindImmediate:
+	case air.OperandKindImmediate:
 		switch imm := op.Value.(type) {
 		case Int:
 			fmt.Fprintf(w, "I%vI", int(imm))
@@ -350,17 +373,15 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 			}
 		case String:
 			panic("BAD")
-		case Nil:
-			fmt.Fprintf(w, "I0I")
 		}
 
 		return nil
-	case compiler.OperandKindRegister:
+	case air.OperandKindRegister:
 		fmt.Fprintf(w, "I%dIR", int(op.Value.(Register)))
 
 		return nil
-	case compiler.OperandKindIndirect:
-		err := x.marshalOperand(w, op.Value.(compiler.Indirect).Ptr)
+	case air.OperandKindIndirect:
+		err := x.marshalOperand(w, op.Value.(air.Indirect).Ptr)
 		if err != nil {
 			return err
 		}
@@ -368,36 +389,36 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 		fmt.Fprintf(w, "%s", op.Kind.String())
 
 		return nil
-	case compiler.OperandKindUnary:
-		err := x.marshalOperand(w, op.Value.(compiler.UnaryOperand).A)
+	case air.OperandKindUnary:
+		err := x.marshalOperand(w, op.Value.(air.UnaryOperand).A)
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s", operatorChar(op.Value.(compiler.UnaryOperand).Op))
+		fmt.Fprintf(w, "%s", operatorChar(op.Value.(air.UnaryOperand).Op))
 
 		return nil
-	case compiler.OperandKindBinary:
-		err := x.marshalOperand(w, op.Value.(compiler.BinaryOperand).Left)
+	case air.OperandKindBinary:
+		err := x.marshalOperand(w, op.Value.(air.BinaryOperand).Left)
 		if err != nil {
 			return err
 		}
 
-		err = x.marshalOperand(w, op.Value.(compiler.BinaryOperand).Right)
+		err = x.marshalOperand(w, op.Value.(air.BinaryOperand).Right)
 		if err != nil {
 			return err
 		}
 
-		fmt.Fprintf(w, "%s", operatorChar(op.Value.(compiler.BinaryOperand).Op))
+		fmt.Fprintf(w, "%s", operatorChar(op.Value.(air.BinaryOperand).Op))
 
 		return nil
-	case compiler.OperandKindVTableLookup:
-		err := x.marshalOperand(w, op.Value.(compiler.VTableLookup).Type)
+	case air.OperandKindVTableLookup:
+		err := x.marshalOperand(w, op.Value.(air.VTableLookup).Type)
 		if err != nil {
 			return err
 		}
 
-		err = x.marshalOperand(w, op.Value.(compiler.VTableLookup).Method)
+		err = x.marshalOperand(w, op.Value.(air.VTableLookup).Method)
 		if err != nil {
 			return err
 		}
@@ -410,25 +431,25 @@ func (x *xenonContext) marshalOperand(w io.Writer, op *compiler.Operand) error {
 	}
 }
 
-func operatorChar(op compiler.Operator) string {
+func operatorChar(op operators.Operator) string {
 	switch op {
-	case compiler.OperatorAddition,
-		compiler.OperatorSubtraction,
-		compiler.OperatorMultiplication,
-		compiler.OperatorDivision,
-		compiler.OperatorLessThan,
-		compiler.OperatorGreaterThan,
-		compiler.OperatorNot,
-		compiler.OperatorBoundsCheck,
-		compiler.OperatorModulo:
+	case operators.Addition,
+		operators.Subtraction,
+		operators.Multiplication,
+		operators.Division,
+		operators.LessThan,
+		operators.GreaterThan,
+		operators.Not,
+		operators.BoundsCheck,
+		operators.Modulo:
 		return string(op)
-	case compiler.OperatorEqual:
+	case operators.Equal:
 		return "="
-	case compiler.OperatorNotEqual:
+	case operators.NotEqual:
 		return "≠"
-	case compiler.OperatorLessThanOrEqual:
+	case operators.LessThanOrEqual:
 		return "󰥽"
-	case compiler.OperatorGreaterThanOrEqual:
+	case operators.GreaterThanOrEqual:
 		return "≥"
 	default:
 		return "?"

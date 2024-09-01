@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/rhino1998/aeon/pkg/compiler/kinds"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
 type Expression interface {
-	Type() Type
+	Type() types.Type
 
 	WrapError(error) error
 }
@@ -20,55 +22,55 @@ type DotExpression struct {
 	parser.Position
 }
 
-func (e *DotExpression) Type() Type {
+func (e *DotExpression) Type() types.Type {
 	return resolveDotExpressionType(e, e.Receiver.Type())
 }
 
-func resolveDotExpressionType(e *DotExpression, typ Type) Type {
-	switch typ := ResolveType(typ).(type) {
-	case *StructType:
+func resolveDotExpressionType(e *DotExpression, typ types.Type) types.Type {
+	switch typ := types.Resolve(typ).(type) {
+	case *types.Struct:
 		field, ok := typ.GetField(e.Key)
 		if !ok {
-			return UnknownType
+			return types.Unknown
 		}
 
 		return field.Type
-	case *TupleType:
+	case *types.Tuple:
 		index, err := strconv.Atoi(e.Key)
 		if err != nil {
-			return UnknownType
+			return types.Unknown
 		}
 
 		if index >= len(typ.Elems()) {
-			return UnknownType
+			return types.Unknown
 		}
 
 		return typ.Elems()[index]
-	case *DerivedType:
-		ftype, ok := typ.BoundMethodType(e.Key)
+	case *types.Derived:
+		method, ok := types.Methods(typ).Get(e.Key)
 		if !ok {
 			return resolveDotExpressionType(e, typ.Underlying())
 		}
 
-		return ftype
-	case *PointerType:
+		return method.BoundFunction()
+	case *types.Pointer:
 		return resolveDotExpressionType(e, typ.Pointee())
-	case *TypeType:
-		method, ok := TypeMethod(typ.Type, e.Key)
+	case *types.TypeType:
+		method, ok := types.Methods(typ.Type).Get(e.Key)
 		if !ok {
-			return UnknownType
+			return types.Unknown
 		}
 
-		return method.Type().(*FunctionType).ToFunction()
-	case *InterfaceType:
+		return method.UnboundFunction()
+	case *types.Interface:
 		method, ok := typ.Methods().Get(e.Key)
 		if !ok {
-			return UnknownType
+			return types.Unknown
 		}
 
-		return method.BoundFunctionType()
+		return method.BoundFunction()
 	default:
-		return UnknownType
+		return types.Unknown
 	}
 }
 
@@ -79,20 +81,20 @@ type IndexExpression struct {
 	parser.Position
 }
 
-func (e *IndexExpression) Type() Type {
-	return resolveIndexExpressionType(e, ResolveType(e.Receiver.Type()))
+func (e *IndexExpression) Type() types.Type {
+	return resolveIndexExpressionType(e, types.Resolve(e.Receiver.Type()))
 }
 
-func resolveIndexExpressionType(_ *IndexExpression, typ Type) Type {
+func resolveIndexExpressionType(_ *IndexExpression, typ types.Type) types.Type {
 	switch typ := typ.(type) {
-	case *MapType:
+	case *types.Map:
 		return typ.Value()
-	case *SliceType:
+	case *types.Slice:
 		return typ.Elem()
-	case *ArrayType:
+	case *types.Array:
 		return typ.Elem()
 	default:
-		return UnknownType
+		return types.Unknown
 	}
 }
 
@@ -111,7 +113,7 @@ func (e *ParenthesizedExpression) Evaluate() (LiteralValue, error) {
 	return exprConst.Evaluate()
 }
 
-func (e *ParenthesizedExpression) Type() Type {
+func (e *ParenthesizedExpression) Type() types.Type {
 	return e.Expression.Type()
 }
 
@@ -127,25 +129,23 @@ type TupleExpression struct {
 	parser.Position
 }
 
-func (e *TupleExpression) Type() Type {
-	elemTyps := make([]Type, 0, len(e.Elems))
+func (e *TupleExpression) Type() types.Type {
+	elemTyps := make([]types.Type, 0, len(e.Elems))
 	for _, elem := range e.Elems {
 		elemTyps = append(elemTyps, elem.Type())
 	}
 
-	return &TupleType{
-		elems: elemTyps,
-	}
+	return types.NewTuple(elemTyps...)
 }
 
 type TypeLiteralExpression struct {
-	typ   Type
+	typ   types.Type
 	Elems []Expression
 
 	parser.Position
 }
 
-func (e *TypeLiteralExpression) Type() Type {
+func (e *TypeLiteralExpression) Type() types.Type {
 	return e.typ
 }
 
@@ -153,8 +153,8 @@ type UnknownExpression struct {
 	parser.Expr
 }
 
-func (e *UnknownExpression) Type() Type {
-	return UnknownType
+func (e *UnknownExpression) Type() types.Type {
+	return types.Unknown
 }
 
 type SpreadExpression struct {
@@ -163,15 +163,11 @@ type SpreadExpression struct {
 	parser.Position
 }
 
-func (e *SpreadExpression) Type() Type {
-	if e.Expr.Type().Kind() != KindSlice {
-		return &VariadicType{
-			elem: UnknownType,
-
-			Position: e.Position,
-		}
+func (e *SpreadExpression) Type() types.Type {
+	if e.Expr.Type().Kind() != kinds.Slice {
+		return types.NewVariadic(types.Unknown)
 	}
-	return ResolveType(e.Expr.Type()).(*SliceType).AsVariadic()
+	return types.Resolve(e.Expr.Type()).(*types.Slice).AsVariadic()
 }
 
 type ErrorReturnExpression struct {
@@ -181,41 +177,41 @@ type ErrorReturnExpression struct {
 	parser.Position
 }
 
-func (e *ErrorReturnExpression) Type() Type {
+func (e *ErrorReturnExpression) Type() types.Type {
 	switch e.Expr.Type().Kind() {
-	case KindInterface:
-		iface := e.Expr.Type().(*InterfaceType)
-		if !TypeError.Underlying().(*InterfaceType).ImplementedBy(iface) {
-			return UnknownType
+	case kinds.Interface:
+		iface := e.Expr.Type().(*types.Interface)
+		if !TypeError.Underlying().(*types.Interface).ImplementedBy(iface) {
+			return types.Unknown
 		}
 
-		return TypeVoid
-	case KindTuple:
-		tupleType := e.Expr.Type().(*TupleType)
-		iface, ok := ResolveType(tupleType.Elems()[len(tupleType.Elems())-1]).(*InterfaceType)
+		return types.Void
+	case kinds.Tuple:
+		tupleType := e.Expr.Type().(*types.Tuple)
+		iface, ok := types.Resolve(tupleType.Elems()[len(tupleType.Elems())-1]).(*types.Interface)
 		if !ok {
-			return UnknownType
+			return types.Unknown
 		}
 
-		if !TypeError.Underlying().(*InterfaceType).ImplementedBy(iface) {
-			return UnknownType
+		if !TypeError.Underlying().(*types.Interface).ImplementedBy(iface) {
+			return types.Unknown
 		}
 
 		if len(tupleType.Elems()) == 1 {
-			return TypeVoid
+			return types.Void
 		}
 
 		if len(tupleType.Elems()) == 2 {
 			return tupleType.Elems()[0]
 		}
 
-		return NewTupleType(tupleType.Elems()[:len(tupleType.Elems())-1]...)
+		return types.NewTuple(tupleType.Elems()[:len(tupleType.Elems())-1]...)
 	default:
-		return UnknownType
+		return types.Unknown
 	}
 }
 
-var errorHandlerFunctionType = NewFunctionType(TypeVoid, []Type{TypeError}, TypeError)
+var errorHandlerFunctionType = types.NewFunction(types.Void, []types.Type{TypeError}, TypeError)
 
 type ErrorHandlerExpression struct {
 	Function *Function
@@ -225,6 +221,41 @@ type ErrorHandlerExpression struct {
 	parser.Position
 }
 
-func (e *ErrorHandlerExpression) Type() Type {
+func (e *ErrorHandlerExpression) Type() types.Type {
 	return e.Expr.Type()
+}
+
+type NilExpression struct {
+	typ types.Type
+
+	parser.Position
+}
+
+func (e *NilExpression) Type() types.Type {
+	return e.typ
+}
+
+type InterfaceCoercionExpression struct {
+	Interface  *types.Interface
+	Expression Expression
+
+	parser.Position
+}
+
+func (e *InterfaceCoercionExpression) Type() types.Type {
+	return e.Interface
+}
+
+func (e *InterfaceCoercionExpression) WrapError(err error) error {
+	return e.Expression.WrapError(err)
+}
+
+type TypeExpression struct {
+	typ types.Type
+
+	parser.Position
+}
+
+func (t *TypeExpression) Type() types.Type {
+	return &types.TypeType{Type: t.typ}
 }

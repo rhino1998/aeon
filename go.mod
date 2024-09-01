@@ -6,6 +6,7 @@ require (
 	github.com/neilotoole/slogt v1.1.0
 	github.com/stretchr/testify v1.8.4
 	github.com/urfave/cli/v3 v3.0.0-alpha9
+	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948
 )
 
 require (

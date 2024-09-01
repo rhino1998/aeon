@@ -1,8 +1,11 @@
-package compiler
+package air
 
 import (
 	"fmt"
-	"reflect"
+
+	"github.com/rhino1998/aeon/pkg/compiler/operators"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
+	"golang.org/x/exp/constraints"
 )
 
 type OperandKind int
@@ -22,6 +25,9 @@ const (
 	OperandKindString
 	OperandKindSymbol
 	OperandKindLocal
+	OperandKindTemp
+	OperandKindGlobal
+	OperandKindConstant
 )
 
 func (s OperandKind) String() string {
@@ -46,22 +52,57 @@ func (s OperandKind) String() string {
 		return "<compiler string>"
 	case OperandKindLocal:
 		return "<compiler local>"
+	case OperandKindTemp:
+		return "<compiler temp>"
+	case OperandKindGlobal:
+		return "<compiler global>"
 	default:
 		return "?"
 	}
 }
 
-func TypeOperand(name TypeName) *Operand {
+const (
+	RegisterPC Register = 0
+	RegisterSP Register = 1
+	RegisterFP Register = 2
+)
+
+type Register int64
+
+func (r Register) String() string {
+	return fmt.Sprintf("reg%02x", int64(r))
+}
+
+func RegisterOperand(reg Register) *Operand {
+	return &Operand{
+		Kind:  OperandKindRegister,
+		Value: reg,
+	}
+}
+
+var (
+	OperandRegisterPC = RegisterOperand(RegisterPC)
+	OperandRegisterSP = RegisterOperand(RegisterSP)
+	OperandRegisterFP = RegisterOperand(RegisterFP)
+)
+
+func TypeOperand(name types.Name) *Operand {
 	return &Operand{
 		Kind:  OperandKindType,
 		Value: name,
 	}
 }
+func FloatOperand(f Float) *Operand {
+	return &Operand{
+		Kind:  OperandKindImmediate,
+		Value: f,
+	}
+}
 
-func StringOperand(name String) *Operand {
+func StringOperand(str String) *Operand {
 	return &Operand{
 		Kind:  OperandKindString,
-		Value: name,
+		Value: str,
 	}
 }
 
@@ -72,9 +113,30 @@ func LabelOperand(label Label) *Operand {
 	}
 }
 
-func LocalOperand(v *Variable) *Operand {
+func LocalOperand(v Variable) *Operand {
 	return &Operand{
 		Kind:  OperandKindLocal,
+		Value: v,
+	}
+}
+
+func TempOperand(v Variable) *Operand {
+	return &Operand{
+		Kind:  OperandKindTemp,
+		Value: v,
+	}
+}
+
+func GlobalOperand(v Variable) *Operand {
+	return &Operand{
+		Kind:  OperandKindGlobal,
+		Value: v,
+	}
+}
+
+func ConstantOperand(v Variable) *Operand {
+	return &Operand{
+		Kind:  OperandKindConstant,
 		Value: v,
 	}
 }
@@ -93,16 +155,16 @@ func (i Indirect) String() string {
 }
 
 type UnaryOperand struct {
-	Op Operator `xc:"o"`
-	A  *Operand `xc:"a"`
+	Op operators.Operator `xc:"o"`
+	A  *Operand           `xc:"a"`
 }
 
 func (n UnaryOperand) String() string { return fmt.Sprintf("%s%s", n.Op, n.A) }
 
 type BinaryOperand struct {
-	Left  *Operand `xc:"a"`
-	Op    Operator `xc:"o"`
-	Right *Operand `xc:"b"`
+	Left  *Operand           `xc:"a"`
+	Op    operators.Operator `xc:"o"`
+	Right *Operand           `xc:"b"`
 }
 
 func (o BinaryOperand) String() string {
@@ -169,7 +231,7 @@ func (o *Operand) walk(w operandWalkFunc) (*Operand, error) {
 		o.Value = v
 
 		return w(o)
-	case OperandKindImmediate, OperandKindLabel, OperandKindString, OperandKindRegister, OperandKindType, OperandKindLocal:
+	case OperandKindImmediate, OperandKindLabel, OperandKindString, OperandKindRegister, OperandKindType, OperandKindLocal, OperandKindGlobal, OperandKindTemp:
 		return w(o)
 	default:
 		return nil, fmt.Errorf("unhandled operand type %q", o.Kind)
@@ -201,25 +263,25 @@ func (o *Operand) OffsetReference(offset Size) *Operand {
 		return o
 	}
 
-	return o.AddressOf().ConstOffset(offset).Dereference()
+	return o.AddressOf().AddConst(offset).Dereference()
 }
 
-func (o *Operand) ConstOffset(offset Size) *Operand {
-	return o.Offset(ImmediateOperand(Int(offset)))
+func (o *Operand) AddConst(offset Size) *Operand {
+	return o.Add(IntOperand(offset))
 }
 
-func (o *Operand) Offset(offset *Operand) *Operand {
+func (o *Operand) Add(r *Operand) *Operand {
 	return &Operand{
 		Kind: OperandKindBinary,
 		Value: BinaryOperand{
 			Left:  o,
-			Op:    "+",
-			Right: offset,
+			Op:    operators.Addition,
+			Right: r,
 		},
 	}
 }
 
-func (o *Operand) Stride(size *Operand) *Operand {
+func (o *Operand) Mul(size *Operand) *Operand {
 	return &Operand{
 		Kind: OperandKindBinary,
 		Value: BinaryOperand{
@@ -247,7 +309,7 @@ func (o *Operand) Not() *Operand {
 	return &Operand{
 		Kind: OperandKindUnary,
 		Value: UnaryOperand{
-			Op: OperatorNot,
+			Op: operators.Not,
 			A:  o,
 		},
 	}
@@ -262,15 +324,46 @@ func (o *Operand) Bound(bound *Operand) *Operand {
 		Kind: OperandKindBinary,
 		Value: BinaryOperand{
 			Left:  o,
-			Op:    OperatorBoundsCheck,
+			Op:    operators.BoundsCheck,
 			Right: bound,
 		},
 	}
 }
 
-func (o *Operand) Equal(b *Operand) bool {
-	// TODO: non-reflect
-	return reflect.DeepEqual(o, b)
+func (o *Operand) Equal(r *Operand) *Operand {
+	return &Operand{
+		Kind: OperandKindBinary,
+		Value: BinaryOperand{
+			Left:  o,
+			Op:    operators.Equal,
+			Right: r,
+		},
+	}
+}
+
+func (o *Operand) NotEqual(r *Operand) *Operand {
+	return &Operand{
+		Kind: OperandKindBinary,
+		Value: BinaryOperand{
+			Left:  o,
+			Op:    operators.NotEqual,
+			Right: r,
+		},
+	}
+}
+
+func IntOperand[I constraints.Integer](i I) *Operand {
+	return &Operand{
+		Value: Int(i),
+		Kind:  OperandKindImmediate,
+	}
+}
+
+func BoolOperand[B ~bool](b B) *Operand {
+	return &Operand{
+		Value: Bool(b),
+		Kind:  OperandKindImmediate,
+	}
 }
 
 func ImmediateOperand(imm Immediate) *Operand {

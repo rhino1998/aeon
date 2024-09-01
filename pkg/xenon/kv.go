@@ -4,18 +4,17 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"go/types"
 	"io"
 	"reflect"
 	"slices"
 	"unicode"
-
-	"github.com/rhino1998/aeon/pkg/compiler"
 )
 
 var (
-	tupleType = reflect.TypeOf(compiler.Tuple{})
-	mapType   = reflect.TypeOf(compiler.Map{})
-	sliceType = reflect.TypeOf(compiler.Slice{})
+	tupleType = reflect.TypeOf(types.Tuple{})
+	mapType   = reflect.TypeOf(types.Map{})
+	sliceType = reflect.TypeOf(types.Slice{})
 )
 
 func marshalXenon(v reflect.Value) ([]byte, error) {

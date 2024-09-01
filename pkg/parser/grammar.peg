@@ -4,6 +4,8 @@
   import (
 		"log"
 		"slices"
+
+    "github.com/rhino1998/aeon/pkg/compiler/operators"
 	)
 
   func anyToSlice[T any](s any) []T {
@@ -307,7 +309,7 @@ AssignmentStatement <- left:Expr _ '=' _ right:Expr {
 AssignmentOperatorStatement <- left:Expr _ op:("+=" / "-=" / "*=" / "/=" / "%=" / "**=") _ right:Expr {
   return AssignmentOperatorStatement{
     Left:left.(Expr),
-    Operator:Operator(op.([]byte)),
+    Operator:operators.Operator(op.([]byte)),
     Right:right.(Expr),
 
     Position: pos(c),
@@ -325,7 +327,7 @@ ExprStatement <- exp:Expr {
 PostfixStatement <- exp:Expr _ op:("++" / "--") {
   return PostfixStatement{
     Expr: exp.(Expr),
-    Operator: Operator(op.([]byte)),
+    Operator: operators.Operator(op.([]byte)),
 
     Position: pos(c),
   }, nil
@@ -672,7 +674,7 @@ MaybeExpExpr <- ExpExpr / TermExpr
 ExpExpr <- left:TermExpr _ op:("**") __ right:MaybeExpExpr {
   return BinaryExpr{
     Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
+    Operator: operators.Operator(op.([]byte)),
     Right: right.(Expr),
 
     Position: pos(c),
@@ -684,7 +686,7 @@ MaybeMulExpr <- MulExpr / MaybeExpExpr
 MulExpr <- left:MaybeExpExpr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") __ right:MaybeMulExpr {
   return BinaryExpr{
     Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
+    Operator: operators.Operator(op.([]byte)),
     Right: right.(Expr),
 
     Position: pos(c),
@@ -696,7 +698,7 @@ MaybeAddExpr <- AddExpr / MaybeMulExpr
 AddExpr <- left:MaybeMulExpr _ op:("+" / "-" / "|" / "^") __ right:MaybeAddExpr {
   return BinaryExpr{
     Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
+    Operator: operators.Operator(op.([]byte)),
     Right: right.(Expr),
 
     Position: pos(c),
@@ -708,7 +710,7 @@ MaybeCmpExpr <- CmpExpr / MaybeAddExpr
 CmpExpr <- left:MaybeAddExpr _ op:("==" / "!=" / ">=" / "<=" / ">" / "<") __ right:MaybeCmpExpr {
   return BinaryExpr{
     Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
+    Operator: operators.Operator(op.([]byte)),
     Right: right.(Expr),
 
     Position: pos(c),
@@ -720,7 +722,7 @@ MaybeAndExpr <- AndExpr / MaybeCmpExpr
 AndExpr <- left:MaybeCmpExpr _ op:("&&") __ right:MaybeCmpExpr {
   return BinaryExpr{
     Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
+    Operator: operators.Operator(op.([]byte)),
     Right: right.(Expr),
 
     Position: pos(c),
@@ -732,7 +734,7 @@ MaybeOrExpr <- OrExpr / MaybeAndExpr
 OrExpr <- left:MaybeAndExpr _ op:("||") __ right:MaybeAndExpr {
   return BinaryExpr{
     Left: left.(Expr),
-    Operator: Operator(op.([]byte)),
+    Operator: operators.Operator(op.([]byte)),
     Right: right.(Expr),
 
     Position: pos(c),
@@ -751,7 +753,7 @@ ErrorHandlerExpr <- expr:MaybeOrExpr _ op:("->") __ handler:MaybeErrorHandlerExp
 
 UnaryExpr <- op:("-" / "+" / "!" / "^" / "*" / "&") exp:Expr {
   return UnaryExpr{
-    Operator: Operator(op.([]byte)),
+    Operator: operators.Operator(op.([]byte)),
     Expr: exp.(Expr),
 
     Position: pos(c),

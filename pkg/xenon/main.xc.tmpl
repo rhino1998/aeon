@@ -368,19 +368,17 @@ function @aeon_bop($kind:number, $op:text, $a:text, $b:text):number
 		@__builtin_panic("bad <= operand")
 
 
-function @aeon_uop($op:text, $a:text):number
+function @aeon_uop($kind:number, $op:text, $a:text):number
 	var $av = @aeon_load($a)
 
-	if ($op == "-I")
+	if ($op == "!")
+		return !$av
+	elseif ($op == "-")
 		return -$av
-	elseif ($op == "-F")
-		return -$av
-	elseif ($op == "+I")
-		return +$av
-	elseif ($op == "+F")
+	elseif ($op == "+")
 		return +$av
 	else
-		print(text("bad unary operand {} {} {}", $op, $a))
+		print(text("bad unary operand {} {}", $op, $av))
 		@aeon_fatal()
 
 ; Advanced Builtins
@@ -605,7 +603,7 @@ function @aeon_run($pc:number):number
 		elseif ($aeon_ops.0 == "bop")
 			@aeon_store($aeon_ops.1, @aeon_bop($aeon_ops.2:number, $aeon_ops.3, $aeon_ops.4, $aeon_ops.5))
 		elseif ($aeon_ops.0 == "uop")
-			@aeon_store($aeon_ops.1, @aeon_uop($aeon_ops.2, $aeon_ops.3))
+			@aeon_store($aeon_ops.1, @aeon_uop($aeon_ops.2:number, $aeon_ops.3, $aeon_ops.4))
 		elseif ($aeon_ops.0 == "jmp")
 			if (@aeon_load($aeon_ops.1))
 				$aeon_reg.0 = @aeon_load($aeon_ops.2)

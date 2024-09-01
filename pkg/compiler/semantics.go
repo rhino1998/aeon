@@ -3,6 +3,10 @@ package compiler
 import (
 	"fmt"
 
+	"github.com/rhino1998/aeon/pkg/compiler/air"
+	"github.com/rhino1998/aeon/pkg/compiler/kinds"
+	"github.com/rhino1998/aeon/pkg/compiler/operators"
+	"github.com/rhino1998/aeon/pkg/compiler/types"
 	"github.com/rhino1998/aeon/pkg/parser"
 )
 
@@ -106,7 +110,7 @@ func (c *Compiler) compileDirective(p *Package, scope *SymbolScope, dir parser.D
 		}
 	case *ExternFunction:
 		return nil, dir.WrapError(fmt.Errorf("directive %q is not supported for extern declarations", dir.Name))
-	case *DerivedType:
+	case *types.Derived:
 		return nil, dir.WrapError(fmt.Errorf("directive %q is not supported for type declarations", dir.Name))
 	case *Constant:
 		return nil, dir.WrapError(fmt.Errorf("directive %q is not supported for constant declarations", dir.Name))
@@ -154,7 +158,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 			errs.Add(err)
 		}
 
-		varType, isVariadic := ResolveType(typ).(*VariadicType)
+		varType, isVariadic := types.Resolve(typ).(*types.Variadic)
 		if isVariadic {
 			if !last {
 				errs.Add(decl.WrapError(fmt.Errorf("only the last paramater may be variadic")))
@@ -183,7 +187,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 
 		f.ret = typ
 	} else {
-		f.ret = TypeVoid
+		f.ret = types.Void
 	}
 
 	err = scope.put(f)
@@ -194,7 +198,7 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 	return f, nil
 }
 
-func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl parser.TypeDeclaration) (_ *DerivedType, err error) {
+func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl parser.TypeDeclaration) (_ *types.Derived, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -205,16 +209,8 @@ func (c *Compiler) compileTypeDeclaration(p *Package, scope *SymbolScope, decl p
 		errs.Add(err)
 	}
 
-	t := &DerivedType{
-		name:       string(decl.Name.Str),
-		pkg:        p,
-		underlying: underlying,
-
-		methodFuncs:    make(map[string]*Function),
-		ptrMethodFuncs: make(map[string]*Function),
-
-		Position: decl.Position,
-	}
+	t := types.NewDerived(string(decl.Name.Str), p, underlying)
+	t.Position = decl.Position
 
 	err = scope.put(t)
 	if err != nil {
@@ -259,7 +255,7 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 	}
 
 	if v.typ == nil {
-		v.typ = UnknownType
+		v.typ = types.Unknown
 		errs.Add(decl.WrapError(fmt.Errorf("variable declaration must have a type or an expression")))
 	}
 
@@ -305,7 +301,7 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 	}
 
 	if v.typ == nil {
-		v.typ = UnknownType
+		v.typ = types.Unknown
 		errs.Add(decl.WrapError(fmt.Errorf("const declaration must have a type or an expression")))
 	}
 
@@ -317,7 +313,7 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 	return v, nil
 }
 
-func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ Type, err error) {
+func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ types.Type, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -325,31 +321,23 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 
 	switch typ := typ.(type) {
 	case nil:
-		return UnknownType, nil
+		return types.Unknown, nil
 	case parser.Identifier:
-		return &ReferencedType{s: scope, name: string(typ.Str)}, nil
+		return types.NewReference(scope, string(typ.Str)), nil
 	case parser.PointerType:
 		pointee, err := c.compileTypeReference(scope, typ.Pointee)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		return &PointerType{
-			pointee: pointee,
-
-			Position: typ.Position,
-		}, nil
+		return types.NewPointer(pointee), nil
 	case parser.SliceType:
 		elem, err := c.compileTypeReference(scope, typ.Element)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		return &SliceType{
-			elem: elem,
-
-			Position: typ.Position,
-		}, nil
+		return types.NewSlice(elem), nil
 	case parser.MapType:
 		key, err := c.compileTypeReference(scope, typ.Key)
 		if err != nil {
@@ -361,14 +349,9 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 			errs.Add(err)
 		}
 
-		return &MapType{
-			key:   key,
-			value: val,
-
-			Position: typ.Position,
-		}, nil
+		return types.NewMap(key, val), nil
 	case parser.TupleType:
-		var elems []Type
+		var elems []types.Type
 		for _, elem := range typ.Elements {
 			elemTyp, err := c.compileTypeReference(scope, elem)
 			if err != nil {
@@ -378,16 +361,14 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 			elems = append(elems, elemTyp)
 		}
 
-		return &TupleType{
-			elems: elems,
-
-			Position: typ.Position,
-		}, nil
+		return types.NewTuple(elems...), nil
 	case parser.ArrayType:
 		elem, err := c.compileTypeReference(scope, typ.Element)
 		if err != nil {
 			errs.Add(err)
 		}
+
+		var length int = -1
 
 		var lengthExpr ConstantExpression
 		if typ.Length != nil {
@@ -400,36 +381,34 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 			if !ok {
 				return nil, typ.Length.WrapError(fmt.Errorf("array length must be a constant expression"))
 			}
+
+			lengthValue, err := lengthExpr.Evaluate()
+			if err != nil {
+				return nil, typ.Length.WrapError(err)
+			}
+
+			length = int(lengthValue.Value().Operand.Value.(air.Int))
+			if length < 0 {
+				return nil, typ.Length.WrapError(fmt.Errorf("array length must be non-negative"))
+			}
 		}
 
-		return &ArrayType{
-			lengthExpr: lengthExpr,
-			elem:       elem,
-
-			Position: typ.Position,
-		}, nil
+		return types.NewArray(length, elem), nil
 	case parser.StructType:
-		var fields []StructField
+		t := types.NewStruct()
 		for _, field := range typ.Fields {
 			fieldType, err := c.compileTypeReference(scope, field.Type)
 			if err != nil {
 				errs.Add(err)
 			}
 
-			fields = append(fields, StructField{
-				Name: string(field.Name.Str),
-				Type: fieldType,
-			})
+			t = t.With(string(field.Name.Str), fieldType)
 		}
 
-		return &StructType{
-			fields: fields,
-
-			Position: typ.Position,
-		}, nil
+		return t, nil
 	case parser.FunctionType:
 		var lastParamType parser.Type
-		parameters := make([]Type, len(typ.Parameters))
+		parameters := make([]types.Type, len(typ.Parameters))
 		for i := len(typ.Parameters) - 1; i >= 0; i-- {
 			param := typ.Parameters[i]
 			if param.Type == nil {
@@ -449,7 +428,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 
 			parameters[i] = typ
 		}
-		var ret Type = TypeVoid
+		var ret types.Type = types.Void
 		if typ.Return != nil {
 			ret, err = c.compileTypeReference(scope, typ.Return)
 			if err != nil {
@@ -457,15 +436,16 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 			}
 		}
 
-		return &FunctionType{
-			Receiver:   TypeVoid,
+		return &types.Function{
+			Receiver:   types.Void,
 			Return:     ret,
 			Parameters: parameters,
 		}, nil
 	case parser.InterfaceType:
-		var methods MethodSet
+
+		t := types.NewInterface()
 		for _, field := range typ.Methods {
-			var params []Type
+			var params []types.Type
 			for _, param := range field.Parameters {
 				paramType, err := c.compileTypeReference(scope, param.Type)
 				if err != nil {
@@ -477,7 +457,7 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 				params = append(params, paramType)
 			}
 
-			var retType Type = TypeVoid
+			var retType types.Type = types.Void
 			if field.Return != nil {
 				retType, err = c.compileTypeReference(scope, field.Return)
 				if err != nil {
@@ -485,39 +465,26 @@ func (c *Compiler) compileTypeReference(scope *SymbolScope, typ parser.Type) (_ 
 				}
 			}
 
-			err = methods.Add(string(field.Name.Str), TypeVoid, params, retType)
-			if err != nil {
-				errs.Add(err)
-			}
+			t = t.With(string(field.Name.Str), params, retType)
 		}
 
-		return &InterfaceType{
-			methods: methods,
-		}, nil
+		return t, nil
 	case parser.ParenthesizedType:
 		inner, err := c.compileTypeReference(scope, typ.Type)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		return &ParenthesizedType{
-			Type: inner,
-
-			Position: typ.Position,
-		}, nil
+		return inner, nil
 	case parser.VariadicType:
 		elem, err := c.compileTypeReference(scope, typ.Type)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		return &VariadicType{
-			elem: elem,
-
-			Position: typ.Position,
-		}, nil
+		return types.NewVariadic(elem), nil
 	default:
-		return UnknownType, typ.WrapError(fmt.Errorf("unhandled type reference %q", typ))
+		return types.Unknown, typ.WrapError(fmt.Errorf("unhandled type reference %q", typ))
 	}
 }
 
@@ -531,7 +498,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 	f.Position = decl.Position
 
 	f.receiver = &Variable{
-		typ: TypeVoid,
+		typ: types.Void,
 	}
 
 	var lastParamType parser.Type
@@ -559,7 +526,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 			errs.Add(err)
 		}
 
-		varType, isVariadic := ResolveType(typ).(*VariadicType)
+		varType, isVariadic := types.Resolve(typ).(*types.Variadic)
 		if isVariadic {
 			if !last {
 				return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
@@ -598,7 +565,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 
 		f.ret = typ
 	} else {
-		f.ret = TypeVoid
+		f.ret = types.Void
 	}
 
 	f.symbols.put(f)
@@ -622,9 +589,6 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 		err = errs.Defer(err)
 	}()
 
-	f := newFunction(string(decl.Name.Str), p)
-	f.Position = decl.Position
-
 	var recvName string
 	if decl.Receiver.Name != nil {
 		recvName = string(decl.Receiver.Name.Str)
@@ -635,17 +599,17 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 		errs.Add(err)
 	}
 
-	if !IsValidMethodReceiverType(recvTyp) {
+	if !types.IsValidMethodReceiverType(recvTyp) {
 		errs.Add(decl.WrapError(fmt.Errorf("cannot use %s as a method receiver", recvTyp)))
 	}
 
-	var recvDerivedType *DerivedType
-	switch recvTyp := DereferenceType(recvTyp).(type) {
-	case *DerivedType:
+	var recvDerivedType *types.Derived
+	switch recvTyp := types.Dereference(recvTyp).(type) {
+	case *types.Derived:
 		recvDerivedType = recvTyp
-	case *PointerType:
-		switch recvTyp := DereferenceType(recvTyp.Pointee()).(type) {
-		case *DerivedType:
+	case *types.Pointer:
+		switch recvTyp := types.Dereference(recvTyp.Pointee()).(type) {
+		case *types.Derived:
 			recvDerivedType = recvTyp
 		default:
 			errs.Add(decl.WrapError(fmt.Errorf("cannot use %s as a method receiver", recvTyp)))
@@ -656,10 +620,13 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 		return nil, errs
 	}
 
-	if recvDerivedType.Package() != p {
+	if recvDerivedType.NamespaceQualifiedName() != p.QualifiedName() {
 		errs.Add(decl.WrapError(fmt.Errorf("cannot declare method on receiver type %s which is not defined in this package", recvTyp)))
 		return nil, errs
 	}
+
+	f := newFunction(string(decl.Name.String()), p)
+	f.Position = decl.Position
 
 	recvVar := &Variable{
 		name: recvName,
@@ -697,7 +664,7 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 			errs.Add(err)
 		}
 
-		varType, isVariadic := ResolveType(typ).(*VariadicType)
+		varType, isVariadic := types.Resolve(typ).(*types.Variadic)
 		if isVariadic {
 			if !last {
 				return nil, decl.WrapError(fmt.Errorf("only the last paramater may be variadic"))
@@ -736,17 +703,20 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 
 		f.ret = typ
 	} else {
-		f.ret = TypeVoid
+		f.ret = types.Void
 	}
 
-	f.symbols.put(f)
+	err = p.scope.put(f)
+	if err != nil {
+		errs.Add(decl.WrapError(err))
+	}
 
 	f.body, err = c.compileStatements(f.symbols, decl.Body)
 	if err != nil {
 		errs.Add(err)
 	}
 
-	if f.Return() != TypeVoid {
+	if f.Return() != types.Void {
 		var last Statement
 		var wrapper ErrorWrapper = decl
 		if len(f.body) > 0 {
@@ -759,7 +729,15 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 		}
 	}
 
-	recvDerivedType.AddMethod(string(decl.Name.Str), f)
+	recvDerivedType.AddMethod(string(decl.Name.Str), f.Type().(*types.Function))
+
+	if _, ok := recvTyp.(*types.Pointer); !ok {
+		ptrF := f.withPointerReceiver()
+		err = p.scope.put(ptrF)
+		if err != nil {
+			return nil, decl.WrapError(err)
+		}
+	}
 
 	return f, nil
 }
@@ -780,7 +758,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			}
 		}
 
-		var typ Type
+		var typ types.Type
 		if stmt.Type != nil {
 			typ, err = c.compileTypeReference(scope, *stmt.Type)
 			if err != nil {
@@ -814,16 +792,16 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			errs.Add(err)
 		}
 
-		if expr.Type().Kind() != KindTuple && len(stmt.Names) > 1 {
+		if expr.Type().Kind() != kinds.Tuple && len(stmt.Names) > 1 {
 			errs.Add(stmt.WrapError(fmt.Errorf("cannot destructure non-tuple type %s into %d variables", expr.Type(), len(stmt.Names))))
 		}
 
 		var variables []*Variable
-		tupleTyp, isTuple := ResolveType(expr.Type()).(*TupleType)
+		tupleTyp, isTuple := types.Resolve(expr.Type()).(*types.Tuple)
 
 		if isTuple && len(stmt.Names) > 1 {
 			for i, name := range stmt.Names {
-				var varType Type = UnknownType
+				var varType types.Type = types.Unknown
 				if i < len(tupleTyp.Elems()) {
 					varType = tupleTyp.Elems()[i]
 				}
@@ -869,7 +847,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 
 		return &AssignmentOperatorStatement{
 			Left:     left,
-			Operator: Operator(stmt.Operator),
+			Operator: stmt.Operator,
 			Right:    right,
 
 			Position: stmt.Position,
@@ -916,7 +894,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			errs.Add(stmt.WrapError(fmt.Errorf("return statement outside function")))
 		}
 
-		if expr != nil && function.Return() == TypeVoid {
+		if expr != nil && function.Return() == types.Void {
 			errs.Add(stmt.WrapError(fmt.Errorf("unexpected return value on void function")))
 		}
 
@@ -935,7 +913,7 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 
 		return &PostfixStatement{
 			Expression: expr,
-			Operator:   Operator(stmt.Operator),
+			Operator:   stmt.Operator,
 
 			Position: stmt.Position,
 		}, scope, nil
@@ -1086,33 +1064,33 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 	switch expr := expr.(type) {
 	case parser.FloatLiteral:
 		return &Literal{
-			value: Float(expr.Value),
+			value: air.Float(expr.Value),
 
-			typ: TypeKind(KindFloat),
+			typ: types.Kind(kinds.Float),
 
 			Position: expr.Position,
 		}, nil
 	case parser.IntLiteral:
 		return &Literal{
-			value: Int(expr.Value),
+			value: air.Int(expr.Value),
 
-			typ: TypeKind(KindInt),
+			typ: types.Kind(kinds.Int),
 
 			Position: expr.Position,
 		}, nil
 	case parser.StringLiteral:
 		return &Literal{
-			value: String(expr.Value),
+			value: air.String(expr.Value),
 
-			typ: TypeKind(KindString),
+			typ: types.Kind(kinds.String),
 
 			Position: expr.Position,
 		}, nil
 	case parser.BoolLiteral:
 		return &Literal{
-			value: Bool(expr.Value),
+			value: air.Bool(expr.Value),
 
-			typ: TypeKind(KindBool),
+			typ: types.Kind(kinds.Bool),
 
 			Position: expr.Position,
 		}, nil
@@ -1129,7 +1107,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 
 		return &BinaryExpression{
 			Left:     left,
-			Operator: Operator(expr.Operator),
+			Operator: expr.Operator,
 			Right:    right,
 
 			Position: expr.Position,
@@ -1202,7 +1180,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 
 		return &UnaryExpression{
 			Expression: exp,
-			Operator:   Operator(expr.Operator),
+			Operator:   operators.Operator(expr.Operator),
 
 			Position: expr.Position,
 		}, nil
@@ -1247,6 +1225,17 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 			}
 
 			elems = append(elems, elemExpr)
+		}
+
+		switch typeRef := types.Resolve(typeRef).(type) {
+		case *types.Array:
+			if typeRef.Length() == -1 {
+				typeRef.SetLength(len(elems))
+			}
+
+			if len(elems) != typeRef.Length() {
+				errs.Add(expr.WrapError(fmt.Errorf("type %s literal expected %d elements, got %d", typeRef, typeRef.Length(), len(elems))))
+			}
 		}
 
 		return &TypeLiteralExpression{

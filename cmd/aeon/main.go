@@ -11,7 +11,6 @@ import (
 	"syscall"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
-	"github.com/rhino1998/aeon/pkg/interpreter"
 	"github.com/rhino1998/aeon/pkg/xenon"
 	"github.com/urfave/cli/v3"
 )
@@ -97,61 +96,6 @@ func main() {
 					}
 
 					return nil
-				},
-			},
-			{
-				Name:  "interpet",
-				Usage: "Interpret and run Aeon source code",
-				Action: func(ctx context.Context, c *cli.Command) error {
-					if c.Args().Len() != 1 {
-						return fmt.Errorf("must provide at least one aeon file or directory as argument")
-					}
-
-					path := c.Args().First()
-					stat, err := os.Stat(path)
-					if err != nil {
-						return fmt.Errorf("invalid path: %w", err)
-					}
-
-					logger := slog.Default()
-
-					config := compiler.Config{}
-
-					compiler, err := compiler.New(logger, config)
-					if err != nil {
-						return fmt.Errorf("failed to initialize compiler: %w", err)
-					}
-
-					if stat.IsDir() {
-						files, err := filepath.Glob(filepath.Join(path, "*.ae"))
-						if err != nil {
-							return fmt.Errorf("failed to find aeon files in directory: %w", err)
-						}
-
-						for _, file := range files {
-							f, err := os.Open(file)
-							if err != nil {
-								return fmt.Errorf("failed to open file: %w", err)
-							}
-
-							compiler.AddFile(file, f)
-						}
-					} else {
-						f, err := os.Open(path)
-						if err != nil {
-							return fmt.Errorf("failed to open file: %w", err)
-						}
-
-						compiler.AddFile(path, f)
-					}
-
-					prog, err := compiler.Compile(ctx)
-					if err != nil {
-						fmt.Fprintf(os.Stderr, "%v", err)
-						os.Exit(1)
-					}
-
-					return interpreter.Execute(prog, "main.main")
 				},
 			},
 			{
