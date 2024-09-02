@@ -1,0 +1,21 @@
+package main
+
+type vec4 (int, int, int, int)
+
+#init
+func main() {
+  var a vec4
+  var b vec4
+  var c vec4
+
+  b = (1, 2, 3, 4)
+  c = (2,1,1,1)
+
+  for i := 0; i < 1000; i++ {
+    a = a + b * c
+  }
+
+  printf("%d %d %d %d", a.0, a.1, a.2, a.3)
+}
+---
+2000 2000 3000 4000
