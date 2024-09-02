@@ -781,7 +781,7 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 		}
 
 		if stmt.Else != nil {
-			bc.JumpAfter(endLabel, nil)
+			bc.JumpAfter(endLabel, scope.newImmediate(air.Bool(true)))
 			bc.LabelLast(elseLabel)
 			elseBC, err := c.compileBCStatement(ctx, prog, stmt.Else, scope)
 			if err != nil {
