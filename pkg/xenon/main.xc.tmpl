@@ -601,6 +601,46 @@ function @aeon_run($funcInfo:number):number
 					@aeon_store($aeon_reg.0+1, $left % $right)
 				else
 					@__builtin_panic("bad + operand")
+			elseif $op == 9; &&
+				if $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+1, $left || $right)
+				else
+					@__builtin_panic("bad && operand")
+			elseif $op == 10; ||
+				if $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+1, $left || $right)
+				else
+					@__builtin_panic("bad || operand")
+			elseif $op == 11; ==
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+1, $left == $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+1, $left == $right)
+				elseif $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+1, $left == $right)
+				elseif $kind == {{.KindPointer}}
+					@aeon_store($aeon_reg.0+1, $left == $right)
+				elseif $kind == {{.KindType}}
+					@aeon_store($aeon_reg.0+1, $left == $right)
+				elseif $kind == {{.KindString}}
+					@aeon_store($aeon_reg.0+1, @aeon_eq_string($left, $right))
+				else
+					@__builtin_panic("bad + operand")
+			elseif $op == 12; !=
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+1, $left != $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+1, $left != $right)
+				elseif $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+1, $left != $right)
+				elseif $kind == {{.KindPointer}}
+					@aeon_store($aeon_reg.0+1, $left != $right)
+				elseif $kind == {{.KindType}}
+					@aeon_store($aeon_reg.0+1, $left != $right)
+				elseif $kind == {{.KindString}}
+					@aeon_store($aeon_reg.0+1, @aeon_ne_string($left, $right))
+				else
+					@__builtin_panic("bad + operand")
 			else
 				@__builtin_panic(text("bad bop {}", $op))
 
@@ -674,7 +714,7 @@ function @aeon_run($funcInfo:number):number
 			$dstLen = @aeon_code($aeon_reg.0+1)
 
 			$sizeLen = @aeon_code($aeon_reg.0+2+$dstLen)
-			$size = @aeon_code($aeon_reg.0+2+$dstLen)
+			$size = @aeon_load($aeon_reg.0+2+$dstLen)
 
 			@aeon_store($aeon_reg.0+1, @aeon_heap_alloc($size))
 

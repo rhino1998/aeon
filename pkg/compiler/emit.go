@@ -3,7 +3,6 @@ package compiler
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/compiler/air"
@@ -73,9 +72,9 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 		return err
 	}
 
-	for i, bc := range prog.bytecode {
-		log.Printf("%02x: %v", i, bc)
-	}
+	// for i, bc := range prog.bytecode {
+	// 	log.Printf("%02x: %v", i, bc)
+	// }
 
 	err = prog.bytecode.ResolveStrings(prog.Strings())
 	if err != nil {

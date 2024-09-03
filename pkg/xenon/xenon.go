@@ -5,7 +5,6 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"text/template"
 
@@ -68,6 +67,7 @@ type xenonContext struct {
 	KindBool    int
 	KindString  int
 	KindPointer int
+	KindType    int
 }
 
 func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Function, error) {
@@ -106,6 +106,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	xeCtx.KindBool = int(kinds.Bool)
 	xeCtx.KindString = int(kinds.String)
 	xeCtx.KindPointer = int(kinds.Pointer)
+	xeCtx.KindType = int(kinds.Type)
 
 	for _, str := range prog.Strings() {
 		xeCtx.Strings = append(xeCtx.Strings, string(str))
@@ -207,7 +208,6 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	}
 
 	bytecode := abc.Compile(prog.Instructions())
-	log.Println(bytecode)
 
 	for i, bc := range bytecode {
 		page := i / xeCtx.PageSize

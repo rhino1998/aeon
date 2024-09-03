@@ -1,15 +1,40 @@
 package main
 
-#init
-func main() {
-  for i := 0; i < 20; i++ {
-    print(fib(i))
-  }
+type Err string
+
+func (e Err) Error() string {
+  return "error: " + string(e)
 }
 
-func fib(n int) int {
-  if n <= 1 {
-    return n
+type T struct {
+  x int
+}
+
+func (t *T) Do() (*T, error) {
+  if t.x == 3 {
+    return t, Err("hello")
   }
-  return fib(n-1) + fib(n-2)
+  print(t.x)
+  t.x++
+  return t, nil
+}
+
+func handler(err error) error {
+  if err != nil {
+    print(err.Error())
+  }
+
+  return nil
+}
+
+func run() error {
+  var t T
+  t.Do()?.Do()?.Do()?.Do()?.Do()?.Do()? -> handler
+
+  return nil
+}
+
+#init
+func main() {
+  print(run())
 }

@@ -115,7 +115,7 @@ func (l *Value) IndexSlice(index *Value) (*Value, error) {
 
 	return &Value{
 		Type:    types.Dereference(typ.Elem()),
-		Operand: l.Operand.Add(index.Operand.Bound(l.Operand.AddConst(1)).Mul(IntOperand(elemSize))).Dereference(),
+		Operand: l.Operand.Add(index.Operand.Bound(l.Operand).Mul(IntOperand(elemSize))).Dereference(),
 	}, nil
 }
 
