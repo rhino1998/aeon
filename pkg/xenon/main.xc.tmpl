@@ -141,7 +141,6 @@ array $aeon_op_arg_stack:number
 var $aeon_numbers = "0123456789"
 
 function @aeon_load_internal($addr:number, $length:number):number
-	var $index = 0
 	var $arg1 = 0
 	var $arg2 = 0
 
@@ -159,9 +158,15 @@ function @aeon_load_internal($addr:number, $length:number):number
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($aeon_reg.$arg1)
 		elseif ($uop == 2) ; memory
-			var $mem = @aeon_code($addr)
-			$addr++
-			$aeon_op_arg_stack.append(@aeon_mem_load($mem))
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append(@aeon_mem_load($arg1))
+		elseif ($uop == 3) ; vtable
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append(@aeon_vtable($arg1, @aeon_str_load($arg2)))
 		elseif ($uop == 4) ; +
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
@@ -230,9 +235,9 @@ function @aeon_load_internal($addr:number, $length:number):number
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append($arg1 < $arg2)
+			$aeon_op_arg_stack.append($arg1 <= $arg2)
 		else
-			print(text("bad uop in load {} at index {} in {}", $uop, $index-1, $addr))
+			print(text("bad uop in load {} at addr {}", $uop, $addr-1))
 			$aeon_op_arg_stack.append($arg1)
 			@aeon_fatal()
 
@@ -249,12 +254,10 @@ function @aeon_load_addr($op:number):number
 
 	var $last = @aeon_code($op+$length)
 
-	return @aeon_load_internal($op+1, $length)
-
 	if ($last == 2) ; mem
 		return @aeon_load_internal($op+1, $length-1)
 	else
-		@__builtin_panic(text("bad operand for load addr {}", $op))
+		@__builtin_panic(text("bad operand for load addr {}", $last))
 
 function @aeon_store($op:number, $v:number)
 	var $length = @aeon_code($op)
@@ -281,109 +284,6 @@ function @aeon_ne_string($a:number, $b:number):number
 
 function @itoa($n:number):number
 	return @aeon_str_alloc($n:text)
-
-function @aeon_bop($kind:number, $op:text, $a:text, $b:text):number
-	var $av = @aeon_load($a)
-	var $bv = @aeon_load($b)
-
-
-	if ($op == "==")
-		if ($kind == {{.KindString}})
-			return @aeon_eq_string($av, $bv)
-		else
-			return $av == $bv
-
-	if ($op == "!=")
-		if ($kind == {{.KindString}})
-			return @aeon_ne_string($av, $bv)
-		else
-			return $av != $bv
-
-	if ($op == "+")
-		if ($kind == {{.KindInt}})
-			return $av + $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av + $bv
-		elseif ($kind == {{.KindString}})
-			return @aeon_add_string($av, $bv)
-		@__builtin_panic("bad + operand")
-
-	if ($op == "-")
-		if ($kind == {{.KindInt}})
-			return $av - $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av - $bv
-		@__builtin_panic("bad - operand")
-
-	if ($op == "*")
-		if ($kind == {{.KindInt}})
-			return $av * $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av * $bv
-		@__builtin_panic("bad * operand")
-
-	if ($op == "/")
-		if ($kind == {{.KindInt}})
-			return @aeon_trunc($av / $bv)
-		elseif ($kind == {{.KindFloat}})
-			return $av / $bv
-		@__builtin_panic("bad / operand")
-
-	if ($op == "%")
-		if ($kind == {{.KindInt}})
-			return $av % $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av % $bv
-		@__builtin_panic("bad % operand")
-
-	if ($op == "**")
-		if ($kind == {{.KindInt}})
-			return $av ^ $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av ^ $bv
-		@__builtin_panic("bad ** operand")
-
-	if ($op == "<")
-		if ($kind == {{.KindInt}})
-			return $av < $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av < $bv
-		@__builtin_panic("bad < operand")
-
-	if ($op == ">")
-		if ($kind == {{.KindInt}})
-			return $av > $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av > $bv
-		@__builtin_panic("bad > operand")
-
-	if ($op == ">=")
-		if ($kind == {{.KindInt}})
-			return $av >= $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av >= $bv
-		@__builtin_panic("bad >= operand")
-
-	if ($op == "<=")
-		if ($kind == {{.KindInt}})
-			return $av <= $bv
-		elseif ($kind == {{.KindFloat}})
-			return $av <= $bv
-		@__builtin_panic("bad <= operand")
-
-
-function @aeon_uop($kind:number, $op:text, $a:text):number
-	var $av = @aeon_load($a)
-
-	if ($op == "!")
-		return !$av
-	elseif ($op == "-")
-		return -$av
-	elseif ($op == "+")
-		return +$av
-	else
-		print(text("bad unary operand {} {}", $op, $av))
-		@aeon_fatal()
 
 ; Advanced Builtins
 
@@ -579,6 +479,7 @@ function @aeon_run($funcInfo:number):number
 	@aeon_reg_init()
 
 	var $line = 0
+	var $sizeLen = 0
 	var $size = 0
 	var $kind = 0
 	var $op = 0
@@ -595,6 +496,8 @@ function @aeon_run($funcInfo:number):number
 	var $left = 0
 	var $rightLen = 0
 	var $right = 0
+	var $elemLen = 0
+	var $elem = 0
 	var $funcLen = 0
 	var $func = 0
 
@@ -644,8 +547,8 @@ function @aeon_run($funcInfo:number):number
 		elseif $code == 3; bop <dst> <#kind> <#op> <left> <right>
 			$dstLen = @aeon_code($aeon_reg.0+1)
 
-			$kind = @aeon_code($aeon_reg.0+2)
-			$op = @aeon_code($aeon_reg.0+3)
+			$kind = @aeon_code($aeon_reg.0+2+$dstLen)
+			$op = @aeon_code($aeon_reg.0+3+$dstLen)
 
 			$leftLen = @aeon_code($aeon_reg.0+4+$dstLen)
 			$left = @aeon_load($aeon_reg.0+4+$dstLen)
@@ -668,12 +571,58 @@ function @aeon_run($funcInfo:number):number
 					@aeon_store($aeon_reg.0+1, $left - $right)
 				else
 					@__builtin_panic("bad + operand")
+			elseif $op == 6; *
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+1, $left * $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+1, $left * $right)
+				else
+					@__builtin_panic("bad + operand")
+			elseif $op == 7; /
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+1, @aeon_trunc($left / $right))
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+1, $left / $right)
+				else
+					@__builtin_panic("bad + operand")
+			elseif $op == 8; %
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+1, $left % $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+1, $left % $right)
+				else
+					@__builtin_panic("bad + operand")
+			else
+				@__builtin_panic(text("bad bop {}", $op))
 
 			$aeon_reg.0 += 6 + $dstLen + $leftLen + $rightLen
+		elseif $code == 4; unop <dst> <#kind> <#op> <src>
+			$dstLen = @aeon_code($aeon_reg.0+1)
+			$kind = @aeon_code($aeon_reg.0+2+$dstLen)
+			$op = @aeon_code($aeon_reg.0+3+$dstLen)
+			$srcLen = @aeon_code($aeon_reg.0+4+$dstLen)
+			$src = @aeon_load($aeon_reg.0+4+$dstLen)
+
+			if $op == 13; !
+				if $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+1, !$src)
+				else
+					@__builtin_panic("bad ! operand")
+			elseif $op == 14; -
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+1, -$src)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+1, -$src)
+				else
+					@__builtin_panic("bad - operand")
+			else
+				@__builtin_panic(text("bad unop {}", $op))
+
+			$aeon_reg.0 += 5 + $dstLen + $srcLen
 		elseif $code == 5; call <#line> <func>
 			$line = @aeon_code($aeon_reg.0+1)
 			$funcLen = @aeon_code($aeon_reg.0+2)
-			$func = @aeon_load_addr($aeon_reg.0+2)
+			$func = @aeon_load($aeon_reg.0+2)
 
 			var $ftype = @aeon_mem_load($func)
 			var $fname = @aeon_str_load(@aeon_mem_load($func+1))
@@ -687,6 +636,17 @@ function @aeon_run($funcInfo:number):number
 				@aeon_call_extern($externName, $size)
 				$aeon_reg.1 -= $size
 				$aeon_reg.0 += 3 + $funcLen
+			elseif $ftype == 2
+				var $faddr = @aeon_mem_load($func+3)
+
+				$aeon_reg.0 += 3 + $funcLen
+
+				repeat {{.NumRegisters}} ($reg)
+					@aeon_mem_store($aeon_reg.1 - $reg + {{.NumRegisters}} - 1, $aeon_reg.$reg)
+
+				$aeon_reg.1 += {{.NumRegisters}}
+				$aeon_reg.2 = $aeon_reg.1 - 1
+				$aeon_reg.0 = $faddr
 			else
 				@__builtin_panic(text("invalid function type: {}", $ftype))
 		elseif $code == 6; ret <#size>
@@ -701,13 +661,53 @@ function @aeon_run($funcInfo:number):number
 			;
 			if $aeon_reg.2 == 0
 				return
-		else if $code == 7; app <dst> <src> <elem> <#size>
+		elseif $code == 7; alc <dst> <size>
+			$dstLen = @aeon_code($aeon_reg.0+1)
+
+			$sizeLen = @aeon_code($aeon_reg.0+2+$dstLen)
+			$size = @aeon_code($aeon_reg.0+2+$dstLen)
+
+			@aeon_store($aeon_reg.0+1, @aeon_heap_alloc($size))
+
+			$aeon_reg.0 += 3 + $dstLen + $sizeLen
+		elseif $code == 8; app <dst> <src> <elem> <#size>
 			$dstLen = @aeon_code($aeon_reg.0+1)
 			$dst = @aeon_load_addr($aeon_reg.0+1)
 			$srcLen = @aeon_code($aeon_reg.0+2+$dstLen)
-			$src = @aeon_load($aeon_reg.0+2+$dstLen)
+			$src = @aeon_load_addr($aeon_reg.0+2+$dstLen)
 			$elemLen = @aeon_code($aeon_reg.0+3+$dstLen+$srcLen)
 			$size = @aeon_code($aeon_reg.0+4+$dstLen+$srcLen+$elemLen)
+
+			var $sliceData = @aeon_mem_load($src)
+			var $sliceLen = @aeon_mem_load($src+1)
+			var $sliceCap = @aeon_mem_load($src+2)
+
+			if $sliceCap < $sliceLen
+				@__builtin_panic("slice cap < len")
+
+			if $sliceLen == $sliceCap
+				if $sliceCap == 0
+					$sliceCap = 1
+				else
+					$sliceCap *= 2
+				var $newSliceData = @aeon_heap_alloc($sliceCap * $size)
+
+				; TODO: memcpy
+				@aeon_memmove($newSliceData, $sliceData, $sliceLen * $size)
+
+				$sliceData = $newSliceData
+
+			if $size == 1
+				$elem = @aeon_load($aeon_reg.0+3+$dstLen+$srcLen)
+				@aeon_mem_store($sliceData + ($sliceLen * $size), $elem)
+			else
+				; TODO: memcpy
+				$elem = @aeon_load_addr($aeon_reg.0+3+$dstLen+$srcLen)
+				@aeon_memmove($sliceData + ($sliceLen * $size), $elem, $size)
+
+			@aeon_mem_store($dst, $sliceData)
+			@aeon_mem_store($dst+1, $sliceLen+1)
+			@aeon_mem_store($dst+2, $sliceCap)
 
 			$aeon_reg.0 += 5 + $dstLen + $srcLen + $elemLen
 		else
