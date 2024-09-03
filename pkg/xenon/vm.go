@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math"
 	"os"
 	"slices"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/rhino1998/aeon/pkg/compiler/abc"
 	"github.com/rhino1998/aeon/pkg/compiler/air"
 	"github.com/rhino1998/aeon/pkg/compiler/kinds"
-	"github.com/rhino1998/aeon/pkg/compiler/operators"
 	"github.com/rhino1998/aeon/pkg/compiler/types"
 )
 
@@ -1310,8 +1308,32 @@ func (r *Runtime) loadInternal(op Addr, length Addr) (float64, error) {
 			} else {
 				stack = append(stack, 0)
 			}
+		case abc.UOPBoundsCheck:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			if int(arg1) >= int(arg2) {
+				return 0, fmt.Errorf("index out of bounds: %d >= %d", int(arg1), int(arg2))
+			}
+
+			stack = append(stack, arg1)
+		case abc.UOPVTableLookup:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			arg2Str, err := r.LoadString(Addr(arg2))
+			if err != nil {
+				return 0, err
+			}
+
+			val, ok := r.vtables[int(arg1)][string(arg2Str)]
+			if !ok {
+				return 0, fmt.Errorf("no such vtable entry for %d %d %s", int(arg1), int(arg2), string(arg2Str))
+			}
+
+			stack = append(stack, val)
 		default:
-			panic(fmt.Sprintf("invalid internal opcode %d", uop))
+			panic(fmt.Sprintf("invalid internal opcode %d", int(uop)))
 		}
 	}
 
@@ -1764,7 +1786,26 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 					if err != nil {
 						return err
 					}
-				// TODO: string
+				case kinds.String:
+					leftStr, err := r.LoadString(Addr(left))
+					if err != nil {
+						return err
+					}
+
+					rightStr, err := r.LoadString(Addr(right))
+					if err != nil {
+						return err
+					}
+
+					val, err := r.allocStr(leftStr + rightStr)
+					if err != nil {
+						return err
+					}
+
+					err = r.store(r.pc()+1, float64(val))
+					if err != nil {
+						return err
+					}
 				default:
 					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
 				}
@@ -1807,6 +1848,138 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 					}
 				case kinds.Float:
 					err = r.store(r.pc()+1, left/right)
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPModulo:
+				switch kinds.Kind(kind) {
+				case kinds.Int:
+					err = r.store(r.pc()+1, float64(int64(left)%int64(right)))
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPLogicalAnd:
+				switch kinds.Kind(kind) {
+				case kinds.Bool:
+					var val float64
+					if left != 0 && right != 0 {
+						val = 1
+					} else {
+						val = 0
+					}
+					err = r.store(r.pc()+1, val)
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPLogicalOr:
+				switch kinds.Kind(kind) {
+				case kinds.Bool:
+					var val float64
+					if left != 0 || right != 0 {
+						val = 1
+					} else {
+						val = 0
+					}
+					err = r.store(r.pc()+1, val)
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPEqual:
+				switch kinds.Kind(kind) {
+				case kinds.Type:
+					err = r.store(r.pc()+1, b(left == right))
+					if err != nil {
+						return err
+					}
+				case kinds.Pointer:
+					err = r.store(r.pc()+1, b(left == right))
+					if err != nil {
+						return err
+					}
+				case kinds.Bool:
+					err = r.store(r.pc()+1, b(left == right))
+					if err != nil {
+						return err
+					}
+				case kinds.Int:
+					err = r.store(r.pc()+1, b(left == right))
+					if err != nil {
+						return err
+					}
+				case kinds.Float:
+					err = r.store(r.pc()+1, b(left == right))
+					if err != nil {
+						return err
+					}
+				case kinds.String:
+					leftStr, err := r.LoadString(Addr(left))
+					if err != nil {
+						return err
+					}
+
+					rightStr, err := r.LoadString(Addr(right))
+					if err != nil {
+						return err
+					}
+
+					err = r.store(r.pc()+1, b(leftStr == rightStr))
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPNotEqual:
+				switch kinds.Kind(kind) {
+				case kinds.Type:
+					err = r.store(r.pc()+1, b(left != right))
+					if err != nil {
+						return err
+					}
+				case kinds.Pointer:
+					err = r.store(r.pc()+1, b(left != right))
+					if err != nil {
+						return err
+					}
+				case kinds.Bool:
+					err = r.store(r.pc()+1, b(left != right))
+					if err != nil {
+						return err
+					}
+				case kinds.Int:
+					err = r.store(r.pc()+1, b(left != right))
+					if err != nil {
+						return err
+					}
+				case kinds.Float:
+					err = r.store(r.pc()+1, b(left != right))
+					if err != nil {
+						return err
+					}
+				case kinds.String:
+					leftStr, err := r.LoadString(Addr(left))
+					if err != nil {
+						return err
+					}
+
+					rightStr, err := r.LoadString(Addr(right))
+					if err != nil {
+						return err
+					}
+
+					err = r.store(r.pc()+1, b(leftStr != rightStr))
 					if err != nil {
 						return err
 					}
@@ -1858,6 +2031,21 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 						if err != nil {
 							return err
 						}
+					}
+				default:
+					return fmt.Errorf("unhandled unary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPNegate:
+				switch kinds.Kind(kind) {
+				case kinds.Int:
+					err = r.store(r.pc()+1, -arg)
+					if err != nil {
+						return err
+					}
+				case kinds.Float:
+					err = r.store(r.pc()+1, -arg)
+					if err != nil {
+						return err
 					}
 				default:
 					return fmt.Errorf("unhandled unary operation %v", kinds.Kind(kind))
@@ -2013,47 +2201,6 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 	}
 }
 
-type loadFunc func() (float64, error)
-
-type storeFunc func(float64, error) error
-
-type binaryOperatorFunc func(*Runtime, float64, float64) (float64, error)
-
-func binaryOp(r *Runtime, opStr string, loadA, loadB loadFunc) (float64, error) {
-	op, ok := binaryOperatorFuncs[opStr]
-	if !ok {
-		return 0, fmt.Errorf("invalid binary operation %q", opStr)
-	}
-
-	a, err := loadA()
-	if err != nil {
-		return 0, err
-	}
-
-	b, err := loadB()
-	if err != nil {
-		return 0, err
-	}
-
-	return op(r, a, b)
-}
-
-type unaryOperatorFunc func(*Runtime, float64) (float64, error)
-
-func unaryOp(r *Runtime, opStr string, loadA loadFunc) (float64, error) {
-	op, ok := unaryOperatorFuncs[opStr]
-	if !ok {
-		return 0, fmt.Errorf("invalid unary operation %q", opStr)
-	}
-
-	a, err := loadA()
-	if err != nil {
-		return 0, err
-	}
-
-	return op(r, a)
-}
-
 type Float = air.Float
 type Int = air.Int
 type String = air.String
@@ -2061,240 +2208,6 @@ type Bool = air.Bool
 type Addr = air.Addr
 type Size = air.Size
 type Register = air.Register
-
-var binaryOperatorFuncs = map[string]binaryOperatorFunc{
-	"I**I": mathBinOp(opExp[Int]),
-	"F**F": mathBinOp(opExp[Float]),
-
-	"I+I": mathBinOp(opAdd[Int]),
-	"F+F": mathBinOp(opAdd[Float]),
-	"S+S": opAddStr,
-
-	"I-I": mathBinOp(opSub[Int]),
-	"F-F": mathBinOp(opSub[Float]),
-
-	"I*I": mathBinOp(opMul[Int]),
-	"F*F": mathBinOp(opMul[Float]),
-
-	"I/I": mathBinOp(opDiv[Int]),
-	"F/F": mathBinOp(opDiv[Float]),
-
-	"I%I": mathBinOp(opMod[Int]),
-
-	"I<I": mathBinOp(opLT[Int]),
-	"F<F": mathBinOp(opLT[Float]),
-
-	"I<=I": mathBinOp(opLTE[Int]),
-	"F<=F": mathBinOp(opLTE[Float]),
-
-	"I>I": mathBinOp(opGT[Int]),
-	"F>F": mathBinOp(opGT[Float]),
-
-	"B&&B": mathBinOp(opLAnd[Bool]),
-	"B||B": mathBinOp(opLOr[Bool]),
-
-	"I>=I": mathBinOp(opGTE[Int]),
-	"F>=F": mathBinOp(opGTE[Float]),
-
-	"I==I": mathBinOp(opEQ[Int]),
-	"F==F": mathBinOp(opEQ[Float]),
-	"S==S": opEQStr,
-	"B==B": mathBinOp(opEQ[Bool]),
-	"T==T": mathBinOp(opEQ[Int]),
-	"P==P": mathBinOp(opEQ[Int]),
-
-	"I!=I": mathBinOp(opNE[Int]),
-	"F!=F": mathBinOp(opNE[Float]),
-	"S!=S": opNEStr,
-	"B!=B": mathBinOp(opNE[Bool]),
-	"T!=T": mathBinOp(opNE[Int]),
-	"P!=P": mathBinOp(opNE[Int]),
-}
-
-func binaryOperation(a kinds.Kind, op operators.Operator, b kinds.Kind) string {
-	return fmt.Sprintf("%s%s%s", shortKind(a), op, shortKind(b))
-}
-
-func unaryOperation(op operators.Operator, a kinds.Kind) string {
-	return fmt.Sprintf("%s%s", op, shortKind(a))
-}
-
-func shortKind(kind kinds.Kind) string {
-	switch kind {
-	case kinds.Int:
-		return "I"
-	case kinds.Float:
-		return "F"
-	case kinds.String:
-		return "S"
-	case kinds.Bool:
-		return "B"
-	case kinds.Pointer:
-		return "P"
-	case kinds.Type:
-		return "T"
-	default:
-		return "?"
-	}
-}
-
-func mathBinOp(f func(a, b float64) float64) binaryOperatorFunc {
-	return binaryOperatorFunc(func(_ *Runtime, a, b float64) (float64, error) {
-		return f(a, b), nil
-	})
-}
-
-var unaryOperatorFuncs = map[string]unaryOperatorFunc{
-	"-I": mathUnOp(opNeg[Int]),
-	"-F": mathUnOp(opNeg[Float]),
-}
-
-func mathUnOp(f func(a float64) float64) unaryOperatorFunc {
-	return unaryOperatorFunc(func(_ *Runtime, a float64) (float64, error) {
-		return f(a), nil
-	})
-}
-
-func opNeg[T Int | Float](a float64) float64 {
-	return -float64(T(a))
-}
-
-func opExp[T Int | Float](a, b float64) float64 {
-	return math.Pow(a, b)
-}
-
-func opAdd[T Int | Float](a, b float64) float64 {
-	return float64(T(a) + T(b))
-}
-
-func opLAnd[T Bool](a float64, b float64) float64 {
-	if a != 0 && b != 0 {
-		return 1
-	}
-	return 0
-}
-
-func opLOr[T Bool](a float64, b float64) float64 {
-	if a != 0 || b != 0 {
-		return 1
-	}
-	return 0
-}
-
-func opAddStr(r *Runtime, a, b float64) (float64, error) {
-	aStr, err := r.LoadString(Addr(a))
-	if err != nil {
-		return 0, err
-	}
-
-	bStr, err := r.LoadString(Addr(b))
-	if err != nil {
-		return 0, err
-	}
-
-	cStr := aStr + bStr
-
-	addr, err := r.allocStr(cStr)
-	if err != nil {
-		return 0, err
-	}
-
-	return float64(addr), nil
-}
-
-func opSub[T Int | Float](a, b float64) float64 {
-	return float64(T(a) - T(b))
-}
-
-func opMul[T Int | Float](a, b float64) float64 {
-	return float64(T(a) * T(b))
-}
-
-func opDiv[T Int | Float](a, b float64) float64 {
-	return float64(T(a) / T(b))
-}
-
-func opMod[T Int](a, b float64) float64 {
-	return float64(T(a) % T(b))
-}
-
-func opLT[T Int | Float](a, b float64) float64 {
-	if a < b {
-		return 1
-	}
-	return 0
-}
-
-func opLTE[T Int | Float](a, b float64) float64 {
-	if a <= b {
-		return 1
-	}
-	return 0
-}
-
-func opGT[T Int | Float](a, b float64) float64 {
-	if a > b {
-		return 1
-	}
-	return 0
-}
-
-func opGTE[T Int | Float](a, b float64) float64 {
-	if a >= b {
-		return 1
-	}
-	return 0
-}
-
-func opEQ[T Int | Float | Bool](a, b float64) float64 {
-	if a == b {
-		return 1
-	}
-	return 0
-}
-
-func opEQStr(r *Runtime, a, b float64) (float64, error) {
-	aStr, err := r.LoadString(Addr(a))
-	if err != nil {
-		return 0, err
-	}
-
-	bStr, err := r.LoadString(Addr(b))
-	if err != nil {
-		return 0, err
-	}
-
-	if aStr == bStr {
-		return 1, nil
-	}
-
-	return 0, nil
-}
-
-func opNE[T Int | String | Float | Bool](a, b float64) float64 {
-	if a != b {
-		return 1
-	}
-	return 0
-}
-
-func opNEStr(r *Runtime, a, b float64) (float64, error) {
-	aStr, err := r.LoadString(Addr(a))
-	if err != nil {
-		return 0, err
-	}
-
-	bStr, err := r.LoadString(Addr(a))
-	if err != nil {
-		return 0, err
-	}
-
-	if aStr != bStr {
-		return 1, nil
-	}
-
-	return 0, nil
-}
 
 func (r *Runtime) printRegisters() {
 	regStrs := make([]string, 0, len(r.registers))
@@ -2322,4 +2235,11 @@ func (r *Runtime) printStack() {
 
 		addr++
 	}
+}
+
+func b(b bool) float64 {
+	if b {
+		return 1
+	}
+	return 0
 }

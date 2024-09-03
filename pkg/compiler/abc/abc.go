@@ -223,6 +223,9 @@ func OperandSize(operand *air.Operand) int {
 		return 1 + OperandSize(operand.Value.(air.BinaryOperand).Left) + OperandSize(operand.Value.(air.BinaryOperand).Right)
 	case air.OperandKindUnary:
 		return 1 + OperandSize(operand.Value.(air.UnaryOperand).A)
+	case air.OperandKindVTableLookup:
+		return 1 + OperandSize(operand.Value.(air.VTableLookup).Type) + OperandSize(operand.Value.(air.VTableLookup).Method)
+
 	case air.OperandKindLabel:
 		return 2
 	default:
@@ -239,6 +242,9 @@ const (
 	UOPSubtraction
 	UOPMultiplication
 	UOPDivision
+	UOPModulo
+	UOPLogicalAnd
+	UOPLogicalOr
 	UOPEqual
 	UOPNotEqual
 	UOPNot
@@ -260,6 +266,12 @@ func BinaryOperatorUOP(operator operators.Operator) float64 {
 		return UOPMultiplication
 	case operators.Division:
 		return UOPDivision
+	case operators.Modulo:
+		return UOPModulo
+	case operators.LogicalAnd:
+		return UOPLogicalAnd
+	case operators.LogicalOr:
+		return UOPLogicalOr
 	case operators.Equal:
 		return UOPEqual
 	case operators.NotEqual:
