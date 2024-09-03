@@ -51,8 +51,12 @@ function @aeon_code_init()
 	{{range $addr, $bc := .Code}}$aeon_code_page_{{$addr.Page}}.{{$addr.Addr}} = {{$bc}}{{"\n\t"}}{{end}}
 
 function @aeon_code($addr:number):number
+	if ($addr < {{$PageSize}})
+		return $aeon_code_page_0.$addr
+
 	var $pageAddr = $addr % $PAGE_SIZE
-	{{range $page := loop 0 .NumCodePages}}
+
+	{{range $page := loop 1 .NumCodePages}}
 	if ($addr < {{mul (add $page 1) $PageSize}})
 		return $aeon_code_page_{{$page}}.$pageAddr
 	{{ end }}
@@ -61,15 +65,21 @@ function @aeon_reg_init()
 	$aeon_reg.fill({{.NumRegisters}}, 0)
 
 function @aeon_mem_load($addr:number):number
+	if $addr < {{$PageSize}}
+		return $aeon_mem_page_0.$addr
+
 	var $pageAddr = $addr % $PAGE_SIZE
-	{{range $page := loop 0 .NumMemPages}}
+	{{range $page := loop 1 .NumMemPages}}
 	if ($addr < {{mul (add $page 1) $PageSize}})
 		return $aeon_mem_page_{{$page}}.$pageAddr
 	{{end}}
 
 function @aeon_mem_store($addr:number, $v:number):text
+	if $addr < {{$PageSize}}
+		$aeon_mem_page_0.$addr = $v
+
 	var $pageAddr = $addr % $PAGE_SIZE
-	{{range $page := loop 0 .NumMemPages}}
+	{{range $page := loop 1 .NumMemPages}}
 	if ($addr < {{mul (add $page 1) $PageSize}})
 		$aeon_mem_page_{{$page}}.$pageAddr = $v
 	{{end}}
@@ -86,19 +96,22 @@ function @aeon_memmove($dst:number, $src:number, $size:number)
 		@aeon_mem_store($dst+$i, $aeon_memmove_tmp.$i)
 
 function @aeon_str_load($addr:number):text
-	var $page = floor($addr / $PAGE_SIZE)
+	if $addr < {{$PageSize}}
+		return $aeon_str_page_0.$addr
+
 	var $pageAddr = $addr % $PAGE_SIZE
-	{{range $page := loop 0 .NumStrPages}}
-	if ($page == {{$page}})
+	{{range $page := loop 1 .NumStrPages}}
+	if ($addr < {{mul (add $page 1) $PageSize}})
 		return $aeon_str_page_{{$page}}.$pageAddr
 	{{end}}
 
 function @aeon_str_store($addr:number, $v:text):text
-	var $page = floor($addr / $PAGE_SIZE)
-	var $pageAddr = $addr % $PAGE_SIZE
+	if $addr < {{$PageSize}}
+		$aeon_str_page_0.$addr = $v
 
-	{{range $page := loop 0 .NumStrPages}}
-	if ($page == {{$page}})
+	var $pageAddr = $addr % $PAGE_SIZE
+	{{range $page := loop 1 .NumStrPages}}
+	if ($addr < {{mul (add $page 1) $PageSize}})
 		$aeon_str_page_{{$page}}.$pageAddr = $v
 	{{end}}
 
@@ -514,10 +527,6 @@ function @aeon_run($funcInfo:number):number
 
 	while ($i < 1000000)
 		$i++
-
-		; print(text("pc = {}", $aeon_reg.0))
-		; print(text("sp = {}", $aeon_reg.1))
-		; print(text("fp = {}", $aeon_reg.2))
 
 		var $code = @aeon_code($aeon_reg.0)
 		if ($code == 0); nop
