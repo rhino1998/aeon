@@ -1,89 +1,15 @@
 package main
 
-extern func itoa(a int) string
-
-type iface interface {
-  l()
-}
-
-type A int
-
-func (a A) l() {
-  print("A" + itoa(int(a)))
-}
-
-type B [1]int
-
-func (b B) l() {
-  print("B" + itoa(b[0]))
-}
-
-type C struct {
-  X int
-}
-
-func (c C) l() {
-  print("C" + itoa(c.X))
-}
-
-type D (int,)
-
-func (d D) l() {
-  print("D" + itoa(int(d.0)))
-}
-
-
-type E int
-
-func (e *E) l() {
-  print("E"+itoa(int(*e)))
-}
-
-type F func()
-
-func (f F) l() {
-  f()
-}
-
-func fImpl() {
-  print("F6")
-}
-
-type G ()
-
-func (g G) l() {
-  print("G7")
-}
-
-type H int
-
-func (h H) l() {
-	print("H" + itoa(int(h)))
-}
-
 #init
-func f2() {
-  var e int = 5
-  var c C
-	var h H = 8
-
-	assert(1==1, "example text here")
-
-  c.X = 3
-  x := [...]iface{
-    A(1),
-    B([...]int{2}),
-    c,
-    D((4,)),
-    (*E)(&e),
-    F(fImpl),
-    G(()),
-		&h,
+func main() {
+  for i := 0; i < 20; i++ {
+    print(fib(i))
   }
+}
 
-  q := interface{}(2)
-
-  for i := 0; i < len(x); i++ {
-    x[i].l()
+func fib(n int) int {
+  if n <= 1 {
+    return n
   }
+  return fib(n-1) + fib(n-2)
 }
