@@ -14,15 +14,15 @@ func (s *Snippet) Add(f ...float64) {
 }
 
 const (
-	Nop float64 = iota
-	Mov
-	Jmp
-	Binop
-	Unop
-	Call
-	Ret
-	Alc
-	App
+	Nop   = 0x00
+	Mov   = 0x01
+	Jmp   = 0x02
+	Binop = 0x03
+	Unop  = 0x04
+	Call  = 0x05
+	Ret   = 0x06
+	Alc   = 0x07
+	App   = 0x08
 )
 
 func Compile(instructions []air.Instruction) Snippet {
@@ -156,7 +156,7 @@ func compileOperand(ins air.Instruction, operand *air.Operand, current int, labe
 			panic(fmt.Errorf("invalid immediate type %T", v))
 		}
 	case air.OperandKindRegister:
-		s.Add(UOPRegister, float64(operand.Value.(air.Register)))
+		s.Add(UOPImmediate, float64(operand.Value.(air.Register)), UOPRegister)
 	case air.OperandKindIndirect:
 		s.Add(compileOperand(ins, operand.Value.(air.Indirect).Ptr, current, labels)...)
 		s.Add(UOPIndirect)
@@ -215,7 +215,7 @@ func OperandSize(operand *air.Operand) int {
 	case air.OperandKindImmediate:
 		return 2
 	case air.OperandKindRegister:
-		return 2
+		return 3
 	case air.OperandKindIndirect:
 		return 1 + OperandSize(operand.Value.(air.Indirect).Ptr)
 	case air.OperandKindBinary:
@@ -233,26 +233,26 @@ func OperandSize(operand *air.Operand) int {
 }
 
 const (
-	UOPImmediate float64 = iota
-	UOPRegister
-	UOPIndirect
-	UOPVTableLookup
-	UOPAddition
-	UOPSubtraction
-	UOPMultiplication
-	UOPDivision
-	UOPModulo
-	UOPLogicalAnd
-	UOPLogicalOr
-	UOPEqual
-	UOPNotEqual
-	UOPNot
-	UOPNegate
-	UOPBoundsCheck
-	UOPGreaterThan
-	UOPGreaterThanOrEqual
-	UOPLessThan
-	UOPLessThanOrEqual
+	UOPImmediate          = 0x00
+	UOPRegister           = 0x01
+	UOPIndirect           = 0x02
+	UOPVTableLookup       = 0x03
+	UOPAddition           = 0x04
+	UOPSubtraction        = 0x05
+	UOPMultiplication     = 0x06
+	UOPDivision           = 0x07
+	UOPModulo             = 0x08
+	UOPLogicalAnd         = 0x09
+	UOPLogicalOr          = 0x0A
+	UOPEqual              = 0x0B
+	UOPNotEqual           = 0x0C
+	UOPNot                = 0x0D
+	UOPNegate             = 0x0E
+	UOPBoundsCheck        = 0x0F
+	UOPGreaterThan        = 0x10
+	UOPGreaterThanOrEqual = 0x11
+	UOPLessThan           = 0x12
+	UOPLessThanOrEqual    = 0x13
 )
 
 func BinaryOperatorUOP(operator operators.Operator) float64 {

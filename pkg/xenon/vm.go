@@ -1039,159 +1039,6 @@ func (r *Runtime) pop() (float64, error) {
 	r.setSP(r.sp() - 1)
 	return val, err
 }
-
-// func (r *Runtime) loadImmediate(imm air.Immediate) loadFunc {
-// 	return loadFunc(func() (float64, error) {
-// 		switch imm := imm.(type) {
-// 		case Int:
-// 			return float64(imm), nil
-// 		case Float:
-// 			return float64(imm), nil
-// 		case Bool:
-// 			if imm {
-// 				return 1, nil
-// 			}
-// 			return 0, nil
-// 		default:
-// 			panic("BAD IMMEDIATE TYPE")
-// 		}
-// 	})
-// }
-//
-// func (r *Runtime) loadIndirect(indirect air.Indirect) loadFunc {
-// 	return r.loadIndirectWithOffset(indirect.Ptr, 0)
-// }
-//
-// func (r *Runtime) loadBinary(binop air.BinaryOperand) loadFunc {
-// 	return loadFunc(func() (float64, error) {
-// 		a, err := r.load(binop.Left)()
-// 		if err != nil {
-// 			return 0, err
-// 		}
-//
-// 		b, err := r.load(binop.Right)()
-// 		if err != nil {
-// 			return 0, err
-// 		}
-//
-// 		switch binop.Op {
-// 		case "+":
-// 			return a + b, nil
-// 		case "-":
-// 			return a - b, nil
-// 		case "*":
-// 			return a * b, nil
-// 		case "<":
-// 			if a < b {
-// 				return 1, nil
-// 			} else {
-// 				return 0, nil
-// 			}
-// 		case "<=":
-// 			if a <= b {
-// 				return 1, nil
-// 			} else {
-// 				return 0, nil
-// 			}
-// 		case "==":
-// 			if a == b {
-// 				return 1, nil
-// 			} else {
-// 				return 0, nil
-// 			}
-// 		case "!=":
-// 			if a != b {
-// 				return 1, nil
-// 			} else {
-// 				return 0, nil
-// 			}
-// 		case "#":
-// 			if int(a) >= int(b) {
-// 				return 0, fmt.Errorf("index out of bounds: %d >= %d", int(a), int(b))
-// 			}
-//
-// 			return a, nil
-// 		default:
-// 			return 0, fmt.Errorf("unhandled binary operand %v", binop.Op)
-// 		}
-// 	})
-// }
-//
-// func (r *Runtime) loadUnary(not air.UnaryOperand) loadFunc {
-// 	return loadFunc(func() (float64, error) {
-// 		a, err := r.load(not.A)()
-// 		if err != nil {
-// 			return 0, err
-// 		}
-//
-// 		switch not.Op {
-// 		case operators.Not:
-// 			if a == 0 {
-// 				return 1, nil
-// 			}
-//
-// 			return 0, nil
-// 		default:
-// 			return 0, fmt.Errorf("unhandled unary operator %v", not.Op)
-// 		}
-//
-// 	})
-// }
-
-// func (r *Runtime) loadIndirectWithOffset(indirect *air.Operand, offset Size) loadFunc {
-// 	return loadFunc(func() (float64, error) {
-// 		base, err := r.load(indirect)()
-// 		if err != nil {
-// 			return 0, err
-// 		}
-//
-// 		return r.loadMem(Addr(base).Offset(offset))
-// 	})
-// }
-
-// func (r *Runtime) loadRegister(reg air.Register) loadFunc {
-// 	return loadFunc(func() (float64, error) {
-// 		return r.registers[reg], nil
-// 	})
-// }
-//
-// func (r *Runtime) loadVTable(lookup air.VTableLookup) loadFunc {
-// 	return loadFunc(func() (float64, error) {
-// 		typeID, err := r.load(lookup.Type)()
-// 		if err != nil {
-// 			return 0, fmt.Errorf("failed to get type id: %w", err)
-// 		}
-//
-// 		typeNameAddr, ok := r.vtables[int(typeID)]["#name"]
-// 		if !ok {
-// 			return 0, fmt.Errorf("no such type %d", int(typeID))
-// 		}
-//
-// 		typeName, err := r.LoadString(Addr(typeNameAddr))
-// 		if err != nil {
-// 			return 0, fmt.Errorf("failed to get type name: %w", err)
-// 		}
-//
-// 		nameAddr, err := r.load(lookup.Method)()
-// 		if err != nil {
-// 			return 0, fmt.Errorf("failed to get method name addr: %w", err)
-// 		}
-//
-// 		name, err := r.LoadString(Addr(nameAddr))
-// 		if err != nil {
-// 			return 0, fmt.Errorf("failed to get method name: %w", err)
-// 		}
-//
-// 		funAddr, ok := r.vtables[int(typeID)][string(name)]
-// 		if !ok {
-// 			r.printVTables()
-// 			return 0, fmt.Errorf("no such vtable entry for %d %s %s", int(typeID), typeName, name)
-// 		}
-//
-// 		return funAddr, nil
-// 	})
-// }
-
 func (r *Runtime) loadInternal(op Addr, length Addr) (float64, error) {
 	var stack []float64
 	var arg1 float64
@@ -1215,13 +1062,8 @@ func (r *Runtime) loadInternal(op Addr, length Addr) (float64, error) {
 
 			stack = append(stack, val)
 		case abc.UOPRegister:
-			reg, err := r.fetch(op)
-			if err != nil {
-				return 0, err
-			}
-			op++
-
-			stack = append(stack, r.registers[int(reg)])
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			stack = append(stack, r.registers[int(arg1)])
 		case abc.UOPIndirect:
 			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
 
@@ -1387,7 +1229,7 @@ func (r *Runtime) store(op Addr, val float64) error {
 		}
 		return r.storeMem(Addr(addr), val)
 	case abc.UOPRegister:
-		reg, err := r.fetch(Addr(op + 1))
+		reg, err := r.loadInternal(Addr(op+1), Addr(length-1))
 		if err != nil {
 			return err
 		}

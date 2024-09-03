@@ -35,7 +35,7 @@ function @__builtin_cos($n:number):number
 const $PAGE_SIZE = {{$PageSize}}
 
 {{range $page := loop 0 .NumCodePages -}}
-array $aeon_code_page_{{$page}}:text
+array $aeon_code_page_{{$page}}:number
 {{end}}
 {{range $page := loop 0 .NumMemPages -}}
 array $aeon_mem_page_{{$page}}:number
@@ -47,10 +47,10 @@ var $aeon_str_index = 0
 array $aeon_reg:number
 
 function @aeon_code_init()
-	{{range $page := loop 0 .NumCodePages}}$aeon_code_page_{{$page}}.fill($PAGE_SIZE, ""){{"\n\t"}}{{end}}
-	{{range $addr, $bc := .Code}}$aeon_code_page_{{$addr.Page}}.{{$addr.Addr}} = "{{$bc}}"{{"\n\t"}}{{end}}
+	{{range $page := loop 0 .NumCodePages}}$aeon_code_page_{{$page}}.fill($PAGE_SIZE, 0){{"\n\t"}}{{end}}
+	{{range $addr, $bc := .Code}}$aeon_code_page_{{$addr.Page}}.{{$addr.Addr}} = {{$bc}}{{"\n\t"}}{{end}}
 
-function @aeon_code($addr:number):text
+function @aeon_code($addr:number):number
 	var $pageAddr = $addr % $PAGE_SIZE
 	{{range $page := loop 0 .NumCodePages}}
 	if ($addr < {{mul (add $page 1) $PageSize}})
@@ -76,6 +76,14 @@ function @aeon_mem_store($addr:number, $v:number):text
 
 function @aeon_mem_init()
 	{{range $page := loop 0 .NumMemPages}}$aeon_mem_page_{{$page}}.fill($PAGE_SIZE, 0){{"\n\t"}}{{end}}
+
+array $aeon_memmove_tmp:number
+function @aeon_memmove($dst:number, $src:number, $size:number)
+	$aeon_memmove_tmp.fill($size, 0)
+	repeat $size ($i)
+		$aeon_memmove_tmp.$i = @aeon_mem_load($src+$i)
+	repeat $size ($i)
+		@aeon_mem_store($dst+$i, $aeon_memmove_tmp.$i)
 
 function @aeon_str_load($addr:number):text
 	var $page = floor($addr / $PAGE_SIZE)
@@ -132,91 +140,99 @@ array $aeon_op_arg_stack:number
 
 var $aeon_numbers = "0123456789"
 
-function @aeon_load_internal($op:text, $limit:number):number
+function @aeon_load_internal($addr:number, $length:number):number
 	var $index = 0
 	var $arg1 = 0
 	var $arg2 = 0
-	while ($index < $limit)
-		var $k = $op.$index
-		$index++
-		if ($k == "F")
-			$aeon_op_arg_stack.append(0)
-		elseif ($k == "T")
-			$aeon_op_arg_stack.append(1)
-		elseif ($k == "I")
-			var $base = $index
-			$index += find(substring($op, $base, -1), "I")
-			$aeon_op_arg_stack.append(substring($op, $base, $index-$base))
-			$index++
-		elseif ($k == "R")
+
+	var $limit = $addr+$length
+
+	while ($addr < $limit)
+		var $uop = @aeon_code($addr)
+		$addr++
+		if ($uop == 0) ; immediate
+			var $imm = @aeon_code($addr)
+			$addr++
+			$aeon_op_arg_stack.append($imm)
+		elseif ($uop == 1) ; register
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($aeon_reg.$arg1)
-		elseif ($k == "@")
-			$arg1 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append(@aeon_mem_load($arg1))
-		elseif ($k == "+")
+		elseif ($uop == 2) ; memory
+			var $mem = @aeon_code($addr)
+			$addr++
+			$aeon_op_arg_stack.append(@aeon_mem_load($mem))
+		elseif ($uop == 4) ; +
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($arg1 + $arg2)
-		elseif ($k == "*")
-			$arg2 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$arg1 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append($arg1 * $arg2)
-		elseif ($k == "=")
-			$arg2 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$arg1 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append($arg1 == $arg2)
-		elseif ($k == "≠")
-			$arg2 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$arg1 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append($arg1 != $arg2)
-		elseif ($k == "󰥽")
-			$arg2 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$arg1 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append($arg1 <= $arg2)
-		elseif ($k == "<")
-			$arg2 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$arg1 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append($arg1 < $arg2)
-		elseif ($k == "-")
+		elseif ($uop == 5) ; -
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($arg1 - $arg2)
-		elseif ($k == "!")
-			$arg1 = $aeon_op_arg_stack.last
-			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append(!$arg1)
-		elseif ($k == "V")
+		elseif ($uop == 6) ; *
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
-			$aeon_op_arg_stack.append(@aeon_vtable($arg1, @aeon_str_load($arg2)))
-		elseif ($k == "#")
+			$aeon_op_arg_stack.append($arg1 * $arg2)
+		elseif ($uop == 11) ; =
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 == $arg2)
+		elseif ($uop == 12) ; !=
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 != $arg2)
+		elseif ($uop == 13) ; !
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append(!$arg1)
+		elseif ($uop == 14) ; -
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append(-$arg1)
+		elseif ($uop == 15)
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			if ($arg1 >= $arg2)
 				print(text("index out of bounds: {} {}", $arg1, $arg2))
 				@aeon_fatal()
+		elseif ($uop == 16) ; >
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 > $arg2)
+		elseif ($uop == 17) ; >=
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 >= $arg2)
+		elseif ($uop == 18) ; <
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 < $arg2)
+		elseif ($uop == 19) ; <=
+			$arg2 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$arg1 = $aeon_op_arg_stack.last
+			$aeon_op_arg_stack.pop()
+			$aeon_op_arg_stack.append($arg1 < $arg2)
 		else
-			print(text("bad uop in load {} at index {} in {}", $k, $index-1, $op))
+			print(text("bad uop in load {} at index {} in {}", $uop, $index-1, $addr))
 			$aeon_op_arg_stack.append($arg1)
 			@aeon_fatal()
 
@@ -224,47 +240,35 @@ function @aeon_load_internal($op:text, $limit:number):number
 	$aeon_op_arg_stack.clear()
 	return $ret
 
-function @aeon_load($op:text):number
-	var $ret = @aeon_load_internal($op, size($op))
-	{{if .Debug}}@debug(text("load {} -> {}", $op, $ret)){{end}}
-	return $ret
+function @aeon_load($op:number):number
+	var $length = @aeon_code($op)
+	return @aeon_load_internal($op+1, $length)
 
-function @aeon_load_addr($op:text):number
-	if (last($op) == "@")
-		return @aeon_load_internal($op, size($op)-1)
+function @aeon_load_addr($op:number):number
+	var $length = @aeon_code($op)
+
+	var $last = @aeon_code($op+$length)
+
+	return @aeon_load_internal($op+1, $length)
+
+	if ($last == 2) ; mem
+		return @aeon_load_internal($op+1, $length-1)
 	else
 		@__builtin_panic(text("bad operand for load addr {}", $op))
 
-function @aeon_mov_size($dst:text, $src:text, $size:number)
-	var $dstAddr = @aeon_load_addr($dst)
-	var $srcAddr = @aeon_load_addr($src)
+function @aeon_store($op:number, $v:number)
+	var $length = @aeon_code($op)
 
-	repeat $size ($offset)
-		@aeon_mem_store($dstAddr+$offset, @aeon_mem_load($srcAddr+$offset))
+	var $last = @aeon_code($op+$length)
 
-function @aeon_mov_init($dst:text, $src:text, $size:number)
-	var $dstAddr = @aeon_load_addr($dst)
-	var $srcVal = @aeon_load($src)
-
-	repeat $size ($offset)
-		@aeon_mem_store($dstAddr+$offset, $srcVal)
-
-
-function @aeon_load_field($op:text, $offset:number):number
-	return @aeon_mem_load(@aeon_load($op) + $offset)
-
-function @aeon_store($op:text, $v:number)
-	if (last($op) == "R")
-		var $reg = @aeon_load_internal($op, size($op)-1)
-		{{if .Debug}}@debug(text("store {} -> R{} = {}", $op, $reg, $v)){{end}}
+	if $last == 1 ; reg
+		var $reg = @aeon_load_internal($op+1, $length-1)
 		$aeon_reg.$reg = $v
-	elseif (last($op) == "@")
-		var $addr = @aeon_load_internal($op, size($op)-1)
-		{{if .Debug}}@debug(text("store {} -> @{} = {}", $op, $addr, $v)){{end}}
+	elseif $last == 2 ; mem
+		var $addr = @aeon_load_internal($op+1, $length-1)
 		@aeon_mem_store($addr, $v)
 	else
-		print(text("bad operand for store {}", $op))
-		@aeon_fatal()
+		@__builtin_panic(text("bad operand for store {} on {}", $op, $aeon_reg.0))
 
 function @aeon_add_string($a:number, $b:number):number
 	return @aeon_str_alloc(@aeon_str_load($a) & @aeon_str_load($b))
@@ -561,6 +565,7 @@ function @aeon_call_size($fname:text):number
 	print(text("invalid extern func {}", $fname))
 	@aeon_fatal()
 
+
 function @aeon_call_extern($fname:text, $size:number)
 	var $sp = $aeon_reg.1
 	{{ range $entry := .ExternFuncs }}
@@ -570,16 +575,36 @@ function @aeon_call_extern($fname:text, $size:number)
 
 ; Main Loop
 
-function @aeon_run($pc:number):number
+function @aeon_run($funcInfo:number):number
 	@aeon_reg_init()
-	$aeon_reg.0 = $pc
-	$aeon_reg.1 = {{.GlobalSize}}
 
+	var $line = 0
 	var $size = 0
+	var $kind = 0
+	var $op = 0
+
+	var $targetLen = 0
+	var $target = 0
+	var $condLen = 0
+	var $cond = 0
+	var $srcLen = 0
+	var $src = 0
+	var $dstLen = 0
+	var $dst = 0
+	var $leftLen = 0
+	var $left = 0
+	var $rightLen = 0
+	var $right = 0
+	var $funcLen = 0
+	var $func = 0
+
+	$aeon_reg.0 = @aeon_mem_load($funcInfo+3)
+	$aeon_reg.1 = {{.GlobalSize}}
 
 	repeat {{.NumRegisters}} ($reg)
 		@aeon_mem_store($aeon_reg.1, 0)
 		$aeon_reg.1 += 1
+
 	$aeon_reg.2 = $aeon_reg.1 - 1
 
 	var $i = 0
@@ -587,80 +612,106 @@ function @aeon_run($pc:number):number
 	while ($i < 100000)
 		$i++
 
+		; print(text("pc = {}", $aeon_reg.0))
+		; print(text("sp = {}", $aeon_reg.1))
+		; print(text("fp = {}", $aeon_reg.2))
+
 		var $code = @aeon_code($aeon_reg.0)
-		$aeon_ops.from($code, "{{.OPSep}}")
-		$aeon_reg.0++
-		{{if .Debug}}@debug(text("{} {} {} {} {}", $i, $aeon_reg.0, $aeon_reg.1, $aeon_reg.2, $code)){{end}}
+		if ($code == 0); nop
+			$aeon_reg.0+=1
+		elseif ($code == 1); mov <#size> <dst> <src>
+			$size = @aeon_code($aeon_reg.0+1)
+			$dstLen = @aeon_code($aeon_reg.0+2)
+			$srcLen = @aeon_code($aeon_reg.0+3+$dstLen)
 
-		if ($aeon_ops.0 == "mov")
-			$size = $aeon_ops.3:number
-			if ($size == 1)
-				@aeon_store($aeon_ops.1, @aeon_load($aeon_ops.2))
-			elseif (last($aeon_ops.2) == "@")
-				@aeon_mov_size($aeon_ops.1, $aeon_ops.2, $size)
-			else
-				@aeon_mov_init($aeon_ops.1, $aeon_ops.2, $size)
-		elseif ($aeon_ops.0 == "bop")
-			@aeon_store($aeon_ops.1, @aeon_bop($aeon_ops.2:number, $aeon_ops.3, $aeon_ops.4, $aeon_ops.5))
-		elseif ($aeon_ops.0 == "uop")
-			@aeon_store($aeon_ops.1, @aeon_uop($aeon_ops.2:number, $aeon_ops.3, $aeon_ops.4))
-		elseif ($aeon_ops.0 == "jmp")
-			if (@aeon_load($aeon_ops.1))
-				$aeon_reg.0 = @aeon_load($aeon_ops.2)
-		elseif ($aeon_ops.0 == "cal")
-			var $fhdr = @aeon_load($aeon_ops.1)
-			var $ftype = @aeon_mem_load($fhdr + 0)
-			if ($ftype == 0)
-				@__builtin_panic("tried to call nil function")
-			elseif ($ftype == 1)
-				var $fname = @aeon_str_load(@aeon_mem_load($fhdr + 3))
-			 	{{if .Debug}}@debug(text("extern {}", $fname)){{end}}
-				$size = @aeon_call_size($fname)
-				@aeon_call_extern($fname, $size)
-				$aeon_reg.1 -= $size
-			elseif ($ftype == 2)
-				var $faddr = @aeon_mem_load($fhdr + 3)
-				repeat {{.NumRegisters}} ($reg)
-					@aeon_mem_store($aeon_reg.1 + {{.NumRegisters}} - $reg - 1, $aeon_reg.$reg)
-
-				$aeon_reg.1 += {{.NumRegisters}}
-				$aeon_reg.2 = $aeon_reg.1 - 1
-				$aeon_reg.0 = $faddr
-			else
-				print(text("panic: unrecognized call function type: {}", $ftype))
-				@aeon_fatal()
-		elseif ($aeon_ops.0 == "ret")
-			var $fp = $aeon_reg.2
-			repeat {{$.NumRegisters}} ($reg)
-				$aeon_reg.$reg = @aeon_mem_load($fp-$reg)
-
-			$aeon_reg.1 = $aeon_reg.1 - $aeon_ops.1:number
-
-			if ($aeon_reg.0 == 0) {
-				return
-			}
-		elseif ($aeon_ops.0 == "str")
-			var $str = ""
-			if ($aeon_ops.size == 3)
-				$str = $aeon_ops.2
-			@aeon_store($aeon_ops.1, @aeon_str_alloc($str))
-		elseif ($aeon_ops.0 == "alc")
-			@aeon_store($aeon_ops.1, @aeon_heap_alloc(@aeon_load($aeon_ops.2)))
-		elseif ($aeon_ops.0 == "app")
-			var $dstSlice = @aeon_load_addr($aeon_ops.1)
-			var $srcSlice = @aeon_load_addr($aeon_ops.2)
-			$size = $aeon_ops.4:number
-			var $elem = 0
 			if $size == 1
-				$elem = @aeon_load($aeon_ops.3)
+				@aeon_store($aeon_reg.0+2, @aeon_load($aeon_reg.0+3+$dstLen))
 			else
-				$elem = @aeon_load_addr($aeon_ops.3)
-			@aeon_append(@aeon_mem_load($srcSlice), @aeon_mem_load($srcSlice + 1), @aeon_mem_load($srcSlice + 2), $elem, $size, $srcSlice)
-		elseif ($aeon_ops.0 == "nop")
-			continue
+				$dst = @aeon_load_addr($aeon_reg.0+2)
+				$src = @aeon_load_addr($aeon_reg.0+3+$dstLen)
+				@aeon_memmove($dst, $src, $size)
+			$aeon_reg.0 += 4 + $srcLen + $dstLen
+		elseif $code == 2; jmp <target> <cond>
+			$targetLen = @aeon_code($aeon_reg.0+1)
+			$target = @aeon_load($aeon_reg.0+1)
+			$condLen = @aeon_code($aeon_reg.0+2+$targetLen)
+			$cond = @aeon_load($aeon_reg.0+2+$targetLen)
+
+			if $cond
+				$aeon_reg.0 = $target
+			else
+				$aeon_reg.0 += 3 + $targetLen + $condLen
+		elseif $code == 3; bop <dst> <#kind> <#op> <left> <right>
+			$dstLen = @aeon_code($aeon_reg.0+1)
+
+			$kind = @aeon_code($aeon_reg.0+2)
+			$op = @aeon_code($aeon_reg.0+3)
+
+			$leftLen = @aeon_code($aeon_reg.0+4+$dstLen)
+			$left = @aeon_load($aeon_reg.0+4+$dstLen)
+			$rightLen = @aeon_code($aeon_reg.0+5+$dstLen+$leftLen)
+			$right = @aeon_load($aeon_reg.0+5+$dstLen+$leftLen)
+
+			if $op == 4; +
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+1, $left + $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+1, $left + $right)
+				elseif $kind == {{.KindString}}
+					@aeon_store($aeon_reg.0+1, @aeon_add_string($left, $right))
+				else
+					@__builtin_panic("bad + operand")
+			elseif $op == 5; -
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+1, $left - $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+1, $left - $right)
+				else
+					@__builtin_panic("bad + operand")
+
+			$aeon_reg.0 += 6 + $dstLen + $leftLen + $rightLen
+		elseif $code == 5; call <#line> <func>
+			$line = @aeon_code($aeon_reg.0+1)
+			$funcLen = @aeon_code($aeon_reg.0+2)
+			$func = @aeon_load_addr($aeon_reg.0+2)
+
+			var $ftype = @aeon_mem_load($func)
+			var $fname = @aeon_str_load(@aeon_mem_load($func+1))
+
+			if $ftype == 0
+				@__builtin_panic(text("invalid function call: {}", $fname))
+			elseif $ftype == 1
+				var $externName = @aeon_str_load(@aeon_mem_load($func+3))
+
+				$size = @aeon_call_size($externName)
+				@aeon_call_extern($externName, $size)
+				$aeon_reg.1 -= $size
+				$aeon_reg.0 += 3 + $funcLen
+			else
+				@__builtin_panic(text("invalid function type: {}", $ftype))
+		elseif $code == 6; ret <#size>
+			$size = @aeon_code($aeon_reg.0+1)
+			var $fp = $aeon_reg.2
+			repeat {{.NumRegisters}} ($reg)
+				$aeon_reg.$reg = @aeon_mem_load($fp - $reg)
+
+			$aeon_reg.1 -= $size
+
+			; TODO: stack tracing
+			;
+			if $aeon_reg.2 == 0
+				return
+		else if $code == 7; app <dst> <src> <elem> <#size>
+			$dstLen = @aeon_code($aeon_reg.0+1)
+			$dst = @aeon_load_addr($aeon_reg.0+1)
+			$srcLen = @aeon_code($aeon_reg.0+2+$dstLen)
+			$src = @aeon_load($aeon_reg.0+2+$dstLen)
+			$elemLen = @aeon_code($aeon_reg.0+3+$dstLen+$srcLen)
+			$size = @aeon_code($aeon_reg.0+4+$dstLen+$srcLen+$elemLen)
+
+			$aeon_reg.0 += 5 + $dstLen + $srcLen + $elemLen
 		else
-			@__builtin_panic(text("unrecognized bytecode {}", $code))
-	@__builtin_panic(text("exceeded execution limit"))
+			@__builtin_panic(text("bad opcode {}", $code))
 
 init
 	@aeon_reg_init()

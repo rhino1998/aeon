@@ -1,18 +1,18 @@
 package xenon
 
 import (
-	"bytes"
 	"context"
 	_ "embed"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"text/template"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
+	"github.com/rhino1998/aeon/pkg/compiler/abc"
 	"github.com/rhino1998/aeon/pkg/compiler/air"
 	"github.com/rhino1998/aeon/pkg/compiler/kinds"
-	"github.com/rhino1998/aeon/pkg/compiler/operators"
 	"github.com/rhino1998/aeon/pkg/compiler/types"
 )
 
@@ -43,7 +43,7 @@ type VTable map[int]map[string]int
 type xenonContext struct {
 	PageSize     int
 	NumCodePages int
-	Code         map[PageAddr]string
+	Code         map[PageAddr]float64
 	VarInitFuncs []int
 	InitFuncs    []int
 	UpdateFuncs  []int
@@ -112,15 +112,15 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	}
 
 	for _, f := range prog.VarInitFunctions() {
-		xeCtx.VarInitFuncs = append(xeCtx.VarInitFuncs, int(f.Addr()))
+		xeCtx.VarInitFuncs = append(xeCtx.VarInitFuncs, int(f.InfoAddr()))
 	}
 
 	for _, f := range prog.InitFunctions() {
-		xeCtx.InitFuncs = append(xeCtx.InitFuncs, int(f.Addr()))
+		xeCtx.InitFuncs = append(xeCtx.InitFuncs, int(f.InfoAddr()))
 	}
 
 	for _, f := range prog.UpdateFunctions() {
-		xeCtx.UpdateFuncs = append(xeCtx.UpdateFuncs, int(f.Addr()))
+		xeCtx.UpdateFuncs = append(xeCtx.UpdateFuncs, int(f.InfoAddr()))
 	}
 
 	allFuncs := make(map[string]int)
@@ -162,7 +162,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		}
 	}
 
-	xeCtx.Code = make(map[PageAddr]string)
+	xeCtx.Code = make(map[PageAddr]float64)
 
 	logger.Debug("Program",
 		slog.Int("page_size", xeCtx.PageSize),
@@ -206,22 +206,17 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		})
 	}
 
-	for i, bc := range prog.Instructions() {
-		var buf bytes.Buffer
-		err := xeCtx.marshalByteCode(&buf, bc)
-		if err != nil {
-			return err
-		}
+	bytecode := abc.Compile(prog.Instructions())
+	log.Println(bytecode)
 
-		bcBytes := buf.Bytes()
-
+	for i, bc := range bytecode {
 		page := i / xeCtx.PageSize
 		pageAddr := i % xeCtx.PageSize
 
 		logger.Debug("debug: %d:%d:%s", slog.Int("page", page), slog.Int("pageAddr", pageAddr), slog.Any("bc", bc))
 		xeCtx.Code[PageAddr{
 			Page: page,
-			Addr: pageAddr}] = string(bcBytes)
+			Addr: pageAddr}] = bc
 	}
 
 	funcMap := template.FuncMap{
@@ -252,206 +247,4 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	}
 
 	return tmpl.Execute(w, &xeCtx)
-}
-
-func (x *xenonContext) marshalByteCode(w io.Writer, bc air.Instruction) error {
-	fmt.Fprintf(w, "%s%s", bc.Name(), x.OPSep)
-
-	switch bc := bc.(type) {
-	case air.Nop:
-	case air.Mov:
-		err := x.marshalOperand(w, bc.Dst)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", x.OPSep)
-		err = x.marshalOperand(w, bc.Src)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Size))
-	case air.Alc:
-		err := x.marshalOperand(w, bc.Dst)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", x.OPSep)
-		err = x.marshalOperand(w, bc.Size)
-		if err != nil {
-			return err
-		}
-	case air.App:
-		err := x.marshalOperand(w, bc.Dst)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", x.OPSep)
-		err = x.marshalOperand(w, bc.Src)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(w, "%s", x.OPSep)
-		err = x.marshalOperand(w, bc.Elem)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Size))
-	case air.BinOp:
-		err := x.marshalOperand(w, bc.Dst)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Kind))
-		fmt.Fprintf(w, "%s%s", x.OPSep, bc.Op)
-
-		fmt.Fprintf(w, "%s", x.OPSep)
-		err = x.marshalOperand(w, bc.Left)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", x.OPSep)
-		err = x.marshalOperand(w, bc.Right)
-		if err != nil {
-			return err
-		}
-	case air.UnOp:
-		err := x.marshalOperand(w, bc.Dst)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s%d", x.OPSep, int(bc.Kind))
-		fmt.Fprintf(w, "%s%s", x.OPSep, bc.Op)
-
-		fmt.Fprintf(w, "%s", x.OPSep)
-		err = x.marshalOperand(w, bc.Src)
-		if err != nil {
-			return err
-		}
-	case air.Jmp:
-		err := x.marshalOperand(w, bc.Cond)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", x.OPSep)
-		err = x.marshalOperand(w, bc.Target)
-		if err != nil {
-			return err
-		}
-	case air.Ret:
-		fmt.Fprintf(w, "%d", int(bc.Args))
-	case air.Cal:
-		err := x.marshalOperand(w, bc.Func)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (x *xenonContext) marshalOperand(w io.Writer, op *air.Operand) error {
-	switch op.Kind {
-	case air.OperandKindImmediate:
-		switch imm := op.Value.(type) {
-		case Int:
-			fmt.Fprintf(w, "I%vI", int(imm))
-		case Float:
-			fmt.Fprintf(w, "I%vI", float64(imm))
-		case Bool:
-			if imm {
-				fmt.Fprintf(w, "T")
-			} else {
-				fmt.Fprintf(w, "F")
-			}
-		case String:
-			panic("BAD")
-		}
-
-		return nil
-	case air.OperandKindRegister:
-		fmt.Fprintf(w, "I%dIR", int(op.Value.(Register)))
-
-		return nil
-	case air.OperandKindIndirect:
-		err := x.marshalOperand(w, op.Value.(air.Indirect).Ptr)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", op.Kind.String())
-
-		return nil
-	case air.OperandKindUnary:
-		err := x.marshalOperand(w, op.Value.(air.UnaryOperand).A)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", operatorChar(op.Value.(air.UnaryOperand).Op))
-
-		return nil
-	case air.OperandKindBinary:
-		err := x.marshalOperand(w, op.Value.(air.BinaryOperand).Left)
-		if err != nil {
-			return err
-		}
-
-		err = x.marshalOperand(w, op.Value.(air.BinaryOperand).Right)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", operatorChar(op.Value.(air.BinaryOperand).Op))
-
-		return nil
-	case air.OperandKindVTableLookup:
-		err := x.marshalOperand(w, op.Value.(air.VTableLookup).Type)
-		if err != nil {
-			return err
-		}
-
-		err = x.marshalOperand(w, op.Value.(air.VTableLookup).Method)
-		if err != nil {
-			return err
-		}
-
-		fmt.Fprintf(w, "%s", op.Kind.String())
-
-		return nil
-	default:
-		return fmt.Errorf("unknown operand kind %v", op.Kind)
-	}
-}
-
-func operatorChar(op operators.Operator) string {
-	switch op {
-	case operators.Addition,
-		operators.Subtraction,
-		operators.Multiplication,
-		operators.Division,
-		operators.LessThan,
-		operators.GreaterThan,
-		operators.Not,
-		operators.BoundsCheck,
-		operators.Modulo:
-		return string(op)
-	case operators.Equal:
-		return "="
-	case operators.NotEqual:
-		return "≠"
-	case operators.LessThanOrEqual:
-		return "󰥽"
-	case operators.GreaterThanOrEqual:
-		return "≥"
-	default:
-		return "?"
-	}
 }
