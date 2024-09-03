@@ -1398,7 +1398,6 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		bc.Ret(funcStackSize)
 
 		bc.Mov(dst, tmp.AsType(dst.Type))
-		bc.Nop()
 		bc.Label(skipRet)
 
 		return bc, dst, nil
