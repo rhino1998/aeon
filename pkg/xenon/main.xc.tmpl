@@ -153,7 +153,7 @@ array $aeon_op_arg_stack:number
 
 var $aeon_numbers = "0123456789"
 
-function @aeon_load_internal($addr:number, $length:number):number
+function @aeon_load($addr:number, $length:number):number
 	var $arg1 = 0
 	var $arg2 = 0
 
@@ -258,17 +258,13 @@ function @aeon_load_internal($addr:number, $length:number):number
 	$aeon_op_arg_stack.clear()
 	return $ret
 
-function @aeon_load($op:number):number
-	var $length = @aeon_code($op)
-	return @aeon_load_internal($op+1, $length)
-
 function @aeon_load_addr($op:number):number
 	var $length = @aeon_code($op)
 
 	var $last = @aeon_code($op+$length)
 
 	if ($last == 2) ; mem
-		return @aeon_load_internal($op+1, $length-1)
+		return @aeon_load($op+1, $length-1)
 	else
 		@__builtin_panic(text("bad operand for load addr {}", $last))
 
@@ -276,7 +272,7 @@ function @aeon_load_addr_internal($op:number, $length:number):number
 	var $last = @aeon_code($op+$length-1)
 
 	if ($last == 2) ; mem
-		return @aeon_load_internal($op, $length-1)
+		return @aeon_load($op, $length-1)
 	else
 		@__builtin_panic(text("bad operand for load addr {}", $last))
 
@@ -286,10 +282,10 @@ function @aeon_store($op:number, $v:number)
 	var $last = @aeon_code($op+$length)
 
 	if $last == 1 ; reg
-		var $reg = @aeon_load_internal($op+1, $length-1)
+		var $reg = @aeon_load($op+1, $length-1)
 		$aeon_reg.$reg = $v
 	elseif $last == 2 ; mem
-		var $addr = @aeon_load_internal($op+1, $length-1)
+		var $addr = @aeon_load($op+1, $length-1)
 		@aeon_mem_store($addr, $v)
 	else
 		@__builtin_panic(text("bad operand for store {} on {}", $op, $aeon_reg.0))
@@ -545,7 +541,7 @@ function @aeon_run($funcInfo:number):number
 			$srcLen = @aeon_code($aeon_reg.0+3+$dstLen)
 
 			if $size == 1
-				@aeon_store($aeon_reg.0+2, @aeon_load($aeon_reg.0+3+$dstLen))
+				@aeon_store($aeon_reg.0+2, @aeon_load($aeon_reg.0+4+$dstLen, $srcLen))
 			else
 				$dst = @aeon_load_addr_internal($aeon_reg.0+3, $dstLen)
 				$src = @aeon_load_addr_internal($aeon_reg.0+4+$dstLen, $srcLen)
@@ -553,9 +549,9 @@ function @aeon_run($funcInfo:number):number
 			$aeon_reg.0 += 4 + $srcLen + $dstLen
 		elseif $code == 2; jmp <target> <cond>
 			$targetLen = @aeon_code($aeon_reg.0+1)
-			$target = @aeon_load_internal($aeon_reg.0+2, $targetLen)
+			$target = @aeon_load($aeon_reg.0+2, $targetLen)
 			$condLen = @aeon_code($aeon_reg.0+2+$targetLen)
-			$cond = @aeon_load_internal($aeon_reg.0+3+$targetLen, $condLen)
+			$cond = @aeon_load($aeon_reg.0+3+$targetLen, $condLen)
 
 			if $cond
 				$aeon_reg.0 = $target
@@ -568,9 +564,9 @@ function @aeon_run($funcInfo:number):number
 			$op = @aeon_code($aeon_reg.0+3+$dstLen)
 
 			$leftLen = @aeon_code($aeon_reg.0+4+$dstLen)
-			$left = @aeon_load_internal($aeon_reg.0+5+$dstLen, $leftLen)
+			$left = @aeon_load($aeon_reg.0+5+$dstLen, $leftLen)
 			$rightLen = @aeon_code($aeon_reg.0+5+$dstLen+$leftLen)
-			$right = @aeon_load_internal($aeon_reg.0+6+$dstLen+$leftLen, $rightLen)
+			$right = @aeon_load($aeon_reg.0+6+$dstLen+$leftLen, $rightLen)
 
 			if $op == 4; +
 				if $kind == {{.KindInt}}
@@ -658,7 +654,7 @@ function @aeon_run($funcInfo:number):number
 			$kind = @aeon_code($aeon_reg.0+2+$dstLen)
 			$op = @aeon_code($aeon_reg.0+3+$dstLen)
 			$srcLen = @aeon_code($aeon_reg.0+4+$dstLen)
-			$src = @aeon_load_internal($aeon_reg.0+5+$dstLen, $srcLen)
+			$src = @aeon_load($aeon_reg.0+5+$dstLen, $srcLen)
 
 			if $op == 13; !
 				if $kind == {{.KindBool}}
@@ -679,7 +675,7 @@ function @aeon_run($funcInfo:number):number
 		elseif $code == 5; call <#line> <func>
 			$line = @aeon_code($aeon_reg.0+1)
 			$funcLen = @aeon_code($aeon_reg.0+2)
-			$func = @aeon_load_internal($aeon_reg.0+3, $funcLen)
+			$func = @aeon_load($aeon_reg.0+3, $funcLen)
 
 			var $ftype = @aeon_mem_load($func)
 			var $fname = @aeon_str_load(@aeon_mem_load($func+1))
@@ -722,7 +718,7 @@ function @aeon_run($funcInfo:number):number
 			$dstLen = @aeon_code($aeon_reg.0+1)
 
 			$sizeLen = @aeon_code($aeon_reg.0+2+$dstLen)
-			$size = @aeon_load_internal($aeon_reg.0+3+$dstLen, $sizeLen)
+			$size = @aeon_load($aeon_reg.0+3+$dstLen, $sizeLen)
 
 			@aeon_store($aeon_reg.0+1, @aeon_heap_alloc($size))
 
@@ -755,7 +751,7 @@ function @aeon_run($funcInfo:number):number
 				$sliceData = $newSliceData
 
 			if $size == 1
-				$elem = @aeon_load_internal($aeon_reg.0+4+$dstLen+$srcLen, $elemLen)
+				$elem = @aeon_load($aeon_reg.0+4+$dstLen+$srcLen, $elemLen)
 				@aeon_mem_store($sliceData + ($sliceLen * $size), $elem)
 			else
 				; TODO: memcpy
