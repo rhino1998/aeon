@@ -613,7 +613,13 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 			return nil, stmt.WrapError(err)
 		}
 
-		bc.BinOp(lhsLoc, lhsLoc, op, stmt.Left.Type().Kind(), rhsLoc)
+		opBC, opLoc, err := c.compileBCBinaryElementwiseOperator(ctx, prog, scope, stmt.Position, op, lhsLoc, lhsLoc, rhsLoc)
+		if err != nil {
+			return nil, err
+		}
+
+		bc.Add(opBC...)
+		bc.Mov(lhsLoc, opLoc)
 
 		return bc, nil
 	case *PostfixStatement:
