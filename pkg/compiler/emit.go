@@ -6,7 +6,6 @@ import (
 	"log"
 	"strconv"
 
-	"github.com/rhino1998/aeon/pkg/compiler/abc"
 	"github.com/rhino1998/aeon/pkg/compiler/air"
 	"github.com/rhino1998/aeon/pkg/compiler/kinds"
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
@@ -84,8 +83,6 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	}
 
 	prog.bytecode.OptimizeOperands()
-
-	log.Println(abc.Compile(prog.bytecode))
 
 	return nil
 }

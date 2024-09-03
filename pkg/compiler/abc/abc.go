@@ -46,7 +46,6 @@ func Compile(instructions []air.Instruction) Snippet {
 
 	for _, instruction := range instructions {
 		bc = append(bc, compileInstruction(instruction, len(bc), labels)...)
-		// log.Println(instruction, compileInstruction(instruction, len(bc), labels))
 	}
 
 	return bc
