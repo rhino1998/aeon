@@ -259,3 +259,17 @@ type TypeExpression struct {
 func (t *TypeExpression) Type() types.Type {
 	return &types.TypeType{Type: t.typ}
 }
+
+type DiscardExpression struct {
+	typ types.Type
+
+	parser.Position
+}
+
+func (d *DiscardExpression) Type() types.Type {
+	if d.typ == nil {
+		return types.Discard
+	}
+
+	return d.typ
+}

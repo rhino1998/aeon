@@ -289,9 +289,13 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	r.strHeapStart = r.strHeapIndex
 	r.strHeapEnd = Addr(strPages * PageSize)
 
-	for i, code := range bytecode {
-		page, pageAddr := r.splitAddr(Addr(i))
-		r.codePages[page][pageAddr] = code
+	var codeAddr Addr
+	for _, instruction := range bytecode {
+		for _, uop := range instruction {
+			page, pageAddr := r.splitAddr(codeAddr)
+			r.codePages[page][pageAddr] = uop
+			codeAddr++
+		}
 	}
 
 	typeIDFromName := make(map[types.Name]int)

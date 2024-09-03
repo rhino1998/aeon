@@ -264,7 +264,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		return nil
 	case *AssignmentOperatorStatement:
-		left, err := c.resolveLHSTypes(stmt.Left)
+		left, err := c.resolveLHSTypes(stmt.Left, stmt.Right.Type())
 		if err != nil {
 			errs.Add(err)
 		}
@@ -290,19 +290,19 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 		return nil
 	case *AssignmentStatement:
-		left, err := c.resolveLHSTypes(stmt.Left)
-		if err != nil {
-			errs.Add(err)
-		}
-
-		stmt.Left = left
-
-		right, err := c.resolveExpressionTypes(stmt.Right, left.Type())
+		right, err := c.resolveExpressionTypes(stmt.Right, stmt.Left.Type())
 		if err != nil {
 			errs.Add(err)
 		}
 
 		stmt.Right = right
+
+		left, err := c.resolveLHSTypes(stmt.Left, stmt.Right.Type())
+		if err != nil {
+			errs.Add(err)
+		}
+
+		stmt.Left = left
 
 		if !types.IsAssignableTo(right.Type(), left.Type()) {
 			errs.Add(stmt.WrapError(fmt.Errorf("cannot assign type %v to %q of type %v", right.Type(), left, left.Type())))
@@ -423,7 +423,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 	}
 }
 
-func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
+func (c *Compiler) resolveLHSTypes(expr Expression, bound types.Type) (_ Expression, err error) {
 	errs := newErrorSet()
 	defer func() {
 		err = errs.Defer(err)
@@ -433,6 +433,13 @@ func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
 	case *Literal:
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to literal"))
 	case *SymbolReferenceExpression:
+		if expr.Name() == "_" {
+			return &DiscardExpression{
+				typ:      bound,
+				Position: expr.Position,
+			}, nil
+		}
+
 		sym, ok := expr.scope.get(expr.Name())
 		if !ok {
 			return expr, expr.WrapError(fmt.Errorf("cannot assign to unrecognized symbol %q", expr.Name()))
@@ -453,7 +460,7 @@ func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
 			return expr, expr.WrapError(fmt.Errorf("cannot assign to expression type: %T", expr))
 		}
 	case *ParenthesizedExpression:
-		expr.Expression, err = c.resolveLHSTypes(expr.Expression)
+		expr.Expression, err = c.resolveLHSTypes(expr.Expression, bound)
 		return expr, err
 	case *BinaryExpression:
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to binary expression"))
@@ -488,6 +495,34 @@ func (c *Compiler) resolveLHSTypes(expr Expression) (_ Expression, err error) {
 		expr.Receiver = receiver
 
 		return c.resolveLHSIndexExpressionReceiverTypes(expr, expr.Receiver.Type())
+	case *TupleExpression:
+		tupleBound, ok := bound.(*types.Tuple)
+		if !ok {
+			if !types.IsUnspecified(bound) {
+				return expr, expr.WrapError(fmt.Errorf("cannot use tuple literal as %s", bound))
+			} else {
+				elemBounds := make([]types.Type, len(expr.Elems))
+				for i := range expr.Elems {
+					elemBounds[i] = types.Unknown
+				}
+				tupleBound = types.NewTuple(elemBounds...)
+			}
+		}
+
+		if len(tupleBound.Elems()) != len(expr.Elems) {
+			return expr, expr.WrapError(fmt.Errorf("expected tuple of %d elements, got %d", len(tupleBound.Elems()), len(expr.Elems)))
+		}
+
+		for i, elem := range expr.Elems {
+			elem, err := c.resolveLHSTypes(elem, tupleBound.Elems()[i])
+			if err != nil {
+				errs.Add(err)
+			}
+
+			expr.Elems[i] = elem
+		}
+
+		return expr, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("cannot assign to expression type: %T", expr))
 	}
@@ -581,7 +616,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound types.Type) (_ 
 	case *Literal:
 		switch val := expr.value.(type) {
 		case air.Int:
-			if bound == nil {
+			if types.IsUnspecified(bound) {
 				if types.IsUnspecified(expr.Type()) {
 					return &Literal{
 						value: expr.value,
@@ -1028,7 +1063,15 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound types.Type) (_ 
 	case *TupleExpression:
 		tupleBound, ok := types.Resolve(bound).(*types.Tuple)
 		if !ok {
-			return expr, expr.WrapError(fmt.Errorf("cannot use tuple literal as %s", bound))
+			if !types.IsUnspecified(bound) {
+				return expr, expr.WrapError(fmt.Errorf("cannot use tuple literal as %s", bound))
+			} else {
+				elemBounds := make([]types.Type, len(expr.Elems))
+				for i := range expr.Elems {
+					elemBounds[i] = types.Unknown
+				}
+				tupleBound = types.NewTuple(elemBounds...)
+			}
 		}
 
 		if len(expr.Elems) != len(tupleBound.Elems()) {

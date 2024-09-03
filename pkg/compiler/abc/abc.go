@@ -7,10 +7,16 @@ import (
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
 )
 
-type Snippet []float64
+type Snippet []Instruction
 
-func (s *Snippet) Add(f ...float64) {
+func (s *Snippet) Add(f ...Instruction) {
 	*s = append(*s, f...)
+}
+
+type Instruction []float64
+
+func (i *Instruction) Add(f ...float64) {
+	*i = append(*i, f...)
 }
 
 const (
@@ -44,15 +50,18 @@ func Compile(instructions []air.Instruction) Snippet {
 		offset += InstructionSize(instruction)
 	}
 
+	offset = 0
 	for _, instruction := range instructions {
-		bc = append(bc, compileInstruction(instruction, len(bc), labels)...)
+		i := compileInstruction(instruction, offset, labels)
+		bc = append(bc, i)
+		offset += len(i)
 	}
 
 	return bc
 }
 
-func compileInstruction(instruction air.Instruction, current int, labels map[air.Label]int) Snippet {
-	var s Snippet
+func compileInstruction(instruction air.Instruction, current int, labels map[air.Label]int) Instruction {
+	var s Instruction
 	switch ins := instruction.(type) {
 	case air.LabelledInstruction:
 		return compileInstruction(ins.Instruction, current, labels)
@@ -134,8 +143,8 @@ func compileInstruction(instruction air.Instruction, current int, labels map[air
 	return s
 }
 
-func compileOperand(ins air.Instruction, operand *air.Operand, current int, labels map[air.Label]int) Snippet {
-	var s Snippet
+func compileOperand(ins air.Instruction, operand *air.Operand, current int, labels map[air.Label]int) Instruction {
+	var s Instruction
 	switch operand.Kind {
 	case air.OperandKindImmediate:
 		s.Add(UOPImmediate)
@@ -242,17 +251,24 @@ const (
 	UOPMultiplication     = 0x06
 	UOPDivision           = 0x07
 	UOPModulo             = 0x08
-	UOPLogicalAnd         = 0x09
-	UOPLogicalOr          = 0x0A
-	UOPEqual              = 0x0B
-	UOPNotEqual           = 0x0C
-	UOPNot                = 0x0D
-	UOPNegate             = 0x0E
-	UOPBoundsCheck        = 0x0F
-	UOPGreaterThan        = 0x10
-	UOPGreaterThanOrEqual = 0x11
-	UOPLessThan           = 0x12
-	UOPLessThanOrEqual    = 0x13
+	UOPExpontiation       = 0x09
+	UOPLogicalAnd         = 0x0A
+	UOPLogicalOr          = 0x0B
+	UOPEqual              = 0x0C
+	UOPNotEqual           = 0x0D
+	UOPNot                = 0x0E
+	UOPNegate             = 0x0F
+	UOPBoundsCheck        = 0x10
+	UOPGreaterThan        = 0x11
+	UOPGreaterThanOrEqual = 0x12
+	UOPLessThan           = 0x13
+	UOPLessThanOrEqual    = 0x14
+	UOPLeftShift          = 0x15
+	UOPRightShift         = 0x16
+	UOPBitwiseAnd         = 0x17
+	UOPBitwordOr          = 0x18
+	UOPBitwiseXor         = 0x19
+	UOPBitwiseNot         = 0x1A
 )
 
 func BinaryOperatorUOP(operator operators.Operator) float64 {
@@ -267,6 +283,8 @@ func BinaryOperatorUOP(operator operators.Operator) float64 {
 		return UOPDivision
 	case operators.Modulo:
 		return UOPModulo
+	case operators.Exponentiation:
+		return UOPExpontiation
 	case operators.LogicalAnd:
 		return UOPLogicalAnd
 	case operators.LogicalOr:
@@ -285,6 +303,16 @@ func BinaryOperatorUOP(operator operators.Operator) float64 {
 		return UOPLessThan
 	case operators.LessThanOrEqual:
 		return UOPLessThanOrEqual
+	case operators.LeftShift:
+		return UOPLeftShift
+	case operators.RightShift:
+		return UOPRightShift
+	case operators.BitwiseAnd:
+		return UOPBitwiseAnd
+	case operators.BitwiseOr:
+		return UOPBitwordOr
+	case operators.BitwiseXor:
+		return UOPBitwiseXor
 	default:
 		panic(fmt.Errorf("invalid operator %q", operator))
 	}
@@ -296,6 +324,8 @@ func UnaryOperatorUOP(operator operators.Operator) float64 {
 		return UOPNot
 	case operators.Negate:
 		return UOPNegate
+	case operators.BitwiseNot:
+		return UOPBitwiseNot
 	default:
 		panic(fmt.Errorf("invalid operator %q", operator))
 	}

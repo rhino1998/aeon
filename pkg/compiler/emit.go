@@ -436,10 +436,12 @@ func (c *Compiler) compileBCLHS(ctx context.Context, prog *Program, expr Express
 
 			return bc, subExprValueLoc, nil
 		default:
-			return nil, nil, fmt.Errorf("invalid lhs %T", expr)
+			return nil, nil, expr.WrapError(fmt.Errorf("invalid lhs %T", expr))
 		}
+	case *DiscardExpression:
+		return nil, scope.allocTemp(expr.Type()), nil
 	default:
-		return nil, nil, fmt.Errorf("invalid lhs %T", expr)
+		return nil, nil, expr.WrapError(fmt.Errorf("invalid lhs %T", expr))
 	}
 }
 

@@ -5,6 +5,7 @@ type Kind int
 const (
 	Unknown Kind = iota
 	Void
+	Discard
 	Nil
 	Bool
 	Int
@@ -66,6 +67,8 @@ func (k Kind) String() string {
 		return "<nil>"
 	case Variadic:
 		return "<...>"
+	case Discard:
+		return "<discard>"
 	default:
 		return "<unknown>"
 	}

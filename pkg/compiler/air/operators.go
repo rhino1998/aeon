@@ -77,6 +77,12 @@ var binaryOperatorKinds = map[BinaryOperatorKinds]kinds.Kind{
 	{operators.Exponentiation, kinds.Int, kinds.Int}:     kinds.Int,
 	{operators.Exponentiation, kinds.Float, kinds.Float}: kinds.Float,
 
+	{operators.LeftShift, kinds.Int, kinds.Int}:  kinds.Int,
+	{operators.RightShift, kinds.Int, kinds.Int}: kinds.Int,
+	{operators.BitwiseAnd, kinds.Int, kinds.Int}: kinds.Int,
+	{operators.BitwiseOr, kinds.Int, kinds.Int}:  kinds.Int,
+	{operators.BitwiseXor, kinds.Int, kinds.Int}: kinds.Int,
+
 	// +
 	{operators.Addition, kinds.Int, kinds.Int}:       kinds.Int,
 	{operators.Addition, kinds.Float, kinds.Float}:   kinds.Float,
@@ -98,14 +104,12 @@ var binaryOperatorKinds = map[BinaryOperatorKinds]kinds.Kind{
 	{operators.Modulo, kinds.Int, kinds.Int}: kinds.Int,
 
 	// ==
-	{operators.Equal, kinds.Int, kinds.Int}:             kinds.Bool,
-	{operators.Equal, kinds.Float, kinds.Float}:         kinds.Bool,
-	{operators.Equal, kinds.String, kinds.String}:       kinds.Bool,
-	{operators.Equal, kinds.Bool, kinds.Bool}:           kinds.Bool,
-	{operators.Equal, kinds.Pointer, kinds.Pointer}:     kinds.Bool,
-	{operators.Equal, kinds.Interface, kinds.Interface}: kinds.Bool,
-	{operators.Equal, kinds.Array, kinds.Array}:         kinds.Bool,
-	{operators.Equal, kinds.Tuple, kinds.Tuple}:         kinds.Bool,
+	{operators.Equal, kinds.Int, kinds.Int}:         kinds.Bool,
+	{operators.Equal, kinds.Float, kinds.Float}:     kinds.Bool,
+	{operators.Equal, kinds.String, kinds.String}:   kinds.Bool,
+	{operators.Equal, kinds.Bool, kinds.Bool}:       kinds.Bool,
+	{operators.Equal, kinds.Pointer, kinds.Pointer}: kinds.Bool,
+	{operators.Equal, kinds.Type, kinds.Type}:       kinds.Bool,
 
 	// !=
 	{operators.NotEqual, kinds.Int, kinds.Int}:         kinds.Bool,
@@ -113,22 +117,30 @@ var binaryOperatorKinds = map[BinaryOperatorKinds]kinds.Kind{
 	{operators.NotEqual, kinds.String, kinds.String}:   kinds.Bool,
 	{operators.NotEqual, kinds.Bool, kinds.Bool}:       kinds.Bool,
 	{operators.NotEqual, kinds.Pointer, kinds.Pointer}: kinds.Bool,
+	{operators.Equal, kinds.Type, kinds.Type}:          kinds.Bool,
 
 	// <
-	{operators.LessThan, kinds.Int, kinds.Int}:     kinds.Bool,
-	{operators.LessThan, kinds.Float, kinds.Float}: kinds.Bool,
+	{operators.LessThan, kinds.Int, kinds.Int}:       kinds.Bool,
+	{operators.LessThan, kinds.Float, kinds.Float}:   kinds.Bool,
+	{operators.LessThan, kinds.String, kinds.String}: kinds.Bool,
 
 	// <=
-	{operators.LessThanOrEqual, kinds.Int, kinds.Int}:     kinds.Bool,
-	{operators.LessThanOrEqual, kinds.Float, kinds.Float}: kinds.Bool,
+	{operators.LessThanOrEqual, kinds.Int, kinds.Int}:       kinds.Bool,
+	{operators.LessThanOrEqual, kinds.Float, kinds.Float}:   kinds.Bool,
+	{operators.LessThanOrEqual, kinds.String, kinds.String}: kinds.Bool,
 
 	// >
-	{operators.GreaterThan, kinds.Int, kinds.Int}:     kinds.Bool,
-	{operators.GreaterThan, kinds.Float, kinds.Float}: kinds.Bool,
+	{operators.GreaterThan, kinds.Int, kinds.Int}:       kinds.Bool,
+	{operators.GreaterThan, kinds.Float, kinds.Float}:   kinds.Bool,
+	{operators.GreaterThan, kinds.String, kinds.String}: kinds.Bool,
 
 	// >=
-	{operators.GreaterThanOrEqual, kinds.Int, kinds.Int}:     kinds.Bool,
-	{operators.GreaterThanOrEqual, kinds.Float, kinds.Float}: kinds.Bool,
+	{operators.GreaterThanOrEqual, kinds.Int, kinds.Int}:       kinds.Bool,
+	{operators.GreaterThanOrEqual, kinds.Float, kinds.Float}:   kinds.Bool,
+	{operators.GreaterThanOrEqual, kinds.String, kinds.String}: kinds.Bool,
+
+	{operators.LogicalAnd, kinds.Bool, kinds.Bool}: kinds.Bool,
+	{operators.LogicalOr, kinds.Bool, kinds.Bool}:  kinds.Bool,
 }
 
 var binaryOperatorEvaluators = map[BinaryOperatorKinds]binaryOperatorEvaluatorFunc{

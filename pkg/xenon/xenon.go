@@ -209,14 +209,20 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 
 	bytecode := abc.Compile(prog.Instructions())
 
-	for i, bc := range bytecode {
-		page := i / xeCtx.PageSize
-		pageAddr := i % xeCtx.PageSize
+	var codeAddr int
+	for _, ins := range bytecode {
+		page := codeAddr / xeCtx.PageSize
+		pageAddr := codeAddr % xeCtx.PageSize
+		logger.Debug("debug: %d:%d:%s", slog.Int("page", page), slog.Int("pageAddr", pageAddr), slog.Any("instruction", ins))
+		for _, uop := range ins {
+			page := codeAddr / xeCtx.PageSize
+			pageAddr := codeAddr % xeCtx.PageSize
 
-		logger.Debug("debug: %d:%d:%s", slog.Int("page", page), slog.Int("pageAddr", pageAddr), slog.Any("bc", bc))
-		xeCtx.Code[PageAddr{
-			Page: page,
-			Addr: pageAddr}] = bc
+			xeCtx.Code[PageAddr{
+				Page: page,
+				Addr: pageAddr}] = uop
+			codeAddr++
+		}
 	}
 
 	funcMap := template.FuncMap{

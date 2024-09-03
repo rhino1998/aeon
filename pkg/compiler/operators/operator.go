@@ -111,12 +111,13 @@ const (
 	Modulo         Operator = "%"
 	LeftShift      Operator = "<<"
 	RightShift     Operator = ">>"
-	BitwiseAnd     Operator = "&"
 
 	Addition    Operator = "+"
 	Subtraction Operator = "-"
-	BitwiseOr   Operator = "|"
-	BitwiseXor  Operator = "^"
+
+	BitwiseOr  Operator = "|"
+	BitwiseXor Operator = "^"
+	BitwiseAnd Operator = "&"
 
 	Equal              Operator = "=="
 	NotEqual           Operator = "!="

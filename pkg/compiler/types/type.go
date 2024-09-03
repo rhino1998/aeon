@@ -27,6 +27,8 @@ var Void = Kind(kinds.Void)
 
 var Nil = Kind(kinds.Nil)
 
+var Discard = Kind(kinds.Discard)
+
 var AnyPointer = NewPointer(Void)
 
 func ConversionBound(t Type) Type {
@@ -85,7 +87,7 @@ func IsAssignableTo(v, to Type) bool {
 		return false
 	}
 
-	if to == nil {
+	if IsUnspecified(to) {
 		return true
 	}
 
@@ -298,7 +300,7 @@ func Equal(t1, t2 Type) bool {
 }
 
 func IsUnspecified(typ Type) bool {
-	if typ == nil {
+	if typ == nil || typ == Unknown || typ == Discard {
 		return true
 	}
 

@@ -297,7 +297,7 @@ IdentifierListComma <- ',' __ rest:IdentifierList {
 }
 
 
-AssignmentStatement <- left:Expr _ '=' _ right:Expr {
+AssignmentStatement <- left:MaybeBareTupleExpr _ '=' _ right:Expr {
   return AssignmentStatement{
     Left:left.(Expr),
     Right:right.(Expr),
@@ -549,7 +549,7 @@ ParenthesizedExpr <- '(' _ expr:Expr _ ')' {
   }, nil
 }
 
-IntLiteral <- '-'? ( ("0x" [0-9a-f_]+) / ("0o" [0-7_]) / ("0b" [0-1_]) / ([0-9_]+)) {
+IntLiteral <- '-'? ( ("0x" [0-9a-f_]+) / ("0o" [0-7_]) / ("0b" [0-1_]) / ([0-9][0-9_]*)) {
   i, err := strconv.ParseInt(string(c.text), 0, 64)
   if err != nil {
     return 0, err
@@ -683,7 +683,15 @@ ExpExpr <- left:TermExpr _ op:("**") __ right:MaybeExpExpr {
 
 MaybeMulExpr <- MulExpr / MaybeExpExpr
 
-MulExpr <- left:MaybeExpExpr _ op:("*" / "/" / "%" / "<<" / ">>" / "&") __ right:MaybeMulExpr {
+MulExpr <- left:MaybeExpExpr _ op:("*" / "/" / "%" / "<<" / ">>") __ right:MaybeMulExpr {
+  return BinaryExpr{
+    Left: left.(Expr),
+    Operator: operators.Operator(op.([]byte)),
+    Right: right.(Expr),
+
+    Position: pos(c),
+  }, nil
+} / left:MaybeExpExpr _ op:("&") !'&' __ right:MaybeMulExpr {
   return BinaryExpr{
     Left: left.(Expr),
     Operator: operators.Operator(op.([]byte)),

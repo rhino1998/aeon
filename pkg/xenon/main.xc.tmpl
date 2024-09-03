@@ -20,6 +20,9 @@ function @__builtin_assert($cond:number, $msg:text)
 		print(text("assertion failed: {}", $msg))
 		@aeon_fatal()
 
+function @delta():number
+	return delta()
+
 function @aeon_trunc($a:number):number
 	return $a - ($a %1)
 
@@ -198,27 +201,27 @@ function @aeon_load($addr:number, $length:number):number
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($arg1 * $arg2)
-		elseif ($uop == 11) ; =
+		elseif ($uop == 12) ; =
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($arg1 == $arg2)
-		elseif ($uop == 12) ; !=
+		elseif ($uop == 13) ; !=
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($arg1 != $arg2)
-		elseif ($uop == 13) ; !
+		elseif ($uop == 14) ; !
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append(!$arg1)
-		elseif ($uop == 14) ; -
+		elseif ($uop == 15) ; -
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append(-$arg1)
-		elseif ($uop == 15)
+		elseif ($uop == 16) ; internal bounds check
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
@@ -296,6 +299,43 @@ function @aeon_eq_string($a:number, $b:number):number
 
 function @aeon_ne_string($a:number, $b:number):number
 	return $a!=$b && (@aeon_str_load($a) != @aeon_str_load($b))
+
+array $aeon_str_cmp:text
+
+function @aeon_str_cmp_init()
+	$aeon_str_cmp.fill(2, "")
+
+function @aeon_ge_string($a:number, $b:number):number
+	var $sa = @aeon_str_load($a)
+	var $sb = @aeon_str_load($b)
+	$aeon_str_cmp.0 = $sa
+	$aeon_str_cmp.1 = $sb
+	$aeon_str_cmp.sortd()
+	return $aeon_str_cmp.0 == $sa
+
+function @aeon_gt_string($a:number, $b:number):number
+	var $sa = @aeon_str_load($a)
+	var $sb = @aeon_str_load($b)
+	$aeon_str_cmp.0 = $sa
+	$aeon_str_cmp.1 = $sb
+	$aeon_str_cmp.sortd()
+	return $aeon_str_cmp.0 == $sa && $sa != $sb
+
+function @aeon_le_string($a:number, $b:number):number
+	var $sa = @aeon_str_load($a)
+	var $sb = @aeon_str_load($b)
+	$aeon_str_cmp.0 = $sa
+	$aeon_str_cmp.1 = $sb
+	$aeon_str_cmp.sort()
+	return $aeon_str_cmp.0 == $sa
+
+function @aeon_lt_string($a:number, $b:number):number
+	var $sa = @aeon_str_load($a)
+	var $sb = @aeon_str_load($b)
+	$aeon_str_cmp.0 = $sa
+	$aeon_str_cmp.1 = $sb
+	$aeon_str_cmp.sort()
+	return $aeon_str_cmp.0 == $sa && $sa != $sb
 
 function @itoa($n:number):number
 	return @aeon_str_alloc($n:text)
@@ -527,7 +567,7 @@ function @aeon_run($funcInfo:number):number
 
 	var $i = 0
 
-	while ($i < 1000000)
+	while ($i < 10000000)
 		$i++
 
 		var $code = @aeon_code($aeon_reg.0)
@@ -603,17 +643,24 @@ function @aeon_run($funcInfo:number):number
 					@aeon_store($aeon_reg.0+2, $dstLen, $left % $right)
 				else
 					@__builtin_panic(text("bad % operand: {}", $kind))
-			elseif $op == 9; &&
+			elseif $op == 9; **
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left ^ $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left ^ $right)
+				else
+					@__builtin_panic(text("bad % operand: {}", $kind))
+			elseif $op == 10; &&
 				if $kind == {{.KindBool}}
 					@aeon_store($aeon_reg.0+2, $dstLen, $left && $right)
 				else
 					@__builtin_panic("bad && operand")
-			elseif $op == 10; ||
+			elseif $op == 11; ||
 				if $kind == {{.KindBool}}
 					@aeon_store($aeon_reg.0+2, $dstLen, $left || $right)
 				else
 					@__builtin_panic("bad || operand")
-			elseif $op == 11; ==
+			elseif $op == 12; ==
 				if $kind == {{.KindInt}}
 					@aeon_store($aeon_reg.0+2, $dstLen, $left == $right)
 				elseif $kind == {{.KindFloat}}
@@ -628,7 +675,7 @@ function @aeon_run($funcInfo:number):number
 					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_eq_string($left, $right))
 				else
 					@__builtin_panic("bad == operand")
-			elseif $op == 12; !=
+			elseif $op == 13; !=
 				if $kind == {{.KindInt}}
 					@aeon_store($aeon_reg.0+2, $dstLen, $left != $right)
 				elseif $kind == {{.KindFloat}}
@@ -642,7 +689,43 @@ function @aeon_run($funcInfo:number):number
 				elseif $kind == {{.KindString}}
 					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_ne_string($left, $right))
 				else
-					@__builtin_panic("bad + operand")
+					@__builtin_panic("bad != operand")
+			elseif $op == 20; >=
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left >= $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left >= $right)
+				elseif $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left != $right)
+				elseif $kind == {{.KindString}}
+					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_ge_string($left, $right))
+				else
+					@__builtin_panic("bad != operand")
+			elseif $op == 21; <<
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left * 2)
+				else
+					@__builtin_panic("bad << operand")
+			elseif $op == 22; >>
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_trunc($left / 2))
+				else
+					@__builtin_panic("bad << operand")
+			elseif $op == 23; &
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, 0) ; TODO: bitwise and
+				else
+					@__builtin_panic("bad & operand")
+			elseif $op == 24; |
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, 0) ; TODO: bitwise or
+				else
+					@__builtin_panic("bad | operand")
+			elseif $op == 25; ^
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, 0) ; TODO: bitwise xor
+				else
+					@__builtin_panic("bad ^ operand")
 			else
 				@__builtin_panic(text("bad bop {}", $op))
 
@@ -770,6 +853,7 @@ init
 	@aeon_mem_init()
 	@aeon_str_init()
 	@aeon_heap_init()
+	@aeon_str_cmp_init()
 {{range $addr := .VarInitFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}
 {{range $addr := .InitFuncs}}{{"\t"}}@aeon_run({{$addr}}){{"\n"}}{{end}}
 
