@@ -290,6 +290,18 @@ function @aeon_store($op:number, $v:number)
 	else
 		@__builtin_panic(text("bad operand for store {} on {}", $op, $aeon_reg.0))
 
+function @aeon_store_internal($op:number, $length:number, $v:number)
+	var $last = @aeon_code($op+$length-1)
+
+	if $last == 1 ; reg
+		var $reg = @aeon_load($op, $length-1)
+		$aeon_reg.$reg = $v
+	elseif $last == 2 ; mem
+		var $addr = @aeon_load($op, $length-1)
+		@aeon_mem_store($addr, $v)
+	else
+		@__builtin_panic(text("bad operand for store {} on {}", $op, $aeon_reg.0))
+
 function @aeon_add_string($a:number, $b:number):number
 	return @aeon_str_alloc(@aeon_str_load($a) & @aeon_str_load($b))
 
@@ -541,7 +553,7 @@ function @aeon_run($funcInfo:number):number
 			$srcLen = @aeon_code($aeon_reg.0+3+$dstLen)
 
 			if $size == 1
-				@aeon_store($aeon_reg.0+2, @aeon_load($aeon_reg.0+4+$dstLen, $srcLen))
+				@aeon_store_internal($aeon_reg.0+3, $dstLen, @aeon_load($aeon_reg.0+4+$dstLen, $srcLen))
 			else
 				$dst = @aeon_load_addr_internal($aeon_reg.0+3, $dstLen)
 				$src = @aeon_load_addr_internal($aeon_reg.0+4+$dstLen, $srcLen)
@@ -570,79 +582,79 @@ function @aeon_run($funcInfo:number):number
 
 			if $op == 4; +
 				if $kind == {{.KindInt}}
-					@aeon_store($aeon_reg.0+1, $left + $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left + $right)
 				elseif $kind == {{.KindFloat}}
-					@aeon_store($aeon_reg.0+1, $left + $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left + $right)
 				elseif $kind == {{.KindString}}
-					@aeon_store($aeon_reg.0+1, @aeon_add_string($left, $right))
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, @aeon_add_string($left, $right))
 				else
 					@__builtin_panic("bad + operand")
 			elseif $op == 5; -
 				if $kind == {{.KindInt}}
-					@aeon_store($aeon_reg.0+1, $left - $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left - $right)
 				elseif $kind == {{.KindFloat}}
-					@aeon_store($aeon_reg.0+1, $left - $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left - $right)
 				else
 					@__builtin_panic("bad - operand")
 			elseif $op == 6; *
 				if $kind == {{.KindInt}}
-					@aeon_store($aeon_reg.0+1, $left * $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left * $right)
 				elseif $kind == {{.KindFloat}}
-					@aeon_store($aeon_reg.0+1, $left * $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left * $right)
 				else
 					@__builtin_panic(text("bad * operand: {}", $kind))
 			elseif $op == 7; /
 				if $kind == {{.KindInt}}
-					@aeon_store($aeon_reg.0+1, @aeon_trunc($left / $right))
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, @aeon_trunc($left / $right))
 				elseif $kind == {{.KindFloat}}
-					@aeon_store($aeon_reg.0+1, $left / $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left / $right)
 				else
 					@__builtin_panic(text("bad / operand: {}", $kind))
 			elseif $op == 8; %
 				if $kind == {{.KindInt}}
-					@aeon_store($aeon_reg.0+1, $left % $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left % $right)
 				elseif $kind == {{.KindFloat}}
-					@aeon_store($aeon_reg.0+1, $left % $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left % $right)
 				else
 					@__builtin_panic(text("bad % operand: {}", $kind))
 			elseif $op == 9; &&
 				if $kind == {{.KindBool}}
-					@aeon_store($aeon_reg.0+1, $left || $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left && $right)
 				else
 					@__builtin_panic("bad && operand")
 			elseif $op == 10; ||
 				if $kind == {{.KindBool}}
-					@aeon_store($aeon_reg.0+1, $left || $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left || $right)
 				else
 					@__builtin_panic("bad || operand")
 			elseif $op == 11; ==
 				if $kind == {{.KindInt}}
-					@aeon_store($aeon_reg.0+1, $left == $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left == $right)
 				elseif $kind == {{.KindFloat}}
-					@aeon_store($aeon_reg.0+1, $left == $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left == $right)
 				elseif $kind == {{.KindBool}}
-					@aeon_store($aeon_reg.0+1, $left == $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left == $right)
 				elseif $kind == {{.KindPointer}}
-					@aeon_store($aeon_reg.0+1, $left == $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left == $right)
 				elseif $kind == {{.KindType}}
-					@aeon_store($aeon_reg.0+1, $left == $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left == $right)
 				elseif $kind == {{.KindString}}
-					@aeon_store($aeon_reg.0+1, @aeon_eq_string($left, $right))
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, @aeon_eq_string($left, $right))
 				else
 					@__builtin_panic("bad == operand")
 			elseif $op == 12; !=
 				if $kind == {{.KindInt}}
-					@aeon_store($aeon_reg.0+1, $left != $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left != $right)
 				elseif $kind == {{.KindFloat}}
-					@aeon_store($aeon_reg.0+1, $left != $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left != $right)
 				elseif $kind == {{.KindBool}}
-					@aeon_store($aeon_reg.0+1, $left != $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left != $right)
 				elseif $kind == {{.KindPointer}}
-					@aeon_store($aeon_reg.0+1, $left != $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left != $right)
 				elseif $kind == {{.KindType}}
-					@aeon_store($aeon_reg.0+1, $left != $right)
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, $left != $right)
 				elseif $kind == {{.KindString}}
-					@aeon_store($aeon_reg.0+1, @aeon_ne_string($left, $right))
+					@aeon_store_internal($aeon_reg.0+2, $dstLen, @aeon_ne_string($left, $right))
 				else
 					@__builtin_panic("bad + operand")
 			else
