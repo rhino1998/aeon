@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/rhino1998/aeon/pkg/compiler"
+	"github.com/rhino1998/aeon/pkg/compiler/abc"
 	"github.com/rhino1998/aeon/pkg/compiler/air"
 	"github.com/rhino1998/aeon/pkg/compiler/kinds"
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
@@ -59,12 +60,12 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				elemSize := Size(2)
 
 				for i := Size(0); i < Size(sliceLen); i++ {
-					typ, err := r.loadAddr(sliceData.Offset(i * elemSize))
+					typ, err := r.loadMem(sliceData.Offset(i * elemSize))
 					if err != nil {
 						return err
 					}
 
-					val, err := r.loadAddr(sliceData.Offset(i*elemSize + 1))
+					val, err := r.loadMem(sliceData.Offset(i*elemSize + 1))
 					if err != nil {
 						return err
 					}
@@ -105,12 +106,12 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 				var args []any
 
 				for i := Size(0); i < Size(sliceLen); i++ {
-					typ, err := r.loadAddr(sliceData.Offset(i * elemSize))
+					typ, err := r.loadMem(sliceData.Offset(i * elemSize))
 					if err != nil {
 						return err
 					}
 
-					val, err := r.loadAddr(sliceData.Offset(i*elemSize + 1))
+					val, err := r.loadMem(sliceData.Offset(i*elemSize + 1))
 					if err != nil {
 						return err
 					}
@@ -209,7 +210,6 @@ func (g *gcState) addHeapVar(v, ptr Addr) {
 		for _, alloc := range g.heapAllocs {
 			if ptr < alloc {
 				g.heapVarAllocs = append(g.heapVarAllocs, prevAlloc)
-				log.Println("adding", v, ptr, prevAlloc)
 				break
 			}
 
@@ -225,7 +225,7 @@ type Runtime struct {
 
 	debug bool
 
-	codePages  [][PageSize]air.Instruction
+	codePages  [][PageSize]float64
 	heapAllocs []Addr
 	heapStart  Addr
 	heapEnd    Addr
@@ -250,6 +250,9 @@ type Runtime struct {
 func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, strPages int, stdout io.Writer, debug bool) (*Runtime, error) {
 	heapStart := Addr(memPages * PageSize / 2)
 
+	// TODO: do this elsewhere
+	bytecode := abc.Compile(prog.Instructions())
+
 	r := &Runtime{
 		prog:        prog,
 		externFuncs: externs,
@@ -257,7 +260,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 		debug: debug,
 
-		codePages: make([][PageSize]air.Instruction, (len(prog.Instructions())+PageSize-1)/PageSize),
+		codePages: make([][PageSize]float64, (len(bytecode)+PageSize-1)/PageSize),
 		memPages:  make([][PageSize]float64, memPages),
 		strPages:  make([][PageSize]String, strPages),
 		registers: make([]float64, prog.Registers()),
@@ -288,7 +291,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	r.strHeapStart = r.strHeapIndex
 	r.strHeapEnd = Addr(strPages * PageSize)
 
-	for i, code := range prog.Instructions() {
+	for i, code := range bytecode {
 		page, pageAddr := r.splitAddr(Addr(i))
 		r.codePages[page][pageAddr] = code
 	}
@@ -443,14 +446,14 @@ func (r *Runtime) memmove(dst, src Addr, size Size) error {
 	var err error
 	tmp := make([]float64, size)
 	for i := Size(0); i < size; i++ {
-		tmp[i], err = r.loadAddr(src.Offset(i))
+		tmp[i], err = r.loadMem(src.Offset(i))
 		if err != nil {
 			return err
 		}
 	}
 
 	for i := Size(0); i < size; i++ {
-		err = r.storeAddr(dst.Offset(i), tmp[i])
+		err = r.storeMem(dst.Offset(i), tmp[i])
 		if err != nil {
 			return err
 		}
@@ -461,12 +464,12 @@ func (r *Runtime) memmove(dst, src Addr, size Size) error {
 
 func (r *Runtime) memcpy(dst, src Addr, size Size) error {
 	for i := Size(0); i < size; i++ {
-		val, err := r.loadAddr(src.Offset(i))
+		val, err := r.loadMem(src.Offset(i))
 		if err != nil {
 			return err
 		}
 
-		err = r.storeAddr(dst.Offset(i), val)
+		err = r.storeMem(dst.Offset(i), val)
 		if err != nil {
 			return err
 		}
@@ -477,7 +480,7 @@ func (r *Runtime) memcpy(dst, src Addr, size Size) error {
 
 func (r *Runtime) memzero(dst Addr, size Size) error {
 	for i := Size(0); i < size; i++ {
-		err := r.storeAddr(dst.Offset(i), 0)
+		err := r.storeMem(dst.Offset(i), 0)
 		if err != nil {
 			return err
 		}
@@ -542,12 +545,12 @@ func (gc *gcState) scanPointers(r *Runtime) error {
 	}
 
 	for i := 1; i < len(r.funcTrace); i += 2 {
-		funcType, err := r.loadAddr(Addr(r.funcTrace[i] + 0))
+		funcType, err := r.loadMem(Addr(r.funcTrace[i] + 0))
 		if err != nil {
 			return err
 		}
 
-		// funcName, err := r.loadAddr(Addr(r.funcTrace[i] + 1))
+		// funcName, err := r.loadMem(Addr(r.funcTrace[i] + 1))
 		// if err != nil {
 		// 	return nil, nil, err
 		// }
@@ -561,7 +564,7 @@ func (gc *gcState) scanPointers(r *Runtime) error {
 		case RuntimeFuncTypeNil, RuntimeFuncTypeExtern:
 			continue
 		case RuntimeFuncTypeFunc:
-			funcAddr, err := r.loadAddr(Addr(r.funcTrace[i] + 3))
+			funcAddr, err := r.loadMem(Addr(r.funcTrace[i] + 3))
 			if err != nil {
 				return err
 			}
@@ -592,7 +595,7 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 		slots = slots[:len(slots)-1]
 		kind := kinds.Kind(r.vtables[slot.Type]["#kind"])
 
-		// val, err := r.loadAddr(slot.Addr)
+		// val, err := r.loadMem(slot.Addr)
 		// if err != nil {
 		// 	return err
 		// }
@@ -607,7 +610,7 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 		switch kind {
 		case kinds.Nil, kinds.Void, kinds.Int, kinds.Bool, kinds.Float:
 		case kinds.String:
-			val, err := r.loadAddr(slot.Addr)
+			val, err := r.loadMem(slot.Addr)
 			if err != nil {
 				return err
 			}
@@ -620,7 +623,7 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 
 			gc.addStrVar(slot.Addr, Addr(val))
 		case kinds.Pointer:
-			val, err := r.loadAddr(slot.Addr)
+			val, err := r.loadMem(slot.Addr)
 			if err != nil {
 				return err
 			}
@@ -648,19 +651,19 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 				totalOffset += elemSize
 			}
 		case kinds.Interface:
-			typ, err := r.loadAddr(slot.Addr)
+			typ, err := r.loadMem(slot.Addr)
 			if err != nil {
 				return err
 			}
 
 			slots = append(slots, RuntimeTypeAddr{Type: int(typ), Addr: slot.Addr.Offset(1)})
 		case kinds.Slice, kinds.Variadic:
-			sliceData, err := r.loadAddr(slot.Addr)
+			sliceData, err := r.loadMem(slot.Addr)
 			if err != nil {
 				return err
 			}
 
-			sliceCap, err := r.loadAddr(slot.Addr + 2)
+			sliceCap, err := r.loadMem(slot.Addr + 2)
 			if err != nil {
 				return err
 			}
@@ -725,14 +728,14 @@ func (gc *gcState) compact(r *Runtime) error {
 			}
 
 			varAddr := gc.heapVars[index]
-			varVal, err := r.loadAddr(varAddr)
+			varVal, err := r.loadMem(varAddr)
 			if err != nil {
 				return err
 			}
 
 			log.Println("moving", alloc, varAddr, varVal, gc.heapIndex, varVal-float64(alloc))
 
-			err = r.storeAddr(varAddr, float64(gc.heapIndex)+(varVal-float64(alloc)))
+			err = r.storeMem(varAddr, float64(gc.heapIndex)+(varVal-float64(alloc)))
 			if err != nil {
 				return err
 			}
@@ -769,13 +772,13 @@ func (gc *gcState) compact(r *Runtime) error {
 		}
 
 		for _, v := range gc.strVars {
-			val, err := r.loadAddr(v)
+			val, err := r.loadMem(v)
 			if err != nil {
 				return err
 			}
 
 			if Addr(val) == ptr {
-				err = r.storeAddr(v, float64(gc.strHeapIndex))
+				err = r.storeMem(v, float64(gc.strHeapIndex))
 				if err != nil {
 					return err
 				}
@@ -896,21 +899,21 @@ func (r *Runtime) CallExtern(name string, ret []float64, args ...float64) error 
 	return extern.Func(r, ret...)
 }
 
-func (r *Runtime) fetch(addr Addr) (air.Instruction, error) {
+func (r *Runtime) fetch(addr Addr) (float64, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.codePages)) {
-		return nil, fmt.Errorf("invalid code page %v for addr %v", page, addr)
+		return 0, fmt.Errorf("invalid code page %v for addr %v", page, addr)
 	}
 
 	if pageAddr >= uint64(len(r.codePages[page])) {
-		return nil, fmt.Errorf("invalid code page addr %v in page %v for addr %v", pageAddr, page, addr)
+		return 0, fmt.Errorf("invalid code page addr %v in page %v for addr %v", pageAddr, page, addr)
 	}
 
 	return r.codePages[page][pageAddr], nil
 }
 
-func (r *Runtime) loadAddr(addr Addr) (float64, error) {
+func (r *Runtime) loadMem(addr Addr) (float64, error) {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
@@ -941,7 +944,7 @@ func (r *Runtime) LoadString(addr Addr) (String, error) {
 func (r *Runtime) loadArgs(sp Addr, size Size) ([]float64, error) {
 	var args []float64
 	for offset := Size(0); offset < size; offset++ {
-		arg, err := r.loadAddr(sp.Offset(offset - size))
+		arg, err := r.loadMem(sp.Offset(offset - size))
 		if err != nil {
 			return nil, err
 		}
@@ -952,7 +955,7 @@ func (r *Runtime) loadArgs(sp Addr, size Size) ([]float64, error) {
 	return args, nil
 }
 
-func (r *Runtime) storeAddr(addr Addr, val float64) error {
+func (r *Runtime) storeMem(addr Addr, val float64) error {
 	page, pageAddr := r.splitAddr(addr)
 
 	if page >= uint64(len(r.memPages)) {
@@ -1028,229 +1031,348 @@ func (r *Runtime) alloc(size Size) (Addr, error) {
 }
 
 func (env *Runtime) push(val float64) error {
-	err := env.storeAddr(env.sp(), val)
+	err := env.storeMem(env.sp(), val)
 	env.setSP(env.sp() + 1)
 	return err
 }
 
 func (r *Runtime) pop() (float64, error) {
-	val, err := r.loadAddr(r.sp())
+	val, err := r.loadMem(r.sp())
 	r.setSP(r.sp() - 1)
 	return val, err
 }
 
-func (r *Runtime) loadImmediate(imm air.Immediate) loadFunc {
-	return loadFunc(func() (float64, error) {
-		switch imm := imm.(type) {
-		case Int:
-			return float64(imm), nil
-		case Float:
-			return float64(imm), nil
-		case Bool:
-			if imm {
-				return 1, nil
+// func (r *Runtime) loadImmediate(imm air.Immediate) loadFunc {
+// 	return loadFunc(func() (float64, error) {
+// 		switch imm := imm.(type) {
+// 		case Int:
+// 			return float64(imm), nil
+// 		case Float:
+// 			return float64(imm), nil
+// 		case Bool:
+// 			if imm {
+// 				return 1, nil
+// 			}
+// 			return 0, nil
+// 		default:
+// 			panic("BAD IMMEDIATE TYPE")
+// 		}
+// 	})
+// }
+//
+// func (r *Runtime) loadIndirect(indirect air.Indirect) loadFunc {
+// 	return r.loadIndirectWithOffset(indirect.Ptr, 0)
+// }
+//
+// func (r *Runtime) loadBinary(binop air.BinaryOperand) loadFunc {
+// 	return loadFunc(func() (float64, error) {
+// 		a, err := r.load(binop.Left)()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+//
+// 		b, err := r.load(binop.Right)()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+//
+// 		switch binop.Op {
+// 		case "+":
+// 			return a + b, nil
+// 		case "-":
+// 			return a - b, nil
+// 		case "*":
+// 			return a * b, nil
+// 		case "<":
+// 			if a < b {
+// 				return 1, nil
+// 			} else {
+// 				return 0, nil
+// 			}
+// 		case "<=":
+// 			if a <= b {
+// 				return 1, nil
+// 			} else {
+// 				return 0, nil
+// 			}
+// 		case "==":
+// 			if a == b {
+// 				return 1, nil
+// 			} else {
+// 				return 0, nil
+// 			}
+// 		case "!=":
+// 			if a != b {
+// 				return 1, nil
+// 			} else {
+// 				return 0, nil
+// 			}
+// 		case "#":
+// 			if int(a) >= int(b) {
+// 				return 0, fmt.Errorf("index out of bounds: %d >= %d", int(a), int(b))
+// 			}
+//
+// 			return a, nil
+// 		default:
+// 			return 0, fmt.Errorf("unhandled binary operand %v", binop.Op)
+// 		}
+// 	})
+// }
+//
+// func (r *Runtime) loadUnary(not air.UnaryOperand) loadFunc {
+// 	return loadFunc(func() (float64, error) {
+// 		a, err := r.load(not.A)()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+//
+// 		switch not.Op {
+// 		case operators.Not:
+// 			if a == 0 {
+// 				return 1, nil
+// 			}
+//
+// 			return 0, nil
+// 		default:
+// 			return 0, fmt.Errorf("unhandled unary operator %v", not.Op)
+// 		}
+//
+// 	})
+// }
+
+// func (r *Runtime) loadIndirectWithOffset(indirect *air.Operand, offset Size) loadFunc {
+// 	return loadFunc(func() (float64, error) {
+// 		base, err := r.load(indirect)()
+// 		if err != nil {
+// 			return 0, err
+// 		}
+//
+// 		return r.loadMem(Addr(base).Offset(offset))
+// 	})
+// }
+
+// func (r *Runtime) loadRegister(reg air.Register) loadFunc {
+// 	return loadFunc(func() (float64, error) {
+// 		return r.registers[reg], nil
+// 	})
+// }
+//
+// func (r *Runtime) loadVTable(lookup air.VTableLookup) loadFunc {
+// 	return loadFunc(func() (float64, error) {
+// 		typeID, err := r.load(lookup.Type)()
+// 		if err != nil {
+// 			return 0, fmt.Errorf("failed to get type id: %w", err)
+// 		}
+//
+// 		typeNameAddr, ok := r.vtables[int(typeID)]["#name"]
+// 		if !ok {
+// 			return 0, fmt.Errorf("no such type %d", int(typeID))
+// 		}
+//
+// 		typeName, err := r.LoadString(Addr(typeNameAddr))
+// 		if err != nil {
+// 			return 0, fmt.Errorf("failed to get type name: %w", err)
+// 		}
+//
+// 		nameAddr, err := r.load(lookup.Method)()
+// 		if err != nil {
+// 			return 0, fmt.Errorf("failed to get method name addr: %w", err)
+// 		}
+//
+// 		name, err := r.LoadString(Addr(nameAddr))
+// 		if err != nil {
+// 			return 0, fmt.Errorf("failed to get method name: %w", err)
+// 		}
+//
+// 		funAddr, ok := r.vtables[int(typeID)][string(name)]
+// 		if !ok {
+// 			r.printVTables()
+// 			return 0, fmt.Errorf("no such vtable entry for %d %s %s", int(typeID), typeName, name)
+// 		}
+//
+// 		return funAddr, nil
+// 	})
+// }
+
+func (r *Runtime) loadInternal(op Addr, length Addr) (float64, error) {
+	var stack []float64
+	var arg1 float64
+	var arg2 float64
+	limit := op + length
+
+	for op < limit {
+		uop, err := r.fetch(op)
+		if err != nil {
+			return 0, err
+		}
+		op++
+
+		switch uop {
+		case abc.UOPImmediate:
+			val, err := r.fetch(op)
+			if err != nil {
+				return 0, err
 			}
-			return 0, nil
+			op++
+
+			stack = append(stack, val)
+		case abc.UOPRegister:
+			reg, err := r.fetch(op)
+			if err != nil {
+				return 0, err
+			}
+			op++
+
+			stack = append(stack, r.registers[int(reg)])
+		case abc.UOPIndirect:
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			val, err := r.loadMem(Addr(arg1))
+			if err != nil {
+				return 0, err
+			}
+
+			stack = append(stack, val)
+		case abc.UOPAddition:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			stack = append(stack, arg1+arg2)
+		case abc.UOPSubtraction:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			stack = append(stack, arg1-arg2)
+		case abc.UOPMultiplication:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			stack = append(stack, arg1*arg2)
+		case abc.UOPEqual:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			if arg1 == arg2 {
+				stack = append(stack, 1)
+			} else {
+				stack = append(stack, 0)
+			}
+		case abc.UOPNotEqual:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			if arg1 != arg2 {
+				stack = append(stack, 1)
+			} else {
+				stack = append(stack, 0)
+			}
+		case abc.UOPLessThan:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			if arg1 < arg2 {
+				stack = append(stack, 1)
+			} else {
+				stack = append(stack, 0)
+			}
+		case abc.UOPLessThanOrEqual:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			if arg1 <= arg2 {
+				stack = append(stack, 1)
+			} else {
+				stack = append(stack, 0)
+			}
+		case abc.UOPGreaterThan:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			if arg1 > arg2 {
+				stack = append(stack, 1)
+			} else {
+				stack = append(stack, 0)
+			}
+		case abc.UOPGreaterThanOrEqual:
+			arg2, stack = stack[len(stack)-1], stack[:len(stack)-1]
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			if arg1 >= arg2 {
+				stack = append(stack, 1)
+			} else {
+				stack = append(stack, 0)
+			}
+		case abc.UOPNot:
+			arg1, stack = stack[len(stack)-1], stack[:len(stack)-1]
+
+			if arg1 == 0 {
+				stack = append(stack, 1)
+			} else {
+				stack = append(stack, 0)
+			}
 		default:
-			panic("BAD IMMEDIATE TYPE")
+			panic(fmt.Sprintf("invalid internal opcode %d", uop))
 		}
-	})
+	}
+
+	return stack[0], nil
 }
 
-func (r *Runtime) loadIndirect(indirect air.Indirect) loadFunc {
-	return r.loadIndirectWithOffset(indirect.Ptr, 0)
+func (r *Runtime) load(op Addr) (float64, error) {
+	length, err := r.fetch(op)
+	if err != nil {
+		return 0, err
+	}
+
+	return r.loadInternal(op+1, Addr(length))
 }
 
-func (r *Runtime) loadBinary(binop air.BinaryOperand) loadFunc {
-	return loadFunc(func() (float64, error) {
-		a, err := r.load(binop.Left)()
-		if err != nil {
-			return 0, err
-		}
+func (r *Runtime) loadAddr(op Addr) (float64, error) {
+	length, err := r.fetch(op)
+	if err != nil {
+		return 0, err
+	}
 
-		b, err := r.load(binop.Right)()
-		if err != nil {
-			return 0, err
-		}
+	last, err := r.fetch(Addr(op + Addr(length)))
+	if err != nil {
+		return 0, err
+	}
 
-		switch binop.Op {
-		case "+":
-			return a + b, nil
-		case "-":
-			return a - b, nil
-		case "*":
-			return a * b, nil
-		case "<":
-			if a < b {
-				return 1, nil
-			} else {
-				return 0, nil
-			}
-		case "<=":
-			if a <= b {
-				return 1, nil
-			} else {
-				return 0, nil
-			}
-		case "==":
-			if a == b {
-				return 1, nil
-			} else {
-				return 0, nil
-			}
-		case "!=":
-			if a != b {
-				return 1, nil
-			} else {
-				return 0, nil
-			}
-		case "#":
-			if int(a) >= int(b) {
-				return 0, fmt.Errorf("index out of bounds: %d >= %d", int(a), int(b))
-			}
-
-			return a, nil
-		default:
-			return 0, fmt.Errorf("unhandled binary operand %v", binop.Op)
-		}
-	})
-}
-
-func (r *Runtime) loadUnary(not air.UnaryOperand) loadFunc {
-	return loadFunc(func() (float64, error) {
-		a, err := r.load(not.A)()
-		if err != nil {
-			return 0, err
-		}
-
-		switch not.Op {
-		case operators.Not:
-			if a == 0 {
-				return 1, nil
-			}
-
-			return 0, nil
-		default:
-			return 0, fmt.Errorf("unhandled unary operator %v", not.Op)
-		}
-
-	})
-}
-
-func (r *Runtime) loadIndirectWithOffset(indirect *air.Operand, offset Size) loadFunc {
-	return loadFunc(func() (float64, error) {
-		base, err := r.load(indirect)()
-		if err != nil {
-			return 0, err
-		}
-
-		return r.loadAddr(Addr(base).Offset(offset))
-	})
-}
-
-func (r *Runtime) loadRegister(reg air.Register) loadFunc {
-	return loadFunc(func() (float64, error) {
-		return r.registers[reg], nil
-	})
-}
-
-func (r *Runtime) loadVTable(lookup air.VTableLookup) loadFunc {
-	return loadFunc(func() (float64, error) {
-		typeID, err := r.load(lookup.Type)()
-		if err != nil {
-			return 0, fmt.Errorf("failed to get type id: %w", err)
-		}
-
-		typeNameAddr, ok := r.vtables[int(typeID)]["#name"]
-		if !ok {
-			return 0, fmt.Errorf("no such type %d", int(typeID))
-		}
-
-		typeName, err := r.LoadString(Addr(typeNameAddr))
-		if err != nil {
-			return 0, fmt.Errorf("failed to get type name: %w", err)
-		}
-
-		nameAddr, err := r.load(lookup.Method)()
-		if err != nil {
-			return 0, fmt.Errorf("failed to get method name addr: %w", err)
-		}
-
-		name, err := r.LoadString(Addr(nameAddr))
-		if err != nil {
-			return 0, fmt.Errorf("failed to get method name: %w", err)
-		}
-
-		funAddr, ok := r.vtables[int(typeID)][string(name)]
-		if !ok {
-			r.printVTables()
-			return 0, fmt.Errorf("no such vtable entry for %d %s %s", int(typeID), typeName, name)
-		}
-
-		return funAddr, nil
-	})
-}
-
-func (r *Runtime) load(operand *air.Operand) loadFunc {
-	switch operand.Kind {
-	case air.OperandKindImmediate:
-		return r.loadImmediate(operand.Value.(air.Immediate))
-	case air.OperandKindIndirect:
-		return r.loadIndirect(operand.Value.(air.Indirect))
-	case air.OperandKindRegister:
-		return r.loadRegister(operand.Value.(air.Register))
-	case air.OperandKindBinary:
-		return r.loadBinary(operand.Value.(air.BinaryOperand))
-	case air.OperandKindUnary:
-		return r.loadUnary(operand.Value.(air.UnaryOperand))
-	case air.OperandKindVTableLookup:
-		return r.loadVTable(operand.Value.(air.VTableLookup))
+	switch last {
+	case abc.UOPIndirect:
+		return r.loadInternal(Addr(op+1), Addr(length-1))
 	default:
-		return func() (float64, error) {
-			return 0, fmt.Errorf("bad %s operand in runtime", operand.Kind)
-		}
+		return 0, fmt.Errorf("invalid load addr uop %v", last)
 	}
 }
 
-func (r *Runtime) storeIndirect(indirect air.Indirect) storeFunc {
-	return storeFunc(func(val float64, err error) error {
+func (r *Runtime) store(op Addr, val float64) error {
+	length, err := r.fetch(Addr(op))
+	if err != nil {
+		return err
+	}
+
+	last, err := r.fetch(op + Addr(length))
+	if err != nil {
+		return err
+	}
+
+	switch last {
+	case abc.UOPIndirect:
+		addr, err := r.loadInternal(Addr(op+1), Addr(length-1))
 		if err != nil {
 			return err
 		}
-
-		ptr, err := r.load(indirect.Ptr)()
+		return r.storeMem(Addr(addr), val)
+	case abc.UOPRegister:
+		reg, err := r.fetch(Addr(op + 1))
 		if err != nil {
 			return err
 		}
-
-		return r.storeAddr(Addr(ptr), val)
-	})
-}
-
-func (r *Runtime) storeRegister(reg air.Register) storeFunc {
-	return storeFunc(func(val float64, err error) error {
-		if err != nil {
-			return err
-		}
-
-		r.registers[reg] = val
+		r.registers[int(reg)] = val
 		return nil
-	})
-}
-
-func (r *Runtime) store(operand *air.Operand) storeFunc {
-	switch operand.Kind {
-	case air.OperandKindIndirect:
-		return r.storeIndirect(operand.Value.(air.Indirect))
-	case air.OperandKindRegister:
-		return r.storeRegister(operand.Value.(air.Register))
 	default:
-		return func(_ float64, err error) error {
-			if err != nil {
-				return err
-			}
-			return fmt.Errorf("bad %s store operand in runtime", operand.Kind)
-		}
+		return fmt.Errorf("invalid store uop %v", last)
 	}
 }
 
@@ -1259,7 +1381,7 @@ func (r *Runtime) panic(err error) error {
 	for i := len(r.funcTrace) - 1; i >= 1; i -= 2 {
 		funcAddr := Addr(r.funcTrace[i])
 
-		funcNameAddr, err := r.loadAddr(funcAddr + 1)
+		funcNameAddr, err := r.loadMem(funcAddr + 1)
 		if err != nil {
 			return err
 		}
@@ -1269,7 +1391,7 @@ func (r *Runtime) panic(err error) error {
 			return err
 		}
 
-		funcFileAddr, err := r.loadAddr(funcAddr + 2)
+		funcFileAddr, err := r.loadMem(funcAddr + 2)
 		if err != nil {
 			return err
 		}
@@ -1320,7 +1442,7 @@ func (r *Runtime) Run(ctx context.Context) error {
 }
 
 func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
-	pc, err := r.loadAddr(funcAddr + 3)
+	pc, err := r.loadMem(funcAddr + 3)
 	if err != nil {
 		return err
 	}
@@ -1363,48 +1485,116 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 
 		if r.debug {
 			log.Println("--------------")
-			log.Printf("%v", code)
-			log.Printf("fp: %v", r.fp())
-			log.Printf("sp: %v", r.sp())
-			log.Printf("pc: %v", r.pc())
-			r.printRegisters()
-			r.printStack()
+			// log.Println(abc.Compile(r.prog.Instructions())[r.pc():])
+			log.Printf("%v %v", code, r.pc())
+			// log.Printf("fp: %v", r.fp())
+			// log.Printf("sp: %v", r.sp())
+			// log.Printf("pc: %v", r.pc())
+			// r.printRegisters()
+			// r.printStack()
 		}
 
-		r.setPC(r.pc() + 1)
+		switch code {
+		case abc.Nop:
+			r.setPC(r.pc() + 1)
+		case abc.Mov:
+			size, err := r.fetch(r.pc() + 1)
+			if err != nil {
+				return err
+			}
 
-		switch code := code.(type) {
-		case nil:
-			return fmt.Errorf("invalid nil bytecode: %w", err)
-		case air.Nop:
-		case air.Mov:
-			tmp := make([]float64, code.Size)
-			for i := Size(0); i < code.Size; i++ {
-				tmp[i], err = r.load(code.Src.OffsetReference(i))()
+			dstLen, err := r.fetch(r.pc() + 2)
+			if err != nil {
+				return err
+			}
+
+			srcLen, err := r.fetch(r.pc() + 3 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			if size == 1 {
+				val, err := r.load(r.pc() + 3 + Addr(dstLen))
+				if err != nil {
+					return err
+				}
+
+				err = r.store(r.pc()+2, val)
+				if err != nil {
+					return err
+				}
+			} else {
+				srcAddr, err := r.loadAddr(r.pc() + 3 + Addr(dstLen))
+				if err != nil {
+					return err
+				}
+
+				dstAddr, err := r.loadAddr(r.pc() + 2)
+				if err != nil {
+					return err
+				}
+
+				err = r.memmove(Addr(dstAddr), Addr(srcAddr), Size(size))
 				if err != nil {
 					return err
 				}
 			}
+			r.setPC(r.pc() + 4 + Addr(dstLen) + Addr(srcLen))
+		case abc.Ret:
+			fp := r.fp()
 
-			for i := Size(0); i < code.Size; i++ {
-				err = r.store(code.Dst.OffsetReference(i))(tmp[i], nil)
+			size, err := r.fetch(r.pc() + 1)
+			if err != nil {
+				return err
+			}
+
+			for reg := range r.registers {
+				r.registers[reg], err = r.loadMem(fp.Offset(-air.Size(reg)))
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to push %s", Register(reg))
 				}
 			}
-		case air.Cal:
-			funcInfoAddr, err := r.load(code.Func)()
+
+			r.setSP(r.sp().Offset(-Size(size)))
+
+			r.funcTrace = r.funcTrace[:len(r.funcTrace)-2]
+
+			// exit completely
+			if r.fp() == 0 {
+				if r.debug {
+					log.Println("--------------")
+					log.Printf("EXIT")
+					log.Printf("fp: %v", r.fp())
+					log.Printf("sp: %v", r.sp())
+					log.Printf("pc: %v", pc)
+					r.printRegisters()
+					r.printStack()
+				}
+				return nil
+			}
+		case abc.Call:
+			line, err := r.fetch(r.pc() + 1)
+			if err != nil {
+				return fmt.Errorf("could not fetch call line number: %w", err)
+			}
+
+			funcInfoAddrLen, err := r.fetch(r.pc() + 2)
+			if err != nil {
+				return fmt.Errorf("could not fetch function info addr len: %w", err)
+			}
+
+			funcInfoAddr, err := r.load(r.pc() + 2)
 			if err != nil {
 				return fmt.Errorf("could not resolve function info: %w", err)
 			}
 
-			funcType, err := r.loadAddr(Addr(funcInfoAddr))
+			funcType, err := r.loadMem(Addr(funcInfoAddr))
 			if err != nil {
 				return fmt.Errorf("could not resolve function addr: %w", err)
 			}
 
 			if r.debug {
-				fNameAddr, err := r.loadAddr(Addr(funcInfoAddr) + 1)
+				fNameAddr, err := r.loadMem(Addr(funcInfoAddr) + 1)
 				if err != nil {
 					return err
 				}
@@ -1417,13 +1607,13 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				log.Printf("call %s", string(fName))
 			}
 
-			r.funcTrace = append(r.funcTrace, float64(code.Line), funcInfoAddr)
+			r.funcTrace = append(r.funcTrace, line, funcInfoAddr)
 
 			switch int(funcType) {
 			case RuntimeFuncTypeNil:
 				return fmt.Errorf("tried to call nil function reference")
 			case RuntimeFuncTypeExtern:
-				externName, err := r.loadAddr(Addr(funcInfoAddr) + 3)
+				externName, err := r.loadMem(Addr(funcInfoAddr) + 3)
 				if err != nil {
 					return fmt.Errorf("could not resolve extern function name")
 				}
@@ -1440,7 +1630,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 
 				args, err := r.loadArgs(r.sp(), entry.ArgSize)
 				if err != nil {
-					return fmt.Errorf("failed to load %d args for extern %q", entry.ArgSize, code.Func)
+					return fmt.Errorf("failed to load %d args for extern", entry.ArgSize)
 				}
 
 				retArgs := make([]float64, 0, entry.ReturnSize+entry.ArgSize)
@@ -1454,7 +1644,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 
 				r.funcTrace = r.funcTrace[:len(r.funcTrace)-2]
 				for i := range entry.ReturnSize {
-					r.storeAddr(r.sp().Offset(-(entry.ArgSize + entry.ReturnSize)).Offset(-i), retArgs[i])
+					r.storeMem(r.sp().Offset(-(entry.ArgSize + entry.ReturnSize)).Offset(-i), retArgs[i])
 				}
 
 				if r.debug {
@@ -1472,18 +1662,21 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				}
 
 				r.setSP(r.sp() - Addr(entry.ArgSize+entry.ReturnSize))
+				r.setPC(r.pc() + 3 + Addr(funcInfoAddrLen))
 
 				continue
 			case RuntimeFuncTypeFunc:
-				faddr, err := r.loadAddr(Addr(funcInfoAddr) + 3)
+				faddr, err := r.loadMem(Addr(funcInfoAddr) + 3)
 				if err != nil {
 					return fmt.Errorf("could not resolve function addr")
 				}
 
 				frameSize := Addr(len(r.registers))
 
+				r.setPC(r.pc() + 3 + Addr(funcInfoAddrLen))
+
 				for reg := range Register(len(r.registers)) {
-					err := r.storeAddr(r.sp()+frameSize-Addr(reg)-1, r.registers[reg])
+					err := r.storeMem(r.sp()+frameSize-Addr(reg)-1, r.registers[reg])
 					if err != nil {
 						return fmt.Errorf("failed to push %s", air.Register(reg))
 					}
@@ -1496,66 +1689,196 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 			default:
 				return fmt.Errorf("unhandled function type %d", int(funcType))
 			}
-		case air.Ret:
-			fp := r.fp()
-
-			for reg := range r.registers {
-				r.registers[reg], err = r.loadAddr(fp.Offset(-air.Size(reg)))
-				if err != nil {
-					return fmt.Errorf("failed to push %s", Register(reg))
-				}
+		case abc.Jmp:
+			targetLen, err := r.fetch(r.pc() + 1)
+			if err != nil {
+				return err
 			}
 
-			r.setSP(r.sp().Offset(-code.Args))
-
-			r.funcTrace = r.funcTrace[:len(r.funcTrace)-2]
-
-			// exit completely
-			if r.fp() == 0 {
-				if r.debug {
-					log.Println("--------------")
-					log.Printf("EXIT")
-					log.Printf("fp: %v", r.fp())
-					log.Printf("sp: %v", r.sp())
-					log.Printf("pc: %v", pc)
-					r.printRegisters()
-					r.printStack()
-				}
-				return nil
+			target, err := r.load(r.pc() + 1)
+			if err != nil {
+				return err
 			}
-		case air.Jmp:
-			cond, err := r.load(code.Cond)()
+
+			condLen, err := r.fetch(r.pc() + 2 + Addr(targetLen))
+			if err != nil {
+				return err
+			}
+
+			cond, err := r.load(r.pc() + 2 + Addr(targetLen))
 			if err != nil {
 				return err
 			}
 
 			if cond != 0 {
-				val, err := r.load(code.Target)()
-				if err != nil {
-					return err
-				}
-
-				r.setPC(Addr(val))
+				r.setPC(Addr(target))
+			} else {
+				r.setPC(r.pc() + 3 + Addr(targetLen) + Addr(condLen))
 			}
-		case air.BinOp:
-			err = r.store(code.Dst)(
-				binaryOp(
-					r,
-					binaryOperation(code.Kind, code.Op, code.Kind),
-					r.load(code.Left),
-					r.load(code.Right),
-				),
-			)
-		case air.UnOp:
-			err = r.store(code.Dst)(
-				unaryOp(
-					r,
-					unaryOperation(code.Op, code.Kind),
-					r.load(code.Src),
-				),
-			)
-		case air.Alc:
-			size, err := r.load(code.Size)()
+		case abc.Binop:
+			dstLen, err := r.fetch(r.pc() + 1)
+			if err != nil {
+				return err
+			}
+
+			kind, err := r.fetch(r.pc() + 2 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			op, err := r.fetch(r.pc() + 3 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			leftLen, err := r.fetch(r.pc() + 4 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			left, err := r.load(r.pc() + 4 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			rightLen, err := r.fetch(r.pc() + 5 + Addr(dstLen) + Addr(leftLen))
+			if err != nil {
+				return err
+			}
+
+			right, err := r.load(r.pc() + 5 + Addr(dstLen) + Addr(leftLen))
+			if err != nil {
+				return err
+			}
+
+			switch op {
+			case abc.UOPAddition:
+				switch kinds.Kind(kind) {
+				case kinds.Int:
+					err = r.store(r.pc()+1, left+right)
+					if err != nil {
+						return err
+					}
+				case kinds.Float:
+					err = r.store(r.pc()+1, left+right)
+					if err != nil {
+						return err
+					}
+				// TODO: string
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPSubtraction:
+				switch kinds.Kind(kind) {
+				case kinds.Int:
+					err = r.store(r.pc()+1, left-right)
+					if err != nil {
+						return err
+					}
+				case kinds.Float:
+					err = r.store(r.pc()+1, left-right)
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPMultiplication:
+				switch kinds.Kind(kind) {
+				case kinds.Int:
+					err = r.store(r.pc()+1, left*right)
+					if err != nil {
+						return err
+					}
+				case kinds.Float:
+					err = r.store(r.pc()+1, left*right)
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			case abc.UOPDivision:
+				switch kinds.Kind(kind) {
+				case kinds.Int:
+					err = r.store(r.pc()+1, float64(int64(left)/int64(right)))
+					if err != nil {
+						return err
+					}
+				case kinds.Float:
+					err = r.store(r.pc()+1, left/right)
+					if err != nil {
+						return err
+					}
+				default:
+					return fmt.Errorf("unhandled binary operation %v", kinds.Kind(kind))
+				}
+			default:
+				return fmt.Errorf("unhandled binary operation %v", op)
+			}
+
+			r.setPC(r.pc() + 6 + Addr(dstLen) + Addr(leftLen) + Addr(rightLen))
+		case abc.Unop:
+			dstLen, err := r.fetch(r.pc() + 1)
+			if err != nil {
+				return err
+			}
+
+			kind, err := r.fetch(r.pc() + 2 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			op, err := r.fetch(r.pc() + 3 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			argLen, err := r.fetch(r.pc() + 4 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			arg, err := r.load(r.pc() + 4 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			switch op {
+			case abc.UOPNot:
+				switch kinds.Kind(kind) {
+				case kinds.Bool:
+					if arg == 0 {
+						err = r.store(r.pc()+1, 1)
+						if err != nil {
+							return err
+						}
+					} else {
+						err = r.store(r.pc()+1, 0)
+						if err != nil {
+							return err
+						}
+					}
+				default:
+					return fmt.Errorf("unhandled unary operation %v", kinds.Kind(kind))
+				}
+			default:
+				return fmt.Errorf("unhandled unary operation %v", op)
+			}
+
+			r.setPC(r.pc() + 5 + Addr(dstLen) + Addr(argLen))
+		case abc.Alc:
+			dstLen, err := r.fetch(r.pc() + 1)
+			if err != nil {
+				return err
+			}
+
+			sizeLen, err := r.fetch(r.pc() + 2 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			size, err := r.load(r.pc() + 2 + Addr(dstLen))
 			if err != nil {
 				return err
 			}
@@ -1565,23 +1888,55 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				return err
 			}
 
-			err = r.store(code.Dst)(float64(addr), nil)
+			err = r.store(r.pc()+1, float64(addr))
 			if err != nil {
 				return err
 			}
-		case air.App:
-			sliceData, err := r.load(code.Src.OffsetReference(0))()
+
+			r.setPC(r.pc() + 3 + Addr(dstLen) + Addr(sizeLen))
+		case abc.App:
+			dstLen, err := r.fetch(r.pc() + 1)
+			if err != nil {
+				return err
+			}
+
+			dst, err := r.loadAddr(r.pc() + 1)
+			if err != nil {
+				return err
+			}
+
+			srcLen, err := r.fetch(r.pc() + 2 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			src, err := r.loadAddr(r.pc() + 2 + Addr(dstLen))
+			if err != nil {
+				return err
+			}
+
+			elemLen, err := r.fetch(r.pc() + 3 + Addr(dstLen) + Addr(srcLen))
+			if err != nil {
+				return err
+			}
+
+			size, err := r.fetch(r.pc() + 4 + Addr(dstLen) + Addr(srcLen) + Addr(elemLen))
+			if err != nil {
+				return err
+			}
+
+			sliceData, err := r.loadMem(Addr(src))
 			if err != nil {
 				return err
 			}
 			sliceDataAddr := Addr(sliceData)
 
-			sliceLen, err := r.load(code.Src.OffsetReference(1))()
+			sliceLen, err := r.loadMem(Addr(src + 1))
 			if err != nil {
 				return err
 			}
 
-			sliceCap, err := r.load(code.Src.OffsetReference(2))()
+			sliceCap, err := r.loadMem(Addr(src + 2))
 			if err != nil {
 				return err
 			}
@@ -1597,12 +1952,12 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 					sliceCap *= 2
 				}
 
-				newDataAddr, err := r.alloc(Size(sliceCap) * code.Size)
+				newDataAddr, err := r.alloc(Size(sliceCap) * Size(size))
 				if err != nil {
 					return err
 				}
 
-				err = r.memcpy(newDataAddr, sliceDataAddr, Size(sliceLen)*code.Size)
+				err = r.memcpy(newDataAddr, sliceDataAddr, Size(sliceLen)*Size(size))
 				if err != nil {
 					return err
 				}
@@ -1610,36 +1965,44 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 				sliceDataAddr = newDataAddr
 			}
 
-			if code.Size == 1 {
-				val, err := r.load(code.Elem)()
+			if size == 1 {
+				elem, err := r.load(r.pc() + 3 + Addr(dstLen) + Addr(srcLen))
 				if err != nil {
 					return err
 				}
-				r.storeAddr(sliceDataAddr.Offset(Size(sliceLen)*code.Size), val)
+
+				err = r.storeMem(sliceDataAddr.Offset(Size(sliceLen)*Size(size)), elem)
+				if err != nil {
+					return err
+				}
 			} else {
-				for i := Size(0); i < code.Size; i++ {
-					val, err := r.load(code.Elem.OffsetReference(i))()
-					if err != nil {
-						return err
-					}
-					r.storeAddr(sliceDataAddr.Offset(Size(sliceLen)*code.Size).Offset(i), val)
+				elem, err := r.loadAddr(r.pc() + 3 + Addr(dstLen) + Addr(srcLen))
+				if err != nil {
+					return err
+				}
+
+				err = r.memcpy(sliceDataAddr.Offset(Size(sliceLen)*Size(size)), Addr(elem), Size(size))
+				if err != nil {
+					return err
 				}
 			}
 
-			err = r.store(code.Dst.OffsetReference(0))(float64(sliceDataAddr), nil)
+			err = r.storeMem(Addr(dst), float64(sliceDataAddr))
 			if err != nil {
 				return err
 			}
 
-			err = r.store(code.Dst.OffsetReference(1))(float64(sliceLen+1), nil)
+			err = r.storeMem(Addr(dst+1), float64(sliceLen+1))
 			if err != nil {
 				return err
 			}
 
-			err = r.store(code.Dst.OffsetReference(2))(float64(sliceCap), nil)
+			err = r.storeMem(Addr(dst+2), float64(sliceCap))
 			if err != nil {
 				return err
 			}
+
+			r.setPC(r.pc() + 5 + Addr(dstLen) + Addr(srcLen) + Addr(elemLen))
 		default:
 			return fmt.Errorf("unrecognized bytecode: %T %v", code, code)
 		}
@@ -1946,7 +2309,7 @@ func (r *Runtime) printStack() {
 	var addr Addr
 
 	for {
-		val, err := r.loadAddr(addr)
+		val, err := r.loadMem(addr)
 		if err != nil {
 			panic(err)
 		}

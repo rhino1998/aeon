@@ -17,6 +17,10 @@ func (s *Snippet) AllocConst(dst *Operand, size Size) {
 	})
 }
 
+func (s *Snippet) Nop() {
+	*s = append(*s, Nop{})
+}
+
 func (s *Snippet) Alloc(dst *Operand, size *Operand) {
 	*s = append(*s, Alc{
 		Dst:  dst,
@@ -184,6 +188,7 @@ func (s Snippet) ResolveLocals() (Size, []types.Type, error) {
 }
 
 type bytecodeWalker struct {
+	Nop   func(int, Nop) (Instruction, error)
 	Mov   func(int, Mov) (Instruction, error)
 	Jmp   func(int, Jmp) (Instruction, error)
 	BinOp func(int, BinOp) (Instruction, error)
@@ -202,6 +207,9 @@ func bytecodeOperandWalker(w func(int, *Operand) (*Operand, error)) bytecodeWalk
 	}
 
 	return bytecodeWalker{
+		Nop: func(index int, bc Nop) (Instruction, error) {
+			return bc, nil
+		},
 		Mov: func(index int, bc Mov) (Instruction, error) {
 			var err error
 			bc.Dst, err = bc.Dst.walk(wi(index))
@@ -310,6 +318,8 @@ func (s Snippet) walk(w bytecodeWalker) error {
 	var walkBC func(int, Instruction) (Instruction, error)
 	walkBC = func(i int, bc Instruction) (Instruction, error) {
 		switch bc := bc.(type) {
+		case Nop:
+			return w.Nop(i, bc)
 		case Jmp:
 			if w.Jmp == nil {
 				return bc, nil
@@ -380,11 +390,7 @@ func (s Snippet) OptimizeOperands() error {
 	}))
 }
 
-func (s *Snippet) LabelFirst(labels ...Label) {
-	s.LabelIndex(0, labels...)
-}
-
-func (s *Snippet) LabelLast(labels ...Label) {
+func (s *Snippet) Label(labels ...Label) {
 	s.LabelIndex(len(*s)-1, labels...)
 }
 
@@ -410,13 +416,6 @@ func (s *Snippet) Add(bcs ...Instruction) {
 }
 
 func (s *Snippet) JumpTo(label Label, cond *Value) {
-	*s = append(*s, Jmp{
-		Cond:   cond.Operand,
-		Target: OperandRegisterPC.Add(LabelOperand(label)).AddConst(-1),
-	})
-}
-
-func (s *Snippet) JumpAfter(label Label, cond *Value) {
 	*s = append(*s, Jmp{
 		Cond:   cond.Operand,
 		Target: OperandRegisterPC.Add(LabelOperand(label)),

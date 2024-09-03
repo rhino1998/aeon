@@ -6,6 +6,7 @@ import (
 	"log"
 	"strconv"
 
+	"github.com/rhino1998/aeon/pkg/compiler/abc"
 	"github.com/rhino1998/aeon/pkg/compiler/air"
 	"github.com/rhino1998/aeon/pkg/compiler/kinds"
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
@@ -63,9 +64,7 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 		}
 	}
 
-	err := prog.bytecode.ResolveLabels()
-
-	_, _, err = prog.bytecode.ResolveGlobals(0)
+	_, _, err := prog.bytecode.ResolveGlobals(0)
 	if err != nil {
 		return err
 	}
@@ -85,6 +84,8 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	}
 
 	prog.bytecode.OptimizeOperands()
+
+	log.Println(abc.Compile(prog.bytecode))
 
 	return nil
 }
@@ -137,6 +138,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 	numLocals := scope.newImmediate(air.Int(0))
 
 	f.bytecode.Mov(scope.SP(), scope.SP().Add(numLocals))
+	f.bytecode.Label(air.Label(f.QualifiedName()))
 
 	// TODO: make these truly global
 	for _, externFunc := range pkg.prog.root.ExternFunctions() {
@@ -270,6 +272,7 @@ func (c *Compiler) compileBCFunction(ctx context.Context, f *Function, scope *Va
 
 	numLocals := scope.newImmediate(air.Int(0))
 	f.bytecode.Mov(scope.SP(), scope.SP().Add(numLocals))
+	f.bytecode.Label(air.Label(f.QualifiedName()))
 
 	funcStackSize, err := air.FunctionStackSize(f.Type().(*types.Function))
 	if err != nil {
@@ -705,18 +708,20 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 				return nil, err
 			}
 
-			condBC.JumpAfter(end, condLoc.Not())
+			condBC.JumpTo(end, condLoc.Not())
 		}
 
 		bc.Add(initBC...)
 		loop := air.NewLabel()
+		loopBC.Nop()
+		loopBC.Label(loop)
 		loopBC.Add(condBC...)
 		loopBC.Add(bodyBC...)
 		loopBC.Add(stepBC...)
 		loopBC.JumpTo(loop, scope.newImmediate(air.Bool(true)))
-		loopBC.LabelFirst(loop)
 		bc.Add(loopBC...)
-		bc.LabelLast(end)
+		bc.Nop()
+		bc.Label(end)
 
 		return bc, nil
 	case *ExpressionStatement:
@@ -772,17 +777,16 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 			if stmt.Else == nil {
 				elseLabel = endLabel
 			}
-			condBC.JumpAfter(elseLabel, condLoc.Not())
+			condBC.JumpTo(elseLabel, condLoc.Not())
 		}
 
 		bc.Add(condBC...)
 		bc.Add(bodyBC...)
-		if stmt.Condition != nil {
-		}
 
 		if stmt.Else != nil {
-			bc.JumpAfter(endLabel, scope.newImmediate(air.Bool(true)))
-			bc.LabelLast(elseLabel)
+			bc.JumpTo(endLabel, scope.newImmediate(air.Bool(true)))
+			bc.Nop()
+			bc.Label(elseLabel)
 			elseBC, err := c.compileBCStatement(ctx, prog, stmt.Else, scope)
 			if err != nil {
 				return nil, err
@@ -791,7 +795,8 @@ func (c *Compiler) compileBCStatement(ctx context.Context, prog *Program, stmt S
 			bc.Add(elseBC...)
 		}
 
-		bc.LabelLast(endLabel)
+		bc.Nop()
+		bc.Label(endLabel)
 
 		return bc, nil
 	default:
@@ -1365,7 +1370,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		}
 
 		skipRet := air.NewLabel()
-		bc.JumpAfter(skipRet, must1(errLoc.InterfaceType()).Equal(nilTypeVal))
+		bc.JumpTo(skipRet, must1(errLoc.InterfaceType()).Equal(nilTypeVal))
 
 		errHandlerLoc, ok := scope.Get(errorHandlerSymbolName)
 		if !ok {
@@ -1381,7 +1386,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 				Func: errHandlerLoc.Operand,
 				Line: int(expr.Position.Line),
 			})
-			bc.JumpAfter(skipRet, must1(handlerRet.InterfaceType()).Equal(nilTypeVal))
+			bc.JumpTo(skipRet, must1(handlerRet.InterfaceType()).Equal(nilTypeVal))
 			bc.Mov(errRetLoc, handlerRet)
 		}
 
@@ -1391,9 +1396,10 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		}
 
 		bc.Ret(funcStackSize)
-		bc.LabelLast(skipRet)
 
 		bc.Mov(dst, tmp.AsType(dst.Type))
+		bc.Nop()
+		bc.Label(skipRet)
 
 		return bc, dst, nil
 	case *ErrorHandlerExpression:

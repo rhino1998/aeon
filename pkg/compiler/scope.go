@@ -352,7 +352,7 @@ func (vs *ValueScope) fun(scope *SymbolScope) *ValueScope {
 func (vs *ValueScope) newFunctionRef(fun *Function) *air.Value {
 	return &air.Value{
 		Type:    types.Kind(kinds.Int),
-		Operand: fun.AddrOp(),
+		Operand: air.LabelOperand(air.Label(fun.QualifiedName())),
 	}
 }
 

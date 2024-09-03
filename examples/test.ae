@@ -1,49 +1,19 @@
 package main
 
-extern func itoa(x int) string
-
-type list struct {
-  head *node
-}
-
-func (l *list) PushBack(val int) {
-  if l.head == nil {
-    l.head = new(node)
-    l.head.val = val
-  } else {
-    l.head.pushBack(val)
+func fib(n int) int {
+  if n <= 0 {
+    return 0
   }
-}
-
-type node struct {
-  val int
-  next *node
-}
-
-func (n *node) pushBack(val int) {
-  if n.next == nil {
-    n2 := new(node)
-    n2.val = val
-    n.next = n2
-  } else {
-    n.next.pushBack(val)
+  if n == 1 {
+    return 1
   }
+  return fib(n-1) + fib(n-2)
 }
-
-type vec4 (int, int, int, int)
 
 #init
 func main() {
-  var a vec4
-  var b vec4
-  var c vec4
-
-  b = (1, 2, 3, 4)
-  c = (2,1,1,1)
-
-  for i := 0; i < 1000; i++ {
-    a = a + b * c
-  }
-
-  printf("%d %d %d %d", a.0, a.1, a.2, a.3)
+  assert(fib(0) == 0)
+  assert(fib(1) == 1)
+  assert(fib(10) == 55)
+  print(fib(20))
 }
