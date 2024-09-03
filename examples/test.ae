@@ -1,40 +1,19 @@
 package main
 
-type Err string
-
-func (e Err) Error() string {
-  return "error: " + string(e)
-}
-
-type T struct {
-  x int
-}
-
-func (t *T) Do() (*T, error) {
-  if t.x == 3 {
-    return t, Err("hello")
-  }
-  print(t.x)
-  t.x++
-  return t, nil
-}
-
-func handler(err error) error {
-  if err != nil {
-    print(err.Error())
-  }
-
-  return nil
-}
-
-func run() error {
-  var t T
-  t.Do()?.Do()?.Do()?.Do()?.Do()?.Do()? -> handler
-
-  return nil
-}
+type vec4 (int, int, int, int)
 
 #init
 func main() {
-  print(run())
+  var a vec4
+  var b vec4
+  var c vec4
+
+  b = (1, 2, 3, 4)
+  c = (2,1,1,1)
+
+  for i := 0; i < 1000; i++ {
+    a = a + b * c
+  }
+
+  printf("%d %d %d %d", a.0, a.1, a.2, a.3)
 }
