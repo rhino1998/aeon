@@ -34,10 +34,15 @@ func SortFunc[T any, K constraints.Ordered](values []T, keyFunc func(T) K, depFu
 	for _, val := range values {
 		key := keyFunc(val)
 		valuesByKey[key] = val
+	}
 
+	for key, val := range valuesByKey {
 		deps := make(map[K]struct{})
 		for _, dep := range depFunc(val) {
-			deps[keyFunc(dep)] = struct{}{}
+			depKey := keyFunc(dep)
+			if has(valuesByKey, depKey) {
+				deps[depKey] = struct{}{}
+			}
 		}
 
 		if len(deps) > 0 {

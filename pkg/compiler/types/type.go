@@ -363,6 +363,7 @@ func IsResolvable(typ Type) bool {
 
 		return true
 	case *Struct:
+		// TODO: handle self-pointers
 		return true
 		for _, field := range typ.Fields() {
 			if !IsResolvable(field.Type) {
