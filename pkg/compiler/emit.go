@@ -3,7 +3,6 @@ package compiler
 import (
 	"context"
 	"fmt"
-	"log"
 	"slices"
 	"strconv"
 
@@ -241,8 +240,6 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 	if err != nil {
 		return nil, err
 	}
-
-	log.Println(mapSlice(globalSymbolsSorted, (*SymbolReference).QualifiedName))
 
 	for _, symbol := range globalSymbolsSorted {
 		global := symbol.Dereference().(*Variable)
