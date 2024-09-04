@@ -17,8 +17,34 @@ func (s SymbolStub) Name() string {
 	return string(s)
 }
 
+type SymbolDependent interface {
+	SymbolDependencies([]*SymbolReference) []*SymbolReference
+}
+
 type Symbol interface {
 	Name() string
+}
+
+type SymbolReference struct {
+	name  string
+	scope *SymbolScope
+}
+
+func (e *SymbolReference) Dereference() Symbol {
+	v, ok := e.scope.get(e.name)
+	if !ok {
+		return nil
+	}
+
+	return v
+}
+
+func (e *SymbolReference) Name() string {
+	return e.name
+}
+
+func (s *SymbolReference) QualifiedName() string {
+	return s.scope.qualifiedSymbolName(s.name)
 }
 
 type QualifiedSymbol interface {
@@ -36,6 +62,7 @@ type SymbolScope struct {
 	name   string
 	scope  map[string]Symbol
 
+	prog       *Program
 	pkg        *Package
 	function   *Function
 	errHandler Expression
@@ -55,6 +82,13 @@ func (s *SymbolScope) Name() string {
 
 func (s *SymbolScope) Parent() *SymbolScope {
 	return s.parent
+}
+
+func (s *SymbolScope) qualifiedSymbolName(name string) string {
+	if s.name == "" {
+		return name
+	}
+	return s.name + "." + name
 }
 
 func (s *SymbolScope) SymbolNames() []string {
@@ -126,6 +160,14 @@ func (s *SymbolScope) ExternFunctions() []*ExternFunction {
 	})
 
 	return externs
+}
+
+func (s *SymbolScope) Program() *Program {
+	if s.parent == nil {
+		return s.prog
+	}
+
+	return s.parent.Program()
 }
 
 func (s *SymbolScope) Package() *Package {
@@ -290,25 +332,44 @@ type ValueScope struct {
 }
 
 func NewValueScope(regs int, symbols *SymbolScope) *ValueScope {
-	types := make(map[types.Name]types.Type)
-	for _, typ := range symbols.DerivedTypes() {
-		types[typ.GlobalName()] = typ
-	}
-	types[TypeNil.GlobalName()] = TypeNil
-
-	strings := make(map[air.String]struct{})
-	strings[""] = struct{}{}
-	for _, name := range symbols.SymbolNames() {
-		strings[air.String(name)] = struct{}{}
-	}
-	return &ValueScope{
+	vs := &ValueScope{
 		symbols:       symbols,
 		function:      symbols.function,
 		variables:     make(map[string]*air.Value),
-		types:         types,
-		strings:       strings,
+		types:         make(map[types.Name]types.Type),
+		strings:       make(map[air.String]struct{}),
 		usedRegisters: make(map[air.Register]bool),
 		numRegisters:  regs,
+	}
+
+	vs.getString("")
+
+	for _, name := range symbols.SymbolNames() {
+		vs.getString(air.String(name))
+	}
+	for _, typ := range symbols.DerivedTypes() {
+		vs.registerType(typ)
+	}
+
+	return vs
+}
+
+func (vs *ValueScope) pkg(pkg *Package) *ValueScope {
+	vs.nextSub++
+	for _, name := range pkg.scope.SymbolNames() {
+		vs.strings[air.String(name)] = struct{}{}
+	}
+	return &ValueScope{
+		parent:  vs,
+		symbols: pkg.scope,
+
+		function:  pkg.scope.Function(),
+		variables: maps.Clone(vs.variables),
+		types:     vs.types,
+		strings:   vs.strings,
+
+		usedRegisters: maps.Clone(vs.usedRegisters),
+		numRegisters:  vs.numRegisters,
 	}
 }
 
@@ -480,10 +541,13 @@ func (vs *ValueScope) registerType(typ types.Type) (types.Name, error) {
 		if !types.Equal(typ, other) {
 			return "", fmt.Errorf("duplicate non-equal types %s %s", typ, other)
 		}
+
+		return name, nil
 	}
 
 	vs.types[name] = typ
-	vs.symbols.Package().prog.registerType(typ)
+	vs.getString(air.String(name))
+	vs.symbols.Program().registerType(typ)
 
 	return name, nil
 }

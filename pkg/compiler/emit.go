@@ -10,6 +10,7 @@ import (
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
 	"github.com/rhino1998/aeon/pkg/compiler/types"
 	"github.com/rhino1998/aeon/pkg/parser"
+	"github.com/rhino1998/aeon/pkg/topological"
 )
 
 func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
@@ -27,6 +28,8 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 			Size: 1,
 		})
 	}
+
+	prog.values = BuiltinValues(prog.Registers(), prog.root)
 
 	prog.registerType(types.Void)
 	prog.registerType(types.NewPointer(types.Void))
@@ -87,10 +90,36 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 }
 
 func (c *Compiler) compileBCPackage(ctx context.Context, pkg *Package) error {
-	pkg.values = BuiltinValues(pkg.prog.Registers(), pkg.scope)
+	pkg.values = pkg.prog.values.sub(pkg.scope)
+
+	constantSymbols, err := topological.SortFunc(
+		mapSlice(pkg.Constants(), (*Constant).Reference),
+		func(c *SymbolReference) string {
+			return c.QualifiedName()
+		},
+		func(c *SymbolReference) []*SymbolReference {
+			if c, ok := c.Dereference().(*Constant); ok {
+				return c.SymbolDependencies(nil)
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		return err
+	}
+
+	var _ = constantSymbols
 
 	// TODO: sort topologically
 	for _, constant := range pkg.Constants() {
+		cName := constant.QualifiedName()
+		deps := constant.SymbolDependencies(nil)
+		for _, dep := range deps {
+			if dep.QualifiedName() == cName {
+				return constant.WrapError(fmt.Errorf("circular dependency in constant %s definition", constant.Name()))
+			}
+		}
+
 		val, err := constant.Evaluate()
 		if err != nil {
 			return err
@@ -1288,17 +1317,28 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		}
 
 		if exprSize > 1 {
-			return nil, nil, expr.WrapError(fmt.Errorf("currently interfaces with values of size > 1 not implemented"))
-		}
+			valBoxPtr := valElem.AsType(types.NewPointer(expr.Expression.Type()))
+			bc.AllocConst(valBoxPtr, exprSize)
 
-		valBC, valLoc, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, valElem)
-		if err != nil {
-			return nil, nil, err
-		}
+			valBox, err := valBoxPtr.Dereference()
+			if err != nil {
+				return nil, nil, expr.WrapError(err)
+			}
 
-		bc.Add(valBC...)
+			valBC, valLoc, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, valBox)
+			if err != nil {
+				return nil, nil, err
+			}
 
-		if valLoc != valElem {
+			bc.Add(valBC...)
+			bc.Mov(valBox, valLoc)
+		} else {
+			valBC, valLoc, err := c.compileBCExpression(ctx, prog, expr.Expression, scope, valElem)
+			if err != nil {
+				return nil, nil, err
+			}
+
+			bc.Add(valBC...)
 			bc.Mov(valElem, valLoc)
 		}
 

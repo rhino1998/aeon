@@ -10,7 +10,8 @@ import (
 )
 
 type Program struct {
-	root *SymbolScope
+	root   *SymbolScope
+	values *ValueScope
 
 	packages map[string]*Package
 	types    map[types.Name]types.Type
@@ -23,14 +24,16 @@ type Program struct {
 }
 
 func newProgram() *Program {
+	scope := BuiltinsSymbols()
 	p := &Program{
-		root: BuiltinsSymbols(),
+		root: scope,
 
 		packages:  make(map[string]*Package),
 		types:     make(map[types.Name]types.Type),
 		strings:   make(map[air.String]struct{}),
 		registers: 0,
 	}
+	scope.prog = p
 
 	return p
 }
@@ -128,6 +131,15 @@ func (p *Program) registerType(t types.Type) {
 	p.types[t.GlobalName()] = t
 	p.strings[air.String(t.GlobalName())] = struct{}{}
 
+	size, err := air.TypeSize(t)
+	if err != nil {
+		panic("bug: unresolvable type size: " + err.Error())
+	}
+
+	if size > 1 {
+		ptrType := types.NewPointer(t)
+		p.registerType(ptrType)
+	}
 }
 
 func (p *Program) GlobalLayout() ([]TypeSlot, error) {

@@ -37,7 +37,12 @@ type ExternFuncEntry struct {
 
 type ExternFuncs []ExternFuncEntry
 
-type VTable map[int]map[string]int
+type VTable map[int]VTableTypeEntry
+
+type VTableTypeEntry struct {
+	Name string
+	Data map[string]int
+}
 
 type xenonContext struct {
 	PageSize     int
@@ -108,8 +113,10 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	xeCtx.KindPointer = int(kinds.Pointer)
 	xeCtx.KindType = int(kinds.Type)
 
-	for _, str := range prog.Strings() {
+	strMap := make(map[air.String]int)
+	for i, str := range prog.Strings() {
 		xeCtx.Strings = append(xeCtx.Strings, string(str))
+		strMap[str] = i
 	}
 
 	for _, f := range prog.VarInitFunctions() {
@@ -130,14 +137,20 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		allFuncs[fun.QualifiedName()] = int(fun.InfoAddr())
 	}
 
+	typeMap := make(map[types.Name]int)
 	for i, typ := range prog.Types() {
-		xeCtx.VTable[i] = make(map[string]int)
+		typeMap[typ.GlobalName()] = i
+		xeCtx.VTable[i] = VTableTypeEntry{
+			Name: string(typ.GlobalName()),
+			Data: make(map[string]int),
+		}
 		typSize, err := air.TypeSize(typ)
 		if err != nil {
 			return fmt.Errorf("failed to get type size: %w", err)
 		}
-		xeCtx.VTable[i]["#size"] = int(typSize)
-		xeCtx.VTable[i]["#kind"] = int(typ.Kind())
+		xeCtx.VTable[i].Data["#kind"] = int(typ.Kind())
+		xeCtx.VTable[i].Data["#size"] = int(typSize)
+		xeCtx.VTable[i].Data["#name"] = int(strMap[air.String(typ.GlobalName())])
 		switch typ := typ.(type) {
 		case *types.Derived:
 			for _, method := range typ.Methods(false) {
@@ -146,7 +159,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 				if !ok {
 					return fmt.Errorf("method %s not found", methodName)
 				}
-				xeCtx.VTable[i][method.Name] = funAddr
+				xeCtx.VTable[i].Data[method.Name] = funAddr
 			}
 		case *types.Pointer:
 			switch typ := types.Dereference(typ.Pointee()).(type) {
@@ -157,9 +170,28 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 					if !ok {
 						return fmt.Errorf("method %s not found", methodName)
 					}
-					xeCtx.VTable[i][method.Name] = funAddr
+					xeCtx.VTable[i].Data[method.Name] = funAddr
 				}
 			}
+		}
+	}
+
+	for i, typ := range prog.Types() {
+		entry := xeCtx.VTable[i]
+		typSize, err := air.TypeSize(typ)
+		if err != nil {
+			return fmt.Errorf("failed to get type size: %w", err)
+		}
+
+		if typSize > 1 {
+			entry.Data["#pointer"] = typeMap[types.NewPointer(typ).GlobalName()]
+		}
+
+		switch typ := typ.(type) {
+		case *types.Derived:
+			entry.Data["#underlying"] = typeMap[typ.Underlying().GlobalName()]
+		case *types.Pointer:
+			entry.Data["#pointee"] = typeMap[typ.Pointee().GlobalName()]
 		}
 	}
 

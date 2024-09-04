@@ -13,19 +13,35 @@ type ConstantExpression interface {
 }
 
 type Constant struct {
-	name string
-	typ  types.Type
+	name  string
+	scope *SymbolScope
+	typ   types.Type
 	ConstantExpression
 
 	parser.Position
 }
 
-func (v *Constant) Name() string {
-	return v.name
+func (c *Constant) Reference() *SymbolReference {
+	return &SymbolReference{
+		name:  c.name,
+		scope: c.scope,
+	}
 }
 
-func (v *Constant) Type() types.Type {
-	return v.typ
+func (c *Constant) QualifiedName() string {
+	return c.scope.qualifiedSymbolName(c.name)
+}
+
+func (c *Constant) Name() string {
+	return c.name
+}
+
+func (c *Constant) Type() types.Type {
+	return c.typ
+}
+
+func (c *Constant) WrapError(err error) error {
+	return c.Position.WrapError(err)
 }
 
 type ConstantValue interface {

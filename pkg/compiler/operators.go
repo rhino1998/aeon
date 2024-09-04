@@ -59,6 +59,14 @@ func (e *BinaryExpression) Type() types.Type {
 	}
 }
 
+func (e *BinaryExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return append(
+		append([]*SymbolReference{},
+			e.Left.SymbolDependencies(path)...),
+		e.Right.SymbolDependencies(path)...,
+	)
+}
+
 type AssignmentOperatorStatement struct {
 	Left     Expression
 	Operator operators.Operator
@@ -81,4 +89,8 @@ func (e *UnaryExpression) Type() types.Type {
 	}
 
 	return typ
+}
+
+func (e *UnaryExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return e.Expression.SymbolDependencies(path)
 }

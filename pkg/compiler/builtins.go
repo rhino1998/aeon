@@ -155,6 +155,10 @@ func (s *BuiltinSymbol) Type() types.Type {
 	return &BuiltinType{symbol: s}
 }
 
+func (s *BuiltinSymbol) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return nil
+}
+
 func (s *BuiltinSymbol) CallExpression(c *Compiler, expr *CallExpression) (Expression, error) {
 	for _, impl := range s.impls {
 		if impl.Match(expr.Args) {
@@ -208,6 +212,14 @@ type BuiltinExpression struct {
 
 func (e *BuiltinExpression) Type() types.Type {
 	return e.Impl.Type(e.Args)
+}
+
+func (e *BuiltinExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	var deps []*SymbolReference
+	for _, arg := range e.Args {
+		deps = append(deps, arg.SymbolDependencies(path)...)
+	}
+	return deps
 }
 
 type builtinLenArray struct{}
@@ -398,8 +410,10 @@ func (b builtinAssert1) Compile(ctx context.Context, c *Compiler, prog *Program,
 
 	return c.compileBCExpression(ctx, prog, &CallExpression{
 		Function: &SymbolReferenceExpression{
-			name:  BuiltinExternAssert.Name(),
-			scope: prog.root,
+			SymbolReference: &SymbolReference{
+				name:  BuiltinExternAssert.Name(),
+				scope: prog.root,
+			},
 
 			Position: pos,
 		},
@@ -454,8 +468,10 @@ func (b builtinAssert2) Compile(ctx context.Context, c *Compiler, prog *Program,
 
 	return c.compileBCExpression(ctx, prog, &CallExpression{
 		Function: &SymbolReferenceExpression{
-			name:  BuiltinExternAssert.Name(),
-			scope: prog.root,
+			SymbolReference: &SymbolReference{
+				name:  BuiltinExternAssert.Name(),
+				scope: prog.root,
+			},
 
 			Position: pos,
 		},

@@ -274,7 +274,8 @@ func (c *Compiler) compileConstDeclaration(p *Package, scope *SymbolScope, decl 
 	}()
 
 	v := &Constant{
-		name: string(decl.Name.Str),
+		name:  string(decl.Name.Str),
+		scope: scope,
 
 		Position: decl.Position,
 	}
@@ -1114,8 +1115,10 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 		}, nil
 	case parser.IdentifierExpr:
 		return &SymbolReferenceExpression{
-			scope: scope,
-			name:  string(expr.Identifier.Str),
+			SymbolReference: &SymbolReference{
+				scope: scope,
+				name:  string(expr.Identifier.Str),
+			},
 
 			Position: expr.Position,
 		}, nil

@@ -32,22 +32,15 @@ function @__builtin_sin($n:number):number
 function @__builtin_cos($n:number):number
 	return cos($n)
 
-; Memory Layout
-
 {{$PageSize := .PageSize}}
 const $PAGE_SIZE = {{$PageSize}}
+
+; Code
+; TODO: maybe put code in unified memory
 
 {{range $page := loop 0 .NumCodePages -}}
 array $aeon_code_page_{{$page}}:number
 {{end}}
-{{range $page := loop 0 .NumMemPages -}}
-array $aeon_mem_page_{{$page}}:number
-{{end}}
-{{range $page := loop 0 .NumStrPages -}}
-array $aeon_str_page_{{$page}}:text
-{{end}}
-var $aeon_str_index = 0
-array $aeon_reg:number
 
 function @aeon_code_init()
 	{{range $page := loop 0 .NumCodePages}}$aeon_code_page_{{$page}}.fill($PAGE_SIZE, 0){{"\n\t"}}{{end}}
@@ -64,8 +57,21 @@ function @aeon_code($addr:number):number
 		return $aeon_code_page_{{$page}}.$pageAddr
 	{{ end }}
 
+; Registers
+
+array $aeon_reg:number
+
 function @aeon_reg_init()
 	$aeon_reg.fill({{.NumRegisters}}, 0)
+
+; Memory
+
+{{range $page := loop 0 .NumMemPages -}}
+array $aeon_mem_page_{{$page}}:number
+{{end}}
+
+function @aeon_mem_init()
+	{{range $page := loop 0 .NumMemPages}}$aeon_mem_page_{{$page}}.fill($PAGE_SIZE, 0){{"\n\t"}}{{end}}
 
 function @aeon_mem_load($addr:number):number
 	if $addr < {{$PageSize}}
@@ -87,9 +93,6 @@ function @aeon_mem_store($addr:number, $v:number):text
 		$aeon_mem_page_{{$page}}.$pageAddr = $v
 	{{end}}
 
-function @aeon_mem_init()
-	{{range $page := loop 0 .NumMemPages}}$aeon_mem_page_{{$page}}.fill($PAGE_SIZE, 0){{"\n\t"}}{{end}}
-
 array $aeon_memmove_tmp:number
 function @aeon_memmove($dst:number, $src:number, $size:number)
 	$aeon_memmove_tmp.fill($size, 0)
@@ -97,6 +100,19 @@ function @aeon_memmove($dst:number, $src:number, $size:number)
 		$aeon_memmove_tmp.$i = @aeon_mem_load($src+$i)
 	repeat $size ($i)
 		@aeon_mem_store($dst+$i, $aeon_memmove_tmp.$i)
+
+function @aeon_memcpy($dst:number, $src:number, $size:number)
+	repeat $size ($i)
+		@aeon_mem_store($dst+$i, @aeon_mem_load($src+$i))
+
+{{range $page := loop 0 .NumStrPages -}}
+array $aeon_str_page_{{$page}}:text
+{{end}}
+
+var $aeon_str_heap_start:number
+var $aeon_str_heap_index:number
+var $aeon_str_heap_end:number
+var $aeon_str_heap_allocs:number ; *slice
 
 function @aeon_str_load($addr:number):text
 	if $addr < {{$PageSize}}
@@ -121,23 +137,28 @@ function @aeon_str_store($addr:number, $v:text):text
 function @aeon_str_init()
 	{{range $page := loop 0 .NumMemPages}}$aeon_str_page_{{$page}}.fill($PAGE_SIZE, ""){{"\n\t"}}{{end}}
 	{{range $i, $str := .Strings }}@aeon_str_store({{$i}}, "{{$str}}"){{"\n\t"}}{{end}}
-	$aeon_str_index = {{len .Strings}}
+	$aeon_str_heap_start = {{len .Strings}}
+	$aeon_str_heap_index = {{len .Strings}}
+	$aeon_str_heap_end  = {{mul .NumStrPages $PageSize}}
 
 function @aeon_str_alloc($v:text):number
-	$aeon_str_index++
-	@aeon_str_store($aeon_str_index, $v)
-	return $aeon_str_index
+	$aeon_str_heap_index++
+	@aeon_str_store($aeon_str_heap_index, $v)
+	return $aeon_str_heap_index
 
 function @aeon_vtable($type:number, $name:text):number
-	{{range $type, $typeTable := .VTable}}if ($type == {{$type}}){{"\n\t\t"}}{{range $name, $addr := $typeTable}}if ($name == "{{$name}}"){{"\n\t\t\t"}}return {{$addr}}{{"\n\t\t"}}{{end}}{{"\n\t"}}{{end}}
+	{{range $type, $typeEntry := .VTable}}if ($type == {{$type}}); {{$typeEntry.Name}}{{"\n\t\t"}}{{range $name, $addr := $typeEntry.Data}}if ($name == "{{$name}}"){{"\n\t\t\t"}}return {{$addr}}{{"\n\t\t"}}{{end}}{{"\n\t"}}{{end}}
 
 ; Heap
 var $aeon_heap_start:number
 var $aeon_heap_index:number
+var $aeon_heap_end:number
+var $aeon_heap_allocs:number ; *slice
 
 function @aeon_heap_init()
 	$aeon_heap_start = {{div (mul .NumMemPages $PageSize) 2}}
 	$aeon_heap_index = $aeon_heap_start
+	$aeon_heap_end = {{mul .NumMemPages $PageSize}}
 
 function @aeon_heap_alloc($size:number):number
 	var $addr = $aeon_heap_index
@@ -369,6 +390,9 @@ function @aeon_append($data:number, $len:number, $cap:number, $elem:number, $siz
 
 function @aeon_to_string($type:number, $value:number):text
 	var $kind = @aeon_vtable($type, "#kind")
+	var $size = @aeon_vtable($type, "#size")
+	var $name = @aeon_str_load(@aeon_vtable($type, "#name"))
+
 	if $kind == {{.KindNil}}
 		return "<nil>"
 	elseif $kind == {{.KindInt}}
@@ -384,8 +408,10 @@ function @aeon_to_string($type:number, $value:number):text
 			return "false"
 	elseif $kind == {{.KindPointer}}
 		return $value:text
+	elseif $kind == {{.KindType}}
+		$name = @aeon_str_load(@aeon_vtable($value, "#name"))
+		return $name
 	else
-		var $name = @aeon_vtable($type, "#name")
 		return text("<unhandled type: {}>", $name)
 
 function @aeon_type_kind($type:number):number
@@ -527,6 +553,10 @@ function @aeon_call_extern($fname:text, $size:number)
 	if ($fname == "{{$entry.Name}}")
 		{{if $entry.HasReturn}}@aeon_mem_store($aeon_reg.1 - $size, {{end}}@{{$entry.Name}}({{range $i, $t := $entry.ArgTypes}}{{if $i }},{{end}}{{$t.Prefix}}@aeon_mem_load($sp-{{len $entry.ArgTypes}}+{{$i}}){{$t.Suffix}}{{end}}){{if $entry.HasReturn}}){{end}}
 	{{ end }}
+
+; Garbage Collector
+
+function @aeon_gc()
 
 ; Main Loop
 
@@ -826,8 +856,7 @@ function @aeon_run($funcInfo:number):number
 					$sliceCap *= 2
 				var $newSliceData = @aeon_heap_alloc($sliceCap * $size)
 
-				; TODO: memcpy
-				@aeon_memmove($newSliceData, $sliceData, $sliceLen * $size)
+				@aeon_memcpy($newSliceData, $sliceData, $sliceLen * $size)
 
 				$sliceData = $newSliceData
 
@@ -835,9 +864,8 @@ function @aeon_run($funcInfo:number):number
 				$elem = @aeon_load($aeon_reg.0+4+$dstLen+$srcLen, $elemLen)
 				@aeon_mem_store($sliceData + ($sliceLen * $size), $elem)
 			else
-				; TODO: memcpy
 				$elem = @aeon_load_addr_internal($aeon_reg.0+4+$dstLen+$srcLen, $elemLen)
-				@aeon_memmove($sliceData + ($sliceLen * $size), $elem, $size)
+				@aeon_memcpy($sliceData + ($sliceLen * $size), $elem, $size)
 
 			@aeon_mem_store($dst, $sliceData)
 			@aeon_mem_store($dst+1, $sliceLen+1)

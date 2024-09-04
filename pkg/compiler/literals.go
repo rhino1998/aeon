@@ -26,7 +26,7 @@ func NewLiteral(val LiteralValue) *Literal {
 	}
 }
 
-func (l Literal) Value(vs *ValueScope) *air.Value {
+func (l *Literal) Value(vs *ValueScope) *air.Value {
 	v := l.value.Value()
 	if v.Operand.Kind == air.OperandKindString {
 		return vs.getString(v.Operand.Value.(air.String))
@@ -35,14 +35,18 @@ func (l Literal) Value(vs *ValueScope) *air.Value {
 	return v
 }
 
-func (l Literal) Evaluate() (LiteralValue, error) {
+func (l *Literal) Evaluate() (LiteralValue, error) {
 	return l.value, nil
 }
 
-func (l Literal) Type() types.Type {
+func (l *Literal) Type() types.Type {
 	return l.typ
 }
 
-func (l Literal) SetType(typ types.Type) {
+func (l *Literal) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return nil
+}
+
+func (l *Literal) SetType(typ types.Type) {
 	l.typ = typ
 }

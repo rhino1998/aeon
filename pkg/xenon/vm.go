@@ -658,7 +658,17 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 				return err
 			}
 
-			slots = append(slots, RuntimeTypeAddr{Type: int(typ), Addr: slot.Addr.Offset(1)})
+			size := kinds.Kind(r.vtables[int(typ)]["#size"])
+			if size == 0 {
+				// skip
+			} else if size == 1 {
+				slots = append(slots, RuntimeTypeAddr{Type: int(typ), Addr: slot.Addr.Offset(1)})
+			} else {
+				ptrTyp := kinds.Kind(r.vtables[int(typ)]["#pointer"])
+
+				slots = append(slots, RuntimeTypeAddr{Type: int(ptrTyp), Addr: slot.Addr.Offset(1)})
+			}
+
 		case kinds.Slice, kinds.Variadic:
 			sliceData, err := r.loadMem(slot.Addr)
 			if err != nil {

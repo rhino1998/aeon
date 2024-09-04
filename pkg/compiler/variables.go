@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
 	"github.com/rhino1998/aeon/pkg/compiler/types"
@@ -44,15 +45,17 @@ func (v *Variable) String() string {
 	return fmt.Sprintf("<var %s %s>", v.name, v.typ)
 }
 
-type SymbolReferenceExpression struct {
-	scope *SymbolScope
-	name  string
-
-	parser.Position
+func (v *Variable) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	if v.expr == nil {
+		return nil
+	}
+	return v.expr.SymbolDependencies(path)
 }
 
-func (e *SymbolReferenceExpression) Name() string {
-	return e.name
+type SymbolReferenceExpression struct {
+	*SymbolReference
+
+	parser.Position
 }
 
 func (e *SymbolReferenceExpression) Type() types.Type {
@@ -74,19 +77,32 @@ func (e *SymbolReferenceExpression) Type() types.Type {
 
 }
 
-func (e *SymbolReferenceExpression) Dereference() Symbol {
-	v, ok := e.scope.get(e.name)
-	if !ok {
+func (e *SymbolReferenceExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	if slices.ContainsFunc(path, func(r *SymbolReference) bool {
+		return r.QualifiedName() == e.SymbolReference.QualifiedName()
+	}) {
 		return nil
 	}
 
-	return v
+	refs := []*SymbolReference{e.SymbolReference}
+
+	val, ok := e.scope.get(e.name)
+	if !ok {
+		return refs
+	}
+
+	symDep, ok := val.(SymbolDependent)
+	if !ok {
+		return refs
+	}
+
+	return append(refs, symDep.SymbolDependencies(append(path, e.SymbolReference))...)
 }
 
 func (e *SymbolReferenceExpression) Evaluate() (LiteralValue, error) {
 	v := e.Dereference()
 	if v == nil {
-		return nil, e.WrapError(fmt.Errorf("undefined variable %s", e.name))
+		return nil, e.WrapError(fmt.Errorf("undefined constant %s", e.name))
 	}
 
 	vConst, ok := v.(*Constant)

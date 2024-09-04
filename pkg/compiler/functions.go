@@ -70,8 +70,10 @@ func (f *Function) withPointerReceiver() *Function {
 		newParams = append(newParams, newParam)
 		symbols.put(newParam)
 		newArgs = append(newArgs, &SymbolReferenceExpression{
-			scope: symbols,
-			name:  paramName,
+			SymbolReference: &SymbolReference{
+				scope: symbols,
+				name:  paramName,
+			},
 		})
 	}
 
@@ -97,8 +99,10 @@ func (f *Function) withPointerReceiver() *Function {
 					Receiver: &UnaryExpression{
 						Operator: operators.Dereference,
 						Expression: &SymbolReferenceExpression{
-							scope: symbols,
-							name:  ptrReceiver.name,
+							SymbolReference: &SymbolReference{
+								scope: symbols,
+								name:  ptrReceiver.name,
+							},
 
 							Position: f.Position,
 						},
@@ -258,6 +262,14 @@ func (e *CallExpression) Type() types.Type {
 	}
 }
 
+func (e *CallExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	var deps []*SymbolReference
+	for _, arg := range e.Args {
+		deps = append(deps, arg.SymbolDependencies(path)...)
+	}
+	return append(deps, e.Function.SymbolDependencies(path)...)
+}
+
 type ReturnStatement struct {
 	Expression Expression
 
@@ -382,6 +394,10 @@ type CompilerFunctionReferenceExpression struct {
 	Function *Function
 }
 
+func (e *CompilerFunctionReferenceExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return nil
+}
+
 func (*CompilerFunctionReferenceExpression) Type() types.Type {
 	return types.Kind(kinds.Int)
 }
@@ -402,12 +418,20 @@ func (e *BoundMethodExpression) Type() types.Type {
 	return e.Method.BoundFunction()
 }
 
+func (e *BoundMethodExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return e.Receiver.SymbolDependencies(path)
+}
+
 type MethodExpression struct {
 	Receiver Expression
 
 	Method types.Method
 
 	parser.Position
+}
+
+func (e *MethodExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return e.Receiver.SymbolDependencies(path)
 }
 
 func (e *MethodExpression) Type() types.Type {
@@ -426,4 +450,8 @@ type MethodFunctionExpression struct {
 
 func (e *MethodFunctionExpression) Type() types.Type {
 	return e.Function.Type().(*types.Function).ToFunction()
+}
+
+func (e *MethodFunctionExpression) SymbolDependencies() []*SymbolReference {
+	return nil
 }

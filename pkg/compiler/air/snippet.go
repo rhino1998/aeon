@@ -10,9 +10,9 @@ import (
 
 type Snippet []Instruction
 
-func (s *Snippet) AllocConst(dst *Operand, size Size) {
+func (s *Snippet) AllocConst(dst *Value, size Size) {
 	*s = append(*s, Alc{
-		Dst:  dst,
+		Dst:  dst.Operand,
 		Size: ImmediateOperand(Int(size)),
 	})
 }

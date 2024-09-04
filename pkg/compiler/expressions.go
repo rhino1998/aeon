@@ -11,6 +11,7 @@ import (
 
 type Expression interface {
 	Type() types.Type
+	SymbolDependencies([]*SymbolReference) []*SymbolReference
 
 	WrapError(error) error
 }
@@ -24,6 +25,10 @@ type DotExpression struct {
 
 func (e *DotExpression) Type() types.Type {
 	return resolveDotExpressionType(e, e.Receiver.Type())
+}
+
+func (e *DotExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return e.Receiver.SymbolDependencies(path)
 }
 
 func resolveDotExpressionType(e *DotExpression, typ types.Type) types.Type {
@@ -85,6 +90,14 @@ func (e *IndexExpression) Type() types.Type {
 	return resolveIndexExpressionType(e, types.Resolve(e.Receiver.Type()))
 }
 
+func (e *IndexExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return append(
+		append([]*SymbolReference{},
+			e.Receiver.SymbolDependencies(path)...),
+		e.Index.SymbolDependencies(path)...,
+	)
+}
+
 func resolveIndexExpressionType(_ *IndexExpression, typ types.Type) types.Type {
 	switch typ := typ.(type) {
 	case *types.Map:
@@ -102,6 +115,10 @@ type ParenthesizedExpression struct {
 	Expression Expression
 
 	parser.Position
+}
+
+func (e *ParenthesizedExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return e.Expression.SymbolDependencies(path)
 }
 
 func (e *ParenthesizedExpression) Evaluate() (LiteralValue, error) {
@@ -138,11 +155,27 @@ func (e *TupleExpression) Type() types.Type {
 	return types.NewTuple(elemTyps...)
 }
 
+func (e *TupleExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	var symbols []*SymbolReference
+	for _, elem := range e.Elems {
+		symbols = append(symbols, elem.SymbolDependencies(path)...)
+	}
+	return symbols
+}
+
 type TypeLiteralExpression struct {
 	typ   types.Type
 	Elems []Expression
 
 	parser.Position
+}
+
+func (e *TypeLiteralExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	var symbols []*SymbolReference
+	for _, elem := range e.Elems {
+		symbols = append(symbols, elem.SymbolDependencies(path)...)
+	}
+	return symbols
 }
 
 func (e *TypeLiteralExpression) Type() types.Type {
@@ -157,6 +190,10 @@ func (e *UnknownExpression) Type() types.Type {
 	return types.Unknown
 }
 
+func (e *UnknownExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return nil
+}
+
 type SpreadExpression struct {
 	Expr Expression
 
@@ -168,6 +205,10 @@ func (e *SpreadExpression) Type() types.Type {
 		return types.NewVariadic(types.Unknown)
 	}
 	return types.Resolve(e.Expr.Type()).(*types.Slice).AsVariadic()
+}
+
+func (e *SpreadExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return e.Expr.SymbolDependencies(path)
 }
 
 type ErrorReturnExpression struct {
@@ -211,6 +252,10 @@ func (e *ErrorReturnExpression) Type() types.Type {
 	}
 }
 
+func (e *ErrorReturnExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return e.Expr.SymbolDependencies(path)
+}
+
 var errorHandlerFunctionType = types.NewFunction(types.Void, []types.Type{TypeError}, TypeError)
 
 type ErrorHandlerExpression struct {
@@ -225,6 +270,10 @@ func (e *ErrorHandlerExpression) Type() types.Type {
 	return e.Expr.Type()
 }
 
+func (e *ErrorHandlerExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return append(e.Expr.SymbolDependencies(path), e.Handler.SymbolDependencies(path)...)
+}
+
 type NilExpression struct {
 	typ types.Type
 
@@ -233,6 +282,10 @@ type NilExpression struct {
 
 func (e *NilExpression) Type() types.Type {
 	return e.typ
+}
+
+func (e *NilExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return nil
 }
 
 type InterfaceCoercionExpression struct {
@@ -244,6 +297,10 @@ type InterfaceCoercionExpression struct {
 
 func (e *InterfaceCoercionExpression) Type() types.Type {
 	return e.Interface
+}
+
+func (e *InterfaceCoercionExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return e.Expression.SymbolDependencies(path)
 }
 
 func (e *InterfaceCoercionExpression) WrapError(err error) error {
@@ -260,6 +317,10 @@ func (t *TypeExpression) Type() types.Type {
 	return &types.TypeType{Type: t.typ}
 }
 
+func (t *TypeExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return nil
+}
+
 type DiscardExpression struct {
 	typ types.Type
 
@@ -272,4 +333,8 @@ func (d *DiscardExpression) Type() types.Type {
 	}
 
 	return d.typ
+}
+
+func (d *DiscardExpression) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
+	return nil
 }
