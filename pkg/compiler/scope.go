@@ -432,7 +432,7 @@ func (vs *ValueScope) newConstant(name string, typ types.Type, op *air.Operand) 
 }
 
 func (vs *ValueScope) newGlobal(v *Variable) *air.Value {
-	if vs.parent != nil {
+	if vs.parent != nil && vs.parent.pkg != nil {
 		return vs.parent.newGlobal(v)
 	}
 
@@ -482,10 +482,7 @@ func (vs *ValueScope) newLocal(v *Variable) *air.Value {
 }
 
 func (vs *ValueScope) allocTemp(typ types.Type) *air.Value {
-	v := &Variable{
-		name: "__local_tmp",
-		typ:  typ,
-	}
+	v := NewVariable("__local_tmp", typ, vs.symbols)
 
 	tmp := &air.Value{
 		Type:    types.NewPointer(types.Dereference(v.Type())),

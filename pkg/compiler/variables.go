@@ -10,15 +10,23 @@ import (
 )
 
 type Variable struct {
-	name string
+	*SymbolReference
 	typ  types.Type
 	expr Expression
 
-	global   bool
-	escaping bool
 	variadic bool
 
 	parser.Position
+}
+
+func NewVariable(name string, typ types.Type, scope *SymbolScope) *Variable {
+	return &Variable{
+		SymbolReference: &SymbolReference{
+			name:  name,
+			scope: scope,
+		},
+		typ: typ,
+	}
 }
 
 func (v *Variable) Name() string {
@@ -33,16 +41,12 @@ func (v *Variable) SetType(typ types.Type) {
 	v.typ = typ
 }
 
-func (v *Variable) Escaping() bool {
-	return v.escaping
-}
-
-func (v *Variable) SetEscaping(escaping bool) {
-	v.escaping = true
-}
-
 func (v *Variable) String() string {
 	return fmt.Sprintf("<var %s %s>", v.name, v.typ)
+}
+
+func (v *Variable) Reference() *SymbolReference {
+	return v.SymbolReference
 }
 
 func (v *Variable) SymbolDependencies(path []*SymbolReference) []*SymbolReference {
@@ -81,7 +85,7 @@ func (e *SymbolReferenceExpression) SymbolDependencies(path []*SymbolReference) 
 	if slices.ContainsFunc(path, func(r *SymbolReference) bool {
 		return r.QualifiedName() == e.SymbolReference.QualifiedName()
 	}) {
-		return nil
+		return []*SymbolReference{e.SymbolReference}
 	}
 
 	refs := []*SymbolReference{e.SymbolReference}

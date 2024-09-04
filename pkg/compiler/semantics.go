@@ -167,13 +167,9 @@ func (c *Compiler) compileExternFunctionDeclaration(p *Package, scope *SymbolSco
 			typ = varType.AsSlice()
 		}
 
-		variable := &Variable{
-			name:     paramName,
-			typ:      typ,
-			variadic: isVariadic,
-
-			Position: param.Position,
-		}
+		variable := NewVariable(paramName, typ, scope)
+		variable.variadic = isVariadic
+		variable.Position = param.Position
 
 		f.parameters[i] = variable
 		last = false
@@ -226,38 +222,36 @@ func (c *Compiler) compileVarDeclaration(p *Package, scope *SymbolScope, decl pa
 		err = errs.Defer(err)
 	}()
 
-	v := &Variable{
-		name:   string(decl.Name.Str),
-		global: true,
+	var varTyp types.Type
 
-		Position: decl.Position,
-	}
 	if decl.Type != nil {
-		typ, err := c.compileTypeReference(scope, *decl.Type)
+		varTyp, err = c.compileTypeReference(scope, *decl.Type)
 		if err != nil {
 			errs.Add(err)
 		}
-
-		v.typ = typ
 	}
+
+	var varExpr Expression
 
 	if decl.Expr != nil {
-		expr, err := c.compileExpression(scope, *decl.Expr)
+		varExpr, err = c.compileExpression(scope, *decl.Expr)
 		if err != nil {
 			errs.Add(err)
 		}
 
-		v.expr = expr
-
-		if v.typ == nil {
-			v.typ = expr.Type()
+		if varTyp == nil {
+			varTyp = varExpr.Type()
 		}
 	}
 
-	if v.typ == nil {
-		v.typ = types.Unknown
+	if varTyp == nil {
+		varTyp = types.Unknown
 		errs.Add(decl.WrapError(fmt.Errorf("variable declaration must have a type or an expression")))
 	}
+
+	v := NewVariable(string(decl.Name.Str), varTyp, scope)
+	v.Position = decl.Position
+	v.expr = varExpr
 
 	err = scope.put(v)
 	if err != nil {
@@ -498,9 +492,7 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 	f := newFunction(string(decl.Name.Str), p)
 	f.Position = decl.Position
 
-	f.receiver = &Variable{
-		typ: types.Void,
-	}
+	f.receiver = NewVariable("", types.Void, scope)
 
 	var lastParamType parser.Type
 	f.parameters = make([]*Variable, len(decl.Parameters))
@@ -536,13 +528,9 @@ func (c *Compiler) compileFunction(p *Package, scope *SymbolScope, decl parser.F
 			typ = varType.AsSlice()
 		}
 
-		variable := &Variable{
-			name:     paramName,
-			typ:      typ,
-			variadic: isVariadic,
-
-			Position: param.Position,
-		}
+		variable := NewVariable(paramName, typ, scope)
+		variable.variadic = isVariadic
+		variable.Position = param.Position
 
 		f.parameters[i] = variable
 		last = false
@@ -629,10 +617,8 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 	f := newFunction(string(decl.Name.String()), p)
 	f.Position = decl.Position
 
-	recvVar := &Variable{
-		name: recvName,
-		typ:  recvTyp,
-	}
+	recvVar := NewVariable(recvName, recvTyp, scope)
+	recvVar.Position = decl.Receiver.Position
 
 	f.receiver = recvVar
 
@@ -674,13 +660,9 @@ func (c *Compiler) compileMethod(p *Package, scope *SymbolScope, decl parser.Met
 			typ = varType.AsSlice()
 		}
 
-		variable := &Variable{
-			name:     paramName,
-			typ:      typ,
-			variadic: isVariadic,
-
-			Position: param.Position,
-		}
+		variable := NewVariable(paramName, typ, scope)
+		variable.variadic = isVariadic
+		variable.Position = param.Position
 
 		f.parameters[i] = variable
 		last = false
@@ -771,10 +753,9 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 			errs.Add(stmt.WrapError(fmt.Errorf("variable declaration must have at least a type or expression")))
 		}
 
-		v := &Variable{
-			name: string(stmt.Name.Str),
-			typ:  typ,
-		}
+		v := NewVariable(string(stmt.Name.Str), typ, scope)
+		v.Position = stmt.Position
+		v.expr = expr
 
 		scope := scope.next()
 
@@ -807,20 +788,16 @@ func (c *Compiler) compileStatement(scope *SymbolScope, stmt parser.Statement) (
 					varType = tupleTyp.Elems()[i]
 				}
 
-				v := &Variable{
-					name: string(name.Str),
-					typ:  varType,
-				}
+				v := NewVariable(string(name.Str), varType, scope)
+				v.Position = name.Position
 
 				variables = append(variables, v)
 
 				scope.put(v)
 			}
 		} else {
-			v := &Variable{
-				name: string(stmt.Names[0].Str),
-				typ:  expr.Type(),
-			}
+			v := NewVariable(string(stmt.Names[0].Str), expr.Type(), scope)
+			v.Position = stmt.Names[0].Position
 
 			variables = append(variables, v)
 
@@ -1295,7 +1272,10 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 			errs.Add(err)
 		}
 
-		scope.put(&Variable{expr: handlerExpr, name: errorHandlerSymbolName})
+		errHandler := NewVariable(errorHandlerSymbolName, errorHandlerFunctionType, scope)
+		errHandler.Position = expr.Position
+		errHandler.expr = handlerExpr
+		scope.put(errHandler)
 
 		handlerScope := scope.next()
 

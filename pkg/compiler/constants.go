@@ -1,6 +1,9 @@
 package compiler
 
 import (
+	"fmt"
+	"slices"
+
 	"github.com/rhino1998/aeon/pkg/compiler/kinds"
 	"github.com/rhino1998/aeon/pkg/compiler/types"
 	"github.com/rhino1998/aeon/pkg/parser"
@@ -42,6 +45,17 @@ func (c *Constant) Type() types.Type {
 
 func (c *Constant) WrapError(err error) error {
 	return c.Position.WrapError(err)
+}
+
+func (c *Constant) Evaluate() (LiteralValue, error) {
+	deps := c.ConstantExpression.SymbolDependencies(nil)
+	if slices.ContainsFunc(deps, func(dep *SymbolReference) bool {
+		return dep.QualifiedName() == c.QualifiedName()
+	}) {
+		return nil, c.WrapError(fmt.Errorf("constant %s is self-referential", c.Name()))
+	}
+
+	return c.ConstantExpression.Evaluate()
 }
 
 type ConstantValue interface {

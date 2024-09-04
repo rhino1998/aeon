@@ -26,10 +26,10 @@ func Sort[T constraints.Ordered](values []T, depFunc func(T) []T) ([]T, error) {
 
 func SortFunc[T any, K constraints.Ordered](values []T, keyFunc func(T) K, depFunc func(T) []T) ([]T, error) {
 	valuesByKey := make(map[K]T)
-	graph := make(map[K]map[K]struct{})
-	inverseGraph := make(map[K]map[K]struct{})
+	dependencies := make(map[K]map[K]struct{})
+	dependents := make(map[K]map[K]struct{})
 
-	edgelessSet := make(map[K]struct{})
+	dependencylessSet := make(map[K]struct{})
 
 	for _, val := range values {
 		key := keyFunc(val)
@@ -41,43 +41,47 @@ func SortFunc[T any, K constraints.Ordered](values []T, keyFunc func(T) K, depFu
 		}
 
 		if len(deps) > 0 {
-			graph[key] = deps
+			dependencies[key] = deps
 		}
 
-		edgelessSet[key] = struct{}{}
+		dependencylessSet[key] = struct{}{}
 	}
 
 	for key, _ := range valuesByKey {
-		for dep := range graph[key] {
-			if inverseGraph[dep] == nil {
-				inverseGraph[dep] = make(map[K]struct{})
+		for dep := range dependencies[key] {
+			if dependents[dep] == nil {
+				dependents[dep] = make(map[K]struct{})
 			}
-			inverseGraph[dep][key] = struct{}{}
-
-			delete(edgelessSet, dep)
+			dependents[dep][key] = struct{}{}
 		}
 	}
 
-	edgeless := sortSlice(slices.Collect(maps.Keys(edgelessSet)))
+	for key, _ := range valuesByKey {
+		for dep := range dependents[key] {
+			delete(dependencylessSet, dep)
+		}
+	}
+
+	dependencyless := sortSlice(slices.Collect(maps.Keys(dependencylessSet)))
 
 	list := make([]T, 0)
 
-	for len(edgeless) > 0 {
+	for len(dependencyless) > 0 {
 		var key K
-		key, edgeless = edgeless[0], edgeless[1:]
+		key, dependencyless = dependencyless[0], dependencyless[1:]
 		list = append(list, valuesByKey[key])
 
-		for _, dep := range sortSlice(slices.Collect(maps.Keys(graph[key]))) {
-			delete(inverseGraph[dep], key)
-			if len(inverseGraph[dep]) == 0 {
-				delete(inverseGraph, dep)
-				edgeless = append(edgeless, dep)
+		for _, dep := range sortSlice(slices.Collect(maps.Keys(dependents[key]))) {
+			delete(dependencies[dep], key)
+			if len(dependencies[dep]) == 0 {
+				delete(dependencies, dep)
+				dependencyless = append(dependencyless, dep)
 			}
 		}
 		values = append(values, valuesByKey[key])
 	}
 
-	if len(inverseGraph) > 0 {
+	if len(dependencies) > 0 {
 		return nil, ErrCycleDetected
 	}
 

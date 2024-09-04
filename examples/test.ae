@@ -4,9 +4,8 @@ extern func delta() float
 
 type vec4 (float, float, float, float)
 
-const z = y
-const y = z
-const x = y
+var y = 3
+var x = y
 
 #init
 func main() {

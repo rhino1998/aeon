@@ -3,6 +3,8 @@ package compiler
 import (
 	"context"
 	"fmt"
+	"log"
+	"slices"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/compiler/air"
@@ -92,34 +94,7 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 func (c *Compiler) compileBCPackage(ctx context.Context, pkg *Package) error {
 	pkg.values = pkg.prog.values.sub(pkg.scope)
 
-	constantSymbols, err := topological.SortFunc(
-		mapSlice(pkg.Constants(), (*Constant).Reference),
-		func(c *SymbolReference) string {
-			return c.QualifiedName()
-		},
-		func(c *SymbolReference) []*SymbolReference {
-			if c, ok := c.Dereference().(*Constant); ok {
-				return c.SymbolDependencies(nil)
-			}
-			return nil
-		},
-	)
-	if err != nil {
-		return err
-	}
-
-	var _ = constantSymbols
-
-	// TODO: sort topologically
 	for _, constant := range pkg.Constants() {
-		cName := constant.QualifiedName()
-		deps := constant.SymbolDependencies(nil)
-		for _, dep := range deps {
-			if dep.QualifiedName() == cName {
-				return constant.WrapError(fmt.Errorf("circular dependency in constant %s definition", constant.Name()))
-			}
-		}
-
 		val, err := constant.Evaluate()
 		if err != nil {
 			return err
@@ -167,7 +142,8 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 	// TODO: make these truly global
 	for _, externFunc := range pkg.prog.root.ExternFunctions() {
-		hdr := scope.newGlobal(&Variable{name: "@" + externFunc.Name(), typ: air.ExternFuncTuple})
+		fName := externFunc.Name()
+		hdr := scope.newGlobal(NewVariable("@"+fName, air.FuncTuple, scope.symbols))
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(air.Int(1)),
 			NewLiteral(air.String(externFunc.Name())),
@@ -184,7 +160,8 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 	}
 
 	for _, externFunc := range pkg.ExternFunctions() {
-		hdr := scope.newGlobal(&Variable{name: "@" + externFunc.Name(), typ: air.ExternFuncTuple})
+		fName := externFunc.Name()
+		hdr := scope.newGlobal(NewVariable("@"+fName, air.FuncTuple, scope.symbols))
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(air.Int(1)),
 			NewLiteral(air.String(externFunc.Name())),
@@ -202,8 +179,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 	{
 		fName := f.Name()
-		hdr := scope.newGlobal(&Variable{name: "@" + fName, typ: air.FuncTuple})
-
+		hdr := scope.newGlobal(NewVariable("@"+fName, air.FuncTuple, scope.symbols))
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(air.Int(2)),
 			NewLiteral(air.String(f.QualifiedName())),
@@ -224,7 +200,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 	for _, fun := range pkg.Functions() {
 		fName := fun.Name()
-		hdr := scope.newGlobal(&Variable{name: "@" + fName, typ: air.FuncTuple})
+		hdr := scope.newGlobal(NewVariable("@"+fName, air.FuncTuple, scope.symbols))
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(air.Int(2)),
 			NewLiteral(air.String(fun.QualifiedName())),
@@ -243,7 +219,33 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 		scope.newConstant(fun.QualifiedName(), f.Type(), hdr.Operand.AddressOf())
 	}
 
-	for _, global := range pkg.Globals() {
+	// check for circular dependencies
+	for _, symbol := range pkg.Globals() {
+		global := symbol.Dereference().(*Variable)
+		deps := global.SymbolDependencies(nil)
+
+		if slices.ContainsFunc(deps, func(sym *SymbolReference) bool {
+			return sym.QualifiedName() == global.QualifiedName()
+		}) {
+			return nil, global.WrapError(fmt.Errorf("circular dependency in global %s", global.Name()))
+		}
+	}
+
+	globalSymbolsSorted, err := topological.SortFunc(
+		mapSlice(pkg.Globals(), (*Variable).Reference),
+		(*SymbolReference).QualifiedName,
+		func(s *SymbolReference) []*SymbolReference {
+			return s.Dereference().(*Variable).SymbolDependencies(nil)
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Println(mapSlice(globalSymbolsSorted, (*SymbolReference).QualifiedName))
+
+	for _, symbol := range globalSymbolsSorted {
+		global := symbol.Dereference().(*Variable)
 		ptr := scope.newGlobal(global)
 		if global.expr != nil {
 			exprBC, exprLoc, err := c.compileBCExpression(ctx, pkg.prog, global.expr, scope, ptr)
@@ -1446,14 +1448,16 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 
 		return bc, dst, nil
 	case *ErrorHandlerExpression:
-		errHandlerVar := &Variable{
-			name: errorHandlerSymbolName,
-			typ:  errorHandlerFunctionType,
-		}
+		handlerDefScope := scope.sub(scope.symbols)
+
+		// TODO: error handle scope
+		errHandlerVar := NewVariable(errorHandlerSymbolName, errorHandlerFunctionType, scope.symbols)
+
+		handlerScope := handlerDefScope.sub(scope.symbols)
 
 		handlerDst := scope.newLocal(errHandlerVar)
 
-		handlerBC, handlerLoc, err := c.compileBCExpression(ctx, prog, expr.Handler, scope, handlerDst)
+		handlerBC, handlerLoc, err := c.compileBCExpression(ctx, prog, expr.Handler, handlerDefScope, handlerDst)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1462,8 +1466,6 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		if handlerLoc != handlerDst {
 			bc.Mov(handlerDst, handlerLoc)
 		}
-
-		handlerScope := scope.sub(scope.symbols)
 
 		subExprBC, subExprLoc, err := c.compileBCExpression(ctx, prog, expr.Expr, handlerScope, dst)
 		if err != nil {

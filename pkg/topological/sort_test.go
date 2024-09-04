@@ -62,7 +62,7 @@ func TestTopologicalSort_Basic(t *testing.T) {
 	l, err := topological.Sort(g.Nodes(), g.NodeEdges)
 	r.NoError(err)
 	r.Equal(3, len(l))
-	r.Equal([]int{1, 2, 3}, l)
+	r.Equal([]int{3, 2, 1}, l)
 }
 
 func TestTopologicalSort_Complex(t *testing.T) {
@@ -81,7 +81,7 @@ func TestTopologicalSort_Complex(t *testing.T) {
 	l, err := topological.Sort(g.Nodes(), g.NodeEdges)
 	r.NoError(err)
 	r.Equal(6, len(l))
-	r.Equal([]int{1, 2, 3, 4, 5, 6}, l)
+	r.Equal([]int{6, 3, 4, 5, 2, 1}, l)
 }
 
 func TestTopologicalSort_Cycle(t *testing.T) {

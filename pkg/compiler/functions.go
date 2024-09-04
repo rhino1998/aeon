@@ -53,20 +53,14 @@ func newFunction(name string, pkg *Package) *Function {
 
 func (f *Function) withPointerReceiver() *Function {
 	symbols := newScope(f.symbols.parent, f.name)
-	ptrReceiver := &Variable{
-		name: "#recv",
-		typ:  types.NewPointer(f.receiver.typ),
-	}
+	ptrReceiver := NewVariable("#recv", types.NewPointer(f.receiver.typ), symbols)
 	symbols.put(ptrReceiver)
 
 	var newParams []*Variable
 	var newArgs []Expression
 	for i, param := range f.parameters {
 		paramName := fmt.Sprintf("#arg_%d", i)
-		newParam := &Variable{
-			name: paramName,
-			typ:  param.typ,
-		}
+		newParam := NewVariable(paramName, param.typ, symbols)
 		newParams = append(newParams, newParam)
 		symbols.put(newParam)
 		newArgs = append(newArgs, &SymbolReferenceExpression{
