@@ -164,7 +164,7 @@ func Dereference(typ Type) Type {
 		}
 
 		return res
-	case *ParenthesizedType:
+	case *Parenthesized:
 		return Dereference(typ.Type)
 	default:
 		return typ
@@ -180,7 +180,7 @@ func Resolve(typ Type) Type {
 		}
 
 		return res
-	case *ParenthesizedType:
+	case *Parenthesized:
 		return Resolve(typ.Type)
 	case *Derived:
 		return Resolve(typ.underlying)
@@ -1015,12 +1015,61 @@ type TypeConversionType struct {
 	Type Type
 }
 
-type ParenthesizedType struct {
+type Parenthesized struct {
 	Type
 
 	parser.Position
 }
 
-func (t *ParenthesizedType) String() string {
+func (t *Parenthesized) String() string {
 	return t.Type.String()
+}
+
+func HasPointer(t Type) bool {
+	switch t := t.(type) {
+	case *Reference:
+		return HasPointer(t.Dereference())
+	case *Derived:
+		return HasPointer(t.Underlying())
+	case *Parenthesized:
+		return HasPointer(t.Type)
+	case Kind:
+		switch t.Kind() {
+		case kinds.String:
+			return true
+		default:
+			return false
+		}
+	case *Pointer:
+		return true
+	case *Array:
+		return HasPointer(t.Elem())
+	case *Slice:
+		return true
+	case *Variadic:
+		return true
+	case *Tuple:
+		for _, elem := range t.Elems() {
+			if HasPointer(elem) {
+				return true
+			}
+		}
+		return false
+	case *Struct:
+		for _, field := range t.Fields() {
+			if HasPointer(field.Type) {
+				return true
+			}
+		}
+
+		return false
+	case *Map:
+		return false // TODO:
+	case *Function:
+		return false
+	case *Interface:
+		return true
+	default:
+		panic(fmt.Sprintf("bug: unhandled type: %T", t))
+	}
 }

@@ -33,6 +33,7 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	prog.values = BuiltinValues(prog.Registers(), prog.root)
 	prog.registerType(types.Void)
 	prog.registerType(types.NewPointer(types.Void))
+	prog.registerType(types.Kind(kinds.Int))
 	prog.registerType(TypeInt)
 	prog.registerType(TypeFloat)
 	prog.registerType(TypeBool)
@@ -43,21 +44,23 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	prog.registerType(air.SliceTuple)
 	prog.registerType(air.InterfaceTuple)
 
-	heapAllocs := NewVariable(heapAllocSliceName, air.SliceTuple, prog.root)
-	prog.root.put(heapAllocs)
-	heapStrAllocs := NewVariable(heapStrAllocSliceName, air.SliceTuple, prog.root)
-	prog.root.put(heapStrAllocs)
-
-	heapGlobals := []*Variable{heapAllocs, heapStrAllocs}
-
-	for _, global := range heapGlobals {
-		globBC, err := c.compileGlobal(ctx, prog, prog.values, global)
-		if err != nil {
-			return err
-		}
-
-		prog.bytecode.Add(globBC...)
-	}
+	// skipNull := NewVariable("#aaa_nil_page", types.NewArray(16, TypeInt), prog.root)
+	// prog.root.put(skipNull)
+	// heapAllocs := NewVariable(heapAllocSliceName, air.SliceTuple, prog.root)
+	// prog.root.put(heapAllocs)
+	// heapStrAllocs := NewVariable(heapStrAllocSliceName, air.SliceTuple, prog.root)
+	// prog.root.put(heapStrAllocs)
+	//
+	// heapGlobals := []*Variable{skipNull, heapAllocs, heapStrAllocs}
+	//
+	// for _, global := range heapGlobals {
+	// 	globBC, err := c.compileGlobal(ctx, prog, prog.values, global)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	//
+	// 	prog.bytecode.Add(globBC...)
+	// }
 
 	for _, pkg := range prog.Packages() {
 		err := c.compileBCPackage(ctx, pkg)

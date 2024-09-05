@@ -9,12 +9,6 @@ function @aeon_fatal()
 function @debug($s:text)
 	{{if .Debug}}print("debug: " & $s){{end}}
 
-function @__builtin_panic($s:text)
-	var $msg = "panic: " & $s
-	@debug($msg)
-	print($msg)
-	@aeon_fatal()
-
 function @__builtin_assert($cond:number, $msg:text)
 	if !($cond)
 		print(text("assertion failed: {}", $msg))
@@ -103,7 +97,7 @@ function @aeon_memmove($dst:number, $src:number, $size:number)
 
 function @aeon_memcpy($dst:number, $src:number, $size:number)
 	repeat $size ($i)
-		@aeon_mem_store($dst+$i, @aeon_mem_load($src+$i))
+		@aeon_mem_store($dst+$i, @aeon_mem_load($src+$i))	
 
 {{range $page := loop 0 .NumStrPages -}}
 array $aeon_str_page_{{$page}}:text
@@ -112,7 +106,7 @@ array $aeon_str_page_{{$page}}:text
 var $aeon_str_heap_start:number
 var $aeon_str_heap_index:number
 var $aeon_str_heap_end:number
-var $aeon_str_heap_allocs:number ; *slice
+array $aeon_str_heap_allocs:number ; TODO: use unified memory for this
 
 function @aeon_str_load($addr:number):text
 	if $addr < {{$PageSize}}
@@ -146,14 +140,45 @@ function @aeon_str_alloc($v:text):number
 	@aeon_str_store($aeon_str_heap_index, $v)
 	return $aeon_str_heap_index
 
+; Stack trace
+array $aeon_stack_trace:number
+
+function @aeon_stack_print()
+	var $i = $aeon_stack_trace.size - 1
+	var $func = $aeon_stack_trace.$i
+	var $name = @aeon_str_load(@aeon_mem_load($func+1))
+	var $file = @aeon_str_load(@aeon_mem_load($func+2))
+
+	print(text("{}()", $name))
+	print(text("	{}", $file))
+	$i--
+	while $i >= 1
+		var $line = $aeon_stack_trace.$i
+		$i--
+		$func = $aeon_stack_trace.$i
+		$i--
+
+		$name = @aeon_str_load(@aeon_mem_load($func+1))
+		$file = @aeon_str_load(@aeon_mem_load($func+2))
+
+		print(text("{}()", $name))
+		print(text("	{}:{}", $file, $line))
+
+function @__builtin_panic($s:text)
+	var $msg = "panic: " & $s
+	@debug($msg)
+	print($msg)
+	@aeon_stack_print()
+	@aeon_fatal()
+
+
 function @aeon_vtable($type:number, $name:text):number
-	{{range $type, $typeEntry := .VTable}}if ($type == {{$type}}); {{$typeEntry.Name}}{{"\n\t\t"}}{{range $name, $addr := $typeEntry.Data}}if ($name == "{{$name}}"){{"\n\t\t\t"}}return {{$addr}}{{"\n\t\t"}}{{end}}{{"\n\t"}}{{end}}
+	{{range $type, $typeEntry := .VTable}}if ($type == {{$type}}); {{$typeEntry.Name}}{{"\n\t\t"}}{{range $name, $addr := $typeEntry.Data}}if ($name == "{{$name}}"){{"\n\t\t\t"}}return {{$addr}}{{"\n\t\t"}}{{end}}@__builtin_panic(text("invalid vtable lookup {} {}", $type, $name)){{"\n\t"}}{{end}}
 
 ; Heap
 var $aeon_heap_start:number
 var $aeon_heap_index:number
 var $aeon_heap_end:number
-var $aeon_heap_allocs:number ; *slice
 
 function @aeon_heap_init()
 	$aeon_heap_start = {{div (mul .NumMemPages $PageSize) 2}}
@@ -163,6 +188,9 @@ function @aeon_heap_init()
 function @aeon_heap_alloc($size:number):number
 	var $addr = $aeon_heap_index
 	$aeon_heap_index += $size
+
+	if $aeon_heap_index > $aeon_heap_end
+		@__builtin_panic("out of memory")
 
 	{{if .Debug}}@debug(text("heap alloc {} -> {}", $size, $addr)){{end}}
 
@@ -556,12 +584,66 @@ function @aeon_call_extern($fname:text, $size:number)
 
 ; Garbage Collector
 
-function @aeon_gc()
+var $aeon_gc_str_heap_start:number
+var $aeon_gc_str_heap_index:number
+var $aeon_gc_str_heap_end:number
+array $aeon_gc_str_heap_vars:number ; TODO: use unifed memory
+array $aeon_gc_str_heap_ptrs:number ; TODO: use unifed memory
+
+function @aeon_gc_add_str_var($var:number, $ptr:number)
+	if $ptr > $aeon_gc_str_heap_start && $ptr < $aeoN_gc_str_heap_end
+		$aeon_gc_str_heap_vars.append($var)
+		$aeon_gc_str_heap_ptrs.append($ptr)
+
+array $aeon_gc_scan_types:number ; TODO: use unified memory
+array $aeon_gc_scan_addrs:number ; TODO: use unified memory
+function @aeon_gc_scan_type($type:number, $addr:number)
+	$aeon_gc_scan_types.append($type)
+	$aeon_gc_scan_addrs.append($addr)
+
+	var $value = 0
+
+	while $aeon_gc_scan_types.size > 0
+		$type = $aeon_gc_scan_types.last
+		$aeon_gc_scan_types.pop()
+		$addr = $aeon_gc_scan_addrs.last
+		$aeon_gc_scan_addrs.pop()
+
+		if !@aeon_vtable($type, "#has-pointer")
+			continue
+
+		var $kind = @aeon_vtable($type, "#kind")
+		if $kind == {{.KindString}}
+			$value = @aeon_mem_load($addr)
+			@aeon_gc_add_str_var($addr, $value)
+		elseif $kind == {{.KindPointer}}
+			; TODO: heap stuff
+		elseif $kind == {{.KindTuple}}
+			; TODO: complex types
+
+function @aeon_gc_scan()
+	; TODO: global map
+			
+	
+
+function @aeon_gc($size:number)
+	if $aeon_str_heap_index + $size < $aeon_str_heap_end
+		; skip GC if we're not using much memory
+		return
+
+	$aeon_gc_str_heap_start = $aeon_str_heap_start
+	$aeon_gc_str_heap_index = $aeon_str_heap_index
+	$aeon_gc_str_heap_end = $aeon_str_heap_end
+
+	@aeon_gc_scan()
 
 ; Main Loop
 
 function @aeon_run($funcInfo:number):number
 	@aeon_reg_init()
+
+	$aeon_stack_trace.append(-1)
+	$aeon_stack_trace.append($funcInfo)
 
 	var $line = 0
 	var $sizeLen = 0
@@ -791,6 +873,9 @@ function @aeon_run($funcInfo:number):number
 			var $ftype = @aeon_mem_load($func)
 			var $fname = @aeon_str_load(@aeon_mem_load($func+1))
 
+			$aeon_stack_trace.append($line)
+			$aeon_stack_trace.append($func)
+
 			if $ftype == 0
 				@__builtin_panic(text("invalid function call: {}", $fname))
 			elseif $ftype == 1
@@ -800,6 +885,9 @@ function @aeon_run($funcInfo:number):number
 				@aeon_call_extern($externName, $size)
 				$aeon_reg.1 -= $size
 				$aeon_reg.0 += 3 + $funcLen
+
+				$aeon_stack_trace.pop()
+				$aeon_stack_trace.pop()
 			elseif $ftype == 2
 				var $faddr = @aeon_mem_load($func+3)
 
@@ -820,6 +908,8 @@ function @aeon_run($funcInfo:number):number
 				$aeon_reg.$reg = @aeon_mem_load($fp - $reg)
 
 			$aeon_reg.1 -= $size
+			$aeon_stack_trace.pop()
+			$aeon_stack_trace.pop()
 
 			; TODO: stack tracing
 			;
@@ -830,6 +920,8 @@ function @aeon_run($funcInfo:number):number
 
 			$sizeLen = @aeon_code($aeon_reg.0+2+$dstLen)
 			$size = @aeon_load($aeon_reg.0+3+$dstLen, $sizeLen)
+
+			@aeon_gc($size)
 
 			@aeon_store($aeon_reg.0+2, $dstLen, @aeon_heap_alloc($size))
 
@@ -842,18 +934,21 @@ function @aeon_run($funcInfo:number):number
 			$elemLen = @aeon_code($aeon_reg.0+3+$dstLen+$srcLen)
 			$size = @aeon_code($aeon_reg.0+4+$dstLen+$srcLen+$elemLen)
 
-			var $sliceData = @aeon_mem_load($src)
 			var $sliceLen = @aeon_mem_load($src+1)
 			var $sliceCap = @aeon_mem_load($src+2)
-
-			if $sliceCap < $sliceLen
-				@__builtin_panic("slice cap < len")
-
 			if $sliceLen == $sliceCap
 				if $sliceCap == 0
 					$sliceCap = 1
 				else
 					$sliceCap *= 2
+				@aeon_gc($sliceCap)
+
+			var $sliceData = @aeon_mem_load($src)
+
+			if $sliceCap < $sliceLen
+				@__builtin_panic("slice cap < len")
+
+			if $sliceLen == $sliceCap
 				var $newSliceData = @aeon_heap_alloc($sliceCap * $size)
 
 				@aeon_memcpy($newSliceData, $sliceData, $sliceLen * $size)

@@ -188,7 +188,6 @@ type gcState struct {
 
 	strVars []Addr
 	strPtrs []Addr
-	strUsed []Addr
 }
 
 func (g *gcState) addStrVar(v, ptr Addr) {
@@ -242,7 +241,6 @@ type Runtime struct {
 	vtables   map[int]map[string]float64
 	globalMap []RuntimeTypeSlot
 	funcMap   map[int][]RuntimeTypeSlot
-	typeMap   map[int][]RuntimeTypeSlot
 }
 
 func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, strPages int, stdout io.Writer, debug bool) (*Runtime, error) {
@@ -269,7 +267,6 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 		vtables: make(map[int]map[string]float64),
 		funcMap: make(map[int][]RuntimeTypeSlot),
-		typeMap: make(map[int][]RuntimeTypeSlot),
 	}
 
 	if stdout == nil {
@@ -320,9 +317,14 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		r.vtables[typeID]["#kind"] = float64(typ.Kind())
 		r.vtables[typeID]["#name"] = float64(strMap[String(typ.GlobalName())])
 
-		typeIDFromName[typ.GlobalName()] = typeID
+		log.Println(typ, types.HasPointer(typ))
+		if types.HasPointer(typ) {
+			r.vtables[typeID]["#has-pointer"] = float64(1)
+		} else {
+			r.vtables[typeID]["#has-pointer"] = float64(0)
+		}
 
-		r.typeMap[typeID] = make([]RuntimeTypeSlot, 0)
+		typeIDFromName[typ.GlobalName()] = typeID
 
 		// TODO: method resolution
 		switch typ := types.Dereference(typ).(type) {
@@ -511,11 +513,15 @@ func (r *Runtime) gc(size Size) error {
 		float64(gc.strHeapIndex+1-gc.strHeapStart)/float64(gc.strHeapEnd-gc.strHeapStart) < 1 {
 		return nil
 	}
+	log.Println("GC")
+	defer log.Println("GC done")
 
+	log.Println("Scanning pointers")
 	err := gc.scanPointers(r)
 	if err != nil {
 		return err
 	}
+	log.Println("Done scanning pointers")
 
 	err = gc.mark(r)
 	if err != nil {
@@ -597,14 +603,19 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 		slots = slots[:len(slots)-1]
 		kind := kinds.Kind(r.vtables[slot.Type]["#kind"])
 
+		hasPointer := r.vtables[slot.Type]["#has-pointer"] == 1
+		if !hasPointer {
+			continue
+		}
+
 		// val, err := r.loadMem(slot.Addr)
 		// if err != nil {
 		// 	return err
 		// }
-
+		//
 		// name, err := r.LoadString(Addr(r.vtables[slot.Type]["#name"]))
 		// if err != nil {
-		// 	return nil, nil, err
+		// 	return err
 		// }
 		//
 		// log.Printf("%v %s = %v", slot.Addr, string(name), val)
@@ -637,9 +648,12 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 			length := int(r.vtables[slot.Type]["#length"])
 			elem := int(r.vtables[slot.Type]["#elem"])
 			elemSize := Size(r.vtables[elem]["#size"])
+			elemHasPointer := r.vtables[elem]["#has-pointer"] == 1
 
-			for i := 0; i < length; i++ {
-				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(elemSize * Size(i))})
+			if elemHasPointer {
+				for i := 0; i < length; i++ {
+					slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(elemSize * Size(i))})
+				}
 			}
 		case kinds.Tuple:
 			var totalOffset Size
@@ -684,11 +698,21 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 
 			elem := int(r.vtables[slot.Type]["#elem"])
 			elemSize := Size(r.vtables[elem]["#size"])
+			elemKind := kinds.Kind(r.vtables[elem]["#kind"])
+			elemHasPointer := r.vtables[elem]["#has-pointer"] == 1
+			log.Println("slice", slot.Addr, sliceData, sliceCap, elem, elemKind, elemSize, elemHasPointer)
 
-			for i := 0; i < int(sliceCap); i++ {
-				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: Addr(sliceData).Offset(elemSize * Size(i))})
+			if elemHasPointer {
+				for i := 0; i < int(sliceCap); i++ {
+					slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: Addr(sliceData).Offset(elemSize * Size(i))})
+				}
 			}
 		case kinds.Struct:
+			hasPointer := r.vtables[slot.Type]["#has-pointer"] == 1
+			if !hasPointer {
+				continue
+			}
+
 			var totalOffset Size
 			elems := int(r.vtables[slot.Type]["#fields"])
 			for i := 0; i < elems; i++ {
@@ -716,12 +740,6 @@ func (gc *gcState) mark(r *Runtime) error {
 		}
 
 		prevHeapAddr = heapAllocAddr
-	}
-
-	for ptr := gc.strHeapStart; ptr <= gc.strHeapIndex; ptr++ {
-		if slices.Contains(gc.strPtrs, ptr) {
-			gc.strUsed = append(gc.strUsed, ptr)
-		}
 	}
 
 	return nil
@@ -773,7 +791,7 @@ func (gc *gcState) compact(r *Runtime) error {
 	gc.heapAllocs = newAllocs
 
 	gc.strHeapIndex = gc.strHeapStart
-	for _, ptr := range gc.strUsed {
+	for _, ptr := range gc.strPtrs {
 		str, err := r.LoadString(ptr)
 		if err != nil {
 			return err

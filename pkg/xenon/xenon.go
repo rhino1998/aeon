@@ -47,7 +47,7 @@ type VTableTypeEntry struct {
 type xenonContext struct {
 	PageSize     int
 	NumCodePages int
-	Code         map[PageAddr]float64
+	Code         map[PageAddr]string
 	VarInitFuncs []int
 	InitFuncs    []int
 	UpdateFuncs  []int
@@ -73,6 +73,7 @@ type xenonContext struct {
 	KindString  int
 	KindPointer int
 	KindType    int
+	KindTuple   int
 }
 
 func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Function, error) {
@@ -112,6 +113,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	xeCtx.KindString = int(kinds.String)
 	xeCtx.KindPointer = int(kinds.Pointer)
 	xeCtx.KindType = int(kinds.Type)
+	xeCtx.KindTuple = int(kinds.Tuple)
 
 	strMap := make(map[air.String]int)
 	for i, str := range prog.Strings() {
@@ -195,7 +197,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		}
 	}
 
-	xeCtx.Code = make(map[PageAddr]float64)
+	xeCtx.Code = make(map[PageAddr]string)
 
 	logger.Debug("Program",
 		slog.Int("page_size", xeCtx.PageSize),
@@ -252,7 +254,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 
 			xeCtx.Code[PageAddr{
 				Page: page,
-				Addr: pageAddr}] = uop
+				Addr: pageAddr}] = fmt.Sprintf("%f", uop)
 			codeAddr++
 		}
 	}

@@ -1,6 +1,6 @@
 package main
 
-extern func delta() float
+extern func __builtin_panic(string)
 
 type vec4 (float, float, float, float)
 
@@ -12,21 +12,5 @@ var z = 5 * y
 
 #init
 func main() {
-  start := delta()
-  var a vec4
-  var b vec4
-  var c vec4
-
-  b = (1, 2, 3, 4)
-  c = (2,1,1,1)
-
-  for i := 0; i < 10000; i++ {
-    a = a + b * c
-  }
-
-  print(x,y,z, w)
-
-  a *= vec4((1.3, 1.1, 1.1, 1.1))
-
-  print(a)
+  __builtin_panic("Hello, World!")
 }
