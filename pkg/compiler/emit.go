@@ -31,7 +31,6 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	}
 
 	prog.values = BuiltinValues(prog.Registers(), prog.root)
-
 	prog.registerType(types.Void)
 	prog.registerType(types.NewPointer(types.Void))
 	prog.registerType(TypeInt)
@@ -43,6 +42,22 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	prog.registerType(air.ExternFuncTuple)
 	prog.registerType(air.SliceTuple)
 	prog.registerType(air.InterfaceTuple)
+
+	heapAllocs := NewVariable(heapAllocSliceName, air.SliceTuple, prog.root)
+	prog.root.put(heapAllocs)
+	heapStrAllocs := NewVariable(heapStrAllocSliceName, air.SliceTuple, prog.root)
+	prog.root.put(heapStrAllocs)
+
+	heapGlobals := []*Variable{heapAllocs, heapStrAllocs}
+
+	for _, global := range heapGlobals {
+		globBC, err := c.compileGlobal(ctx, prog, prog.values, global)
+		if err != nil {
+			return err
+		}
+
+		prog.bytecode.Add(globBC...)
+	}
 
 	for _, pkg := range prog.Packages() {
 		err := c.compileBCPackage(ctx, pkg)
@@ -75,10 +90,6 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	if err != nil {
 		return err
 	}
-
-	// for i, bc := range prog.bytecode {
-	// 	log.Printf("%02x: %v", i, bc)
-	// }
 
 	err = prog.bytecode.ResolveStrings(prog.Strings())
 	if err != nil {
@@ -124,6 +135,38 @@ func (c *Compiler) compileBCPackage(ctx context.Context, pkg *Package) error {
 	}
 
 	return nil
+}
+
+func (c *Compiler) compileGlobal(ctx context.Context, prog *Program, scope *ValueScope, global *Variable) (air.Snippet, error) {
+	var bc air.Snippet
+	ptr := scope.newGlobal(global)
+	if global.expr != nil {
+		exprBC, exprLoc, err := c.compileBCExpression(ctx, prog, global.expr, scope, ptr)
+		if err != nil {
+			return nil, err
+		}
+
+		bc.Add(exprBC...)
+
+		err = bc.Mov(ptr, exprLoc)
+		if err != nil {
+			return nil, global.WrapError(err)
+		}
+	} else {
+		exprBC, exprLoc, err := c.compileBCZeroValue(ctx, prog, global.Position, global.Type(), scope, ptr)
+		if err != nil {
+			return nil, err
+		}
+
+		bc.Add(exprBC...)
+
+		err = bc.Mov(ptr, exprLoc)
+		if err != nil {
+			return nil, global.WrapError(err)
+		}
+	}
+
+	return bc, nil
 }
 
 func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Function, error) {
@@ -243,32 +286,12 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 	for _, symbol := range globalSymbolsSorted {
 		global := symbol.Dereference().(*Variable)
-		ptr := scope.newGlobal(global)
-		if global.expr != nil {
-			exprBC, exprLoc, err := c.compileBCExpression(ctx, pkg.prog, global.expr, scope, ptr)
-			if err != nil {
-				return nil, err
-			}
-
-			f.bytecode.Add(exprBC...)
-
-			err = f.bytecode.Mov(ptr, exprLoc)
-			if err != nil {
-				return nil, global.WrapError(err)
-			}
-		} else {
-			exprBC, exprLoc, err := c.compileBCZeroValue(ctx, pkg.prog, global.Position, global.Type(), scope, ptr)
-			if err != nil {
-				return nil, err
-			}
-
-			f.bytecode.Add(exprBC...)
-
-			err = f.bytecode.Mov(ptr, exprLoc)
-			if err != nil {
-				return nil, global.WrapError(err)
-			}
+		globBC, err := c.compileGlobal(ctx, pkg.prog, scope, global)
+		if err != nil {
+			return nil, err
 		}
+
+		f.bytecode.Add(globBC...)
 	}
 
 	f.bytecode.Ret(0)

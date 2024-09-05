@@ -19,8 +19,6 @@ type Program struct {
 
 	registers int
 	bytecode  air.Snippet
-
-	stringOffset air.Addr
 }
 
 func newProgram() *Program {
@@ -259,6 +257,9 @@ func (p *Program) UpdateFunctions() []*Function {
 // TODO: topological sort by import
 func (p *Program) Globals() []*Variable {
 	var ret []*Variable
+
+	ret = append(ret, p.root.Variables()...)
+
 	for _, pkg := range p.Packages() {
 		ret = append(ret, pkg.Globals()...)
 	}
@@ -410,18 +411,6 @@ func (p *Package) OffsetAddr(addr air.Addr) {
 	for _, fun := range p.Functions() {
 		fun.OffsetAddr(addr)
 	}
-
-	for _, drv := range p.DerivedTypes() {
-		for _, met := range drv.Methods(false) {
-			var _ = met // TODO: resolve methods
-			// met.OffsetAddr(addr)
-		}
-
-		for _, met := range drv.Methods(true) {
-			var _ = met // TODO: resolve methods
-			// met.OffsetAddr(addr)
-		}
-	}
 }
 
 func (p *Package) Globals() []*Variable {
@@ -450,4 +439,14 @@ func (p *Package) UpdateFunctions() []*Function {
 
 func (p *Package) Strings() []air.String {
 	return p.values.Strings()
+}
+
+func (p *Package) HeapAllocsAddr() air.Addr {
+	val, _ := p.values.Get(heapAllocSliceName)
+	return air.Addr(val.Operand.Value.(air.Int))
+}
+
+func (p *Package) HeapStrAllocsAddr() air.Addr {
+	val, _ := p.values.Get(heapStrAllocSliceName)
+	return air.Addr(val.Operand.Value.(air.Int))
 }
