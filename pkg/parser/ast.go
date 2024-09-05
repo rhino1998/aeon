@@ -355,6 +355,7 @@ func (ReturnStatement) statement() {}
 type Expr interface {
 	expr()
 
+	fmt.Stringer
 	WrapError(err error) error
 }
 

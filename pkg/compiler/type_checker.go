@@ -37,7 +37,7 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 	for _, typ := range pkg.DerivedTypes() {
 		newTyp, err := c.resolveTypes(typ.Position, typ.Underlying())
 		if err != nil {
-			errs.Add(err)
+			errs.Add(typ.WrapError(fmt.Errorf("type %s is invalid: %w", err)))
 		}
 
 		typ.SetUnderlying(newTyp)
@@ -53,6 +53,8 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 		}) {
 			errs.Add(global.WrapError(fmt.Errorf("circular dependency in global %s", global.Name())))
 		}
+
+		global.expr = &UnknownExpression{ErrorWrapper: global.expr}
 	}
 
 	globalSymbolsSorted, err := topological.SortFunc(
@@ -103,27 +105,20 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 
 	f.receiver.typ, err = c.resolveTypes(f.Position, f.Receiver().Type())
 	if err != nil {
-		errs.Add(err)
-	}
-
-	if f.Receiver().Type().Kind() == kinds.Unknown {
-		errs.Add(f.WrapError(fmt.Errorf("function %q has unknown receiver %q of type %s", f.Name(), f.Receiver().Name(), f.Receiver().Type())))
+		// TODO: handle no name
+		errs.Add(f.receiver.WrapError(fmt.Errorf("function %s receiver %s has invalid receiver type: %w", f.Name(), f.receiver.Name(), err)))
 	}
 
 	for _, param := range f.Parameters() {
 		param.typ, err = c.resolveTypes(param.Position, param.Type())
 		if err != nil {
-			errs.Add(err)
-		}
-
-		if param.Type().Kind() == kinds.Unknown {
-			errs.Add(f.WrapError(fmt.Errorf("function %q has unknown parameter %q of type %s", f.Name(), param.Name(), param.Type())))
+			errs.Add(param.WrapError(fmt.Errorf("function %s parameter %s has invalid type: %w", f.Name(), param.Name(), err)))
 		}
 	}
 
 	f.ret, err = c.resolveTypes(f.Position, f.Return())
 	if err != nil {
-		errs.Add(err)
+		errs.Add(f.WrapError(fmt.Errorf("function %s has invalid return type: %w", f.Name(), err)))
 	}
 
 	if f.Return().Kind() == kinds.Unknown {
@@ -141,13 +136,8 @@ func (c *Compiler) resolveFunctionTypes(f *Function) (err error) {
 }
 
 func (c *Compiler) resolveTypes(pos parser.Position, typ types.Type) (_ types.Type, err error) {
-	errs := newErrorSet()
-	defer func() {
-		err = errs.Defer(err)
-	}()
-
 	if !types.IsResolvable(typ) {
-		errs.Add(pos.WrapError(fmt.Errorf("type %s is unknown", typ)))
+		return nil, fmt.Errorf("type %s is unknown", typ)
 	}
 
 	switch typ := typ.(type) {
@@ -182,11 +172,7 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 
 		g.typ, err = c.resolveTypes(g.Position, typ)
 		if err != nil {
-			return err
-		}
-
-		if !types.IsResolvable(typ) {
-			errs.Add(g.WrapError(fmt.Errorf("type %s is unknown", typ)))
+			errs.Add(g.WrapError(fmt.Errorf("global variable %s has invalid type: %v", g.Name(), typ)))
 		}
 	}
 
@@ -215,7 +201,7 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 
 			stmt.Type, err = c.resolveTypes(stmt.Position, typ)
 			if err != nil {
-				return err
+				errs.Add(stmt.WrapError(fmt.Errorf("variable %s has invalid type: %w", stmt.Variable.Name(), err)))
 			}
 
 			stmt.Type = typ
@@ -1130,7 +1116,7 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound types.Type) (_ 
 	case *TypeLiteralExpression:
 		exprType, err := c.resolveTypes(expr.Position, expr.Type())
 		if err != nil {
-			errs.Add(err)
+			errs.Add(expr.WrapError(fmt.Errorf("invalid type literal: %w", err)))
 		}
 
 		expr.typ = exprType
@@ -1260,6 +1246,8 @@ func (c *Compiler) resolveExpressionTypes(expr Expression, bound types.Type) (_ 
 	case *MethodExpression:
 		return expr, nil
 	case *InterfaceCoercionExpression:
+		return expr, nil
+	case *UnknownExpression:
 		return expr, nil
 	default:
 		return expr, expr.WrapError(fmt.Errorf("unhandled expression in type checker %T: %s", expr, expr))

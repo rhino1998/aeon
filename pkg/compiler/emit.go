@@ -1471,6 +1471,9 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 		bc.Add(subExprBC...)
 
 		return bc, subExprLoc, nil
+	case *UnknownExpression:
+		// NOTE: this assumes that other errors have already occurred
+		return nil, nil, nil
 	default:
 		return nil, nil, expr.WrapError(fmt.Errorf("unhandled expression in bytecode generator %T", expr))
 	}

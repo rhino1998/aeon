@@ -183,7 +183,7 @@ func (e *TypeLiteralExpression) Type() types.Type {
 }
 
 type UnknownExpression struct {
-	parser.Expr
+	ErrorWrapper
 }
 
 func (e *UnknownExpression) Type() types.Type {

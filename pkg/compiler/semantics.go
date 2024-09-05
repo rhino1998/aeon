@@ -1293,7 +1293,7 @@ func (c *Compiler) compileExpression(scope *SymbolScope, expr parser.Expr) (_ Ex
 		}, nil
 	default:
 		return &UnknownExpression{
-			Expr: expr,
+			ErrorWrapper: expr,
 		}, expr.WrapError(fmt.Errorf("unhandled expression %s", expr))
 	}
 }
