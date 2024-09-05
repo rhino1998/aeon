@@ -247,27 +247,27 @@ function @aeon_load($addr:number, $length:number):number
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			if ($arg1 >= $arg2)
-				print(text("index out of bounds: {} {}", $arg1, $arg2))
+				print(text("index out of bounds: {} >= {}", $arg1, $arg2))
 				@aeon_fatal()
-		elseif ($uop == 16) ; >
+		elseif ($uop == 17) ; >
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($arg1 > $arg2)
-		elseif ($uop == 17) ; >=
+		elseif ($uop == 18) ; >=
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($arg1 >= $arg2)
-		elseif ($uop == 18) ; <
+		elseif ($uop == 19) ; <
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$aeon_op_arg_stack.append($arg1 < $arg2)
-		elseif ($uop == 19) ; <=
+		elseif ($uop == 20) ; <=
 			$arg2 = $aeon_op_arg_stack.last
 			$aeon_op_arg_stack.pop()
 			$arg1 = $aeon_op_arg_stack.last
@@ -767,12 +767,12 @@ function @aeon_run($funcInfo:number):number
 			$srcLen = @aeon_code($aeon_reg.0+4+$dstLen)
 			$src = @aeon_load($aeon_reg.0+5+$dstLen, $srcLen)
 
-			if $op == 13; !
+			if $op == 14; !
 				if $kind == {{.KindBool}}
 					@aeon_store($aeon_reg.0+2, $dstLen, !$src)
 				else
 					@__builtin_panic("bad ! operand")
-			elseif $op == 14; -
+			elseif $op == 15; -
 				if $kind == {{.KindInt}}
 					@aeon_store($aeon_reg.0+2, $dstLen, -$src)
 				elseif $kind == {{.KindFloat}}

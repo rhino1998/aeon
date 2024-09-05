@@ -988,7 +988,7 @@ func (t *Interface) ImplementedBy(i Type) bool {
 		}
 		return t.Methods().Subset(i.Methods(false))
 	case *Pointer:
-		switch pointee := i.Pointee().(type) {
+		switch pointee := Dereference(i.Pointee()).(type) {
 		case *Derived:
 			return t.Methods().Subset(pointee.Methods(true))
 		default:

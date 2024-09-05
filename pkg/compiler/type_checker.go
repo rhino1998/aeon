@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 
 	"github.com/rhino1998/aeon/pkg/compiler/air"
@@ -9,6 +10,7 @@ import (
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
 	"github.com/rhino1998/aeon/pkg/compiler/types"
 	"github.com/rhino1998/aeon/pkg/parser"
+	"github.com/rhino1998/aeon/pkg/topological"
 )
 
 func (c *Compiler) resolveProgramTypes(prog *Program) (err error) {
@@ -41,8 +43,32 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 		typ.SetUnderlying(newTyp)
 	}
 
-	for _, g := range pkg.Globals() {
-		err := c.resolveGlobalTypes(pkg, g)
+	// check for circular dependencies
+	for _, symbol := range pkg.Globals() {
+		global := symbol.Dereference().(*Variable)
+		deps := global.SymbolDependencies(nil)
+
+		if slices.ContainsFunc(deps, func(sym *SymbolReference) bool {
+			return sym.QualifiedName() == global.QualifiedName()
+		}) {
+			errs.Add(global.WrapError(fmt.Errorf("circular dependency in global %s", global.Name())))
+		}
+	}
+
+	globalSymbolsSorted, err := topological.SortFunc(
+		mapSlice(pkg.Globals(), (*Variable).Reference),
+		(*SymbolReference).QualifiedName,
+		func(s *SymbolReference) []*SymbolReference {
+			return s.Dereference().(*Variable).SymbolDependencies(nil)
+		},
+	)
+	if err != nil {
+		errs.Add(err)
+	}
+
+	for _, symbol := range globalSymbolsSorted {
+		global := symbol.Dereference().(*Variable)
+		err := c.resolveGlobalTypes(pkg, global)
 		if err != nil {
 			errs.Add(err)
 		}
@@ -162,8 +188,6 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 		if !types.IsResolvable(typ) {
 			errs.Add(g.WrapError(fmt.Errorf("type %s is unknown", typ)))
 		}
-
-		g.SetType(typ)
 	}
 
 	if g.expr != nil {
@@ -195,7 +219,6 @@ func (c *Compiler) resolveStatementTypes(stmt Statement) (err error) {
 			}
 
 			stmt.Type = typ
-			stmt.Variable.SetType(stmt.Type)
 		}
 
 		if stmt.Expression != nil {

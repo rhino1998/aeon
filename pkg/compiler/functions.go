@@ -246,7 +246,7 @@ type CallExpression struct {
 }
 
 func (e *CallExpression) Type() types.Type {
-	switch ftype := e.Function.Type().(type) {
+	switch ftype := types.Resolve(e.Function.Type()).(type) {
 	case *types.Function:
 		return ftype.Return
 	case *types.TypeType:
