@@ -166,15 +166,6 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 		err = errs.Defer(err)
 	}()
 
-	if g.Type() != nil {
-		typ := types.Dereference(g.Type())
-
-		g.typ, err = c.resolveTypes(g.Position, typ)
-		if err != nil {
-			errs.Add(g.WrapError(fmt.Errorf("global variable %s has invalid type: %v", g.Name(), typ)))
-		}
-	}
-
 	if g.expr != nil {
 		expr, err := c.resolveExpressionTypes(g.expr, g.Type())
 		if err != nil {
@@ -182,6 +173,15 @@ func (c *Compiler) resolveGlobalTypes(pkg *Package, g *Variable) (err error) {
 		}
 
 		g.expr = expr
+	}
+
+	if g.Type() != nil {
+		typ := g.Type()
+
+		g.typ, err = c.resolveTypes(g.Position, typ)
+		if err != nil {
+			errs.Add(g.WrapError(fmt.Errorf("global variable %s has invalid type: %v", g.Name(), typ)))
+		}
 	}
 
 	return nil

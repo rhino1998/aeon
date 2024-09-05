@@ -34,7 +34,7 @@ func (v *Variable) Name() string {
 }
 
 func (v *Variable) Type() types.Type {
-	if v.typ == nil {
+	if v.typ == nil || v.typ == types.Unknown {
 		return v.expr.Type()
 	}
 
