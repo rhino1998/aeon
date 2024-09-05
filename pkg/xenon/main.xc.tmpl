@@ -173,7 +173,20 @@ function @__builtin_panic($s:text)
 
 
 function @aeon_vtable($type:number, $name:text):number
-	{{range $type, $typeEntry := .VTable}}if ($type == {{$type}}); {{$typeEntry.Name}}{{"\n\t\t"}}{{range $name, $addr := $typeEntry.Data}}if ($name == "{{$name}}"){{"\n\t\t\t"}}return {{$addr}}{{"\n\t\t"}}{{end}}@__builtin_panic(text("invalid vtable lookup {} {}", $type, $name)){{"\n\t"}}{{end}}
+	{{range $type, $typeEntry := .VTable}}if ($type == {{$type}}); {{$typeEntry.Name}}{{"\n\t\t"}}{{range $name, $addr := $typeEntry.Data}}if ($name == "{{$name}}"){{"\n\t\t\t"}}return {{$addr}}{{"\n\t\t"}}{{end}}{{"\n\t"}}{{end}}
+	@__builtin_panic(text("invalid vtable lookup {} {}", $type, $name))
+
+function @aeon_stack_size($addr:number):number
+	{{range $funcAddr, $layout := .StackLayouts}}if ($addr == {{$funcAddr}}){{"\n\t\t"}}return {{len $layout }}{{"\n\t"}}{{end}}
+	@__builtin_panic(text("invalid function stack size lookup {}", $addr))
+
+function @aeon_stack_layout($addr:number, $local:number):number
+	{{range $funcAddr, $layout := .StackLayouts}}if ($addr == {{$funcAddr}}){{"\n\t\t"}}{{range $i, $type := $layout}}if ($local == {{$i}}){{"\n\t\t\t"}}return {{$type}}{{"\n\t\t"}}{{end}}{{"\n\t"}}{{end}}
+	@__builtin_panic(text("invalid function stack layout lookup {} {}", $addr, $local))
+
+function @aeon_global_layout($global:number):number
+	{{range $global, $type := .GlobalLayout}}if ($global == {{$global}}){{"\n\t\t"}}return {{$type}}{{"\n\t\t"}}{{"\n\t"}}{{end}}
+	@__builtin_panic(text("invalid global layout lookup {} {}", $global))
 
 ; Heap
 var $aeon_heap_start:number
@@ -609,6 +622,9 @@ function @aeon_gc_scan_type($type:number, $addr:number)
 		$addr = $aeon_gc_scan_addrs.last
 		$aeon_gc_scan_addrs.pop()
 
+		var $name = @aeon_str_load(@aeon_vtable($type, "#name"))
+		print(text("scanning {} at {}", $name, $addr))
+
 		if !@aeon_vtable($type, "#has-pointer")
 			continue
 
@@ -623,13 +639,38 @@ function @aeon_gc_scan_type($type:number, $addr:number)
 
 function @aeon_gc_scan()
 	; TODO: global map
-			
 	
+	var $addr = 1
+	var $global = 0
+	var $type = 0
+	var $size = 0
+	while $addr < {{.GlobalSize}}
+		$type = @aeon_global_layout($global)
+		$size = @aeon_vtable($type, "#size")
+		@aeon_gc_scan_type($type, $addr)
+		$addr += $size
+		$global++
+
+	var $i = 1
+	while $i < $aeon_stack_trace.size
+		var $ftype = @aeon_mem_load($aeon_stack_trace.$i)
+
+		if $ftype == 2
+			var $faddr = @aeon_mem_load($aeon_stack_trace.$i+3)
+			var $fsize = @aeon_stack_size($faddr)
+			repeat $fsize ($local)
+				$type = @aeon_stack_layout($faddr, $local)
+				$size = @aeon_vtable($type, "#size")
+				@aeon_gc_scan_type($type, $addr)
+				$addr += $size
+		
+		$i+=2
 
 function @aeon_gc($size:number)
-	if $aeon_str_heap_index + $size < $aeon_str_heap_end
-		; skip GC if we're not using much memory
-		return
+	; if $aeon_str_heap_index + $size < $aeon_str_heap_end
+	; 	; skip GC if we're not using much memory
+	; 	return
+	print("GC")
 
 	$aeon_gc_str_heap_start = $aeon_str_heap_start
 	$aeon_gc_str_heap_index = $aeon_str_heap_index
@@ -712,6 +753,9 @@ function @aeon_run($funcInfo:number):number
 
 			$kind = @aeon_code($aeon_reg.0+2+$dstLen)
 			$op = @aeon_code($aeon_reg.0+3+$dstLen)
+
+			if $op == 4 && $kind == {{.KindString}}; string add
+				@aeon_gc(0)
 
 			$leftLen = @aeon_code($aeon_reg.0+4+$dstLen)
 			$left = @aeon_load($aeon_reg.0+5+$dstLen, $leftLen)

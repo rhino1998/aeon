@@ -17,6 +17,9 @@ type Program struct {
 	types    map[types.Name]types.Type
 	strings  map[air.String]struct{}
 
+	globalSize   air.Size
+	globalLayout []types.Type
+
 	registers int
 	bytecode  air.Snippet
 }
@@ -95,34 +98,12 @@ func (p *Program) Strings() []air.String {
 	return sortedMapKeysByKey(p.strings)
 }
 
-func (p *Program) GlobalSize() (air.Size, error) {
-	var size air.Size
-	for _, global := range p.Globals() {
-		typSize, err := air.TypeSize(global.Type())
-		if err != nil {
-			return 0, fmt.Errorf("global %s: %w", global.Name(), err)
-		}
+func (p *Program) GlobalLayout() []types.Type {
+	return p.globalLayout
+}
 
-		size += typSize
-	}
-
-	externTypeSize, err := air.TypeSize(air.ExternFuncTuple)
-	if err != nil {
-		return 0, fmt.Errorf("extern func type: %w", err)
-	}
-
-	size += externTypeSize * air.Size(len(p.ExternFuncs()))
-
-	funcTypeSize, err := air.TypeSize(air.FuncTuple)
-	if err != nil {
-		return 0, fmt.Errorf("func type: %w", err)
-	}
-
-	size += funcTypeSize * air.Size(len(p.Functions()))
-
-	size += 1
-
-	return size, nil
+func (p *Program) GlobalSize() air.Size {
+	return p.globalSize
 }
 
 func (p *Program) registerType(t types.Type) {
@@ -138,59 +119,6 @@ func (p *Program) registerType(t types.Type) {
 		ptrType := types.NewPointer(t)
 		p.registerType(ptrType)
 	}
-}
-
-func (p *Program) GlobalLayout() ([]TypeSlot, error) {
-	layout := make([]TypeSlot, 0)
-	var offset air.Size
-
-	addLayout := func(t types.Type) error {
-		layout = append(layout, TypeSlot{
-			Offset: offset,
-			Type:   t,
-		})
-		typSize, err := air.TypeSize(t)
-		if err != nil {
-			return err
-		}
-		offset += typSize
-
-		return nil
-	}
-
-	for _, global := range p.Globals() {
-		err := addLayout(global.Type())
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	for range p.ExternFuncs() {
-		err := addLayout(air.ExternFuncTuple)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	for range p.Functions() {
-		err := addLayout(air.FuncTuple)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	for _, drv := range p.DerivedTypes() {
-		var _ = drv
-		// TODO: resolve method functions
-		// for range drv.MethodFunctions() {
-		// 	addLayout(funcType)
-		// }
-		// for range drv.PtrMethodFunctions() {
-		// 	addLayout(funcType)
-		// }
-	}
-
-	return layout, nil
 }
 
 // TODO: topological sort by import

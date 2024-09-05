@@ -2,7 +2,6 @@ package air
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/rhino1998/aeon/pkg/compiler/kinds"
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
@@ -140,33 +139,6 @@ type Immediate interface {
 	Kind() kinds.Kind
 }
 
-type Struct map[string]any
-
-type Tuple []any
-
-func (t Tuple) String() string {
-	var parts []string
-	for _, e := range t {
-		parts = append(parts, fmt.Sprintf("%v", e))
-	}
-
-	return fmt.Sprintf("Tuple(%s)", strings.Join(parts, ", "))
-}
-
-type Slice []any
-
-type Closure struct {
-	Addr      Addr
-	EnvStart  Addr
-	EnvLength int
-}
-
-type Map map[any]any
-
-func (m Map) String() string {
-	return fmt.Sprintf("Map(%v)", map[any]any(m))
-}
-
 type Nop struct{}
 
 func (Nop) String() string {
@@ -188,7 +160,7 @@ func (m Mov) Name() string {
 }
 
 func (m Mov) String() string {
-	return fmt.Sprintf("(mov %v %v %v", m.Size, m.Dst, m.Src)
+	return fmt.Sprintf("(mov %v %v %v)", m.Size, m.Dst, m.Src)
 }
 
 type Convert[To, From any] struct {

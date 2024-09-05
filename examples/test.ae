@@ -12,5 +12,5 @@ var z = 5 * y
 
 #init
 func main() {
-  __builtin_panic("Hello, World!")
+  x := "a" + "a"
 }

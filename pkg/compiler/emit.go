@@ -3,6 +3,7 @@ package compiler
 import (
 	"context"
 	"fmt"
+	"log"
 	"slices"
 	"strconv"
 
@@ -84,7 +85,8 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 		}
 	}
 
-	_, _, err := prog.bytecode.ResolveGlobals(0)
+	var err error
+	prog.globalSize, prog.globalLayout, err = prog.bytecode.ResolveGlobals(0)
 	if err != nil {
 		return err
 	}
@@ -97,6 +99,10 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 	err = prog.bytecode.ResolveStrings(prog.Strings())
 	if err != nil {
 		return err
+	}
+
+	for i, bc := range prog.bytecode {
+		log.Printf("%02x: %v", i, bc)
 	}
 
 	prog.bytecode.OptimizeOperands()
@@ -188,7 +194,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 	// TODO: make these truly global
 	for _, externFunc := range pkg.prog.root.ExternFunctions() {
 		fName := externFunc.Name()
-		hdr := scope.newGlobal(NewVariable("@"+fName, air.FuncTuple, scope.symbols))
+		hdr := scope.newGlobal(NewVariable("@"+fName, air.ExternFuncTuple, scope.symbols))
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(air.Int(1)),
 			NewLiteral(air.String(externFunc.Name())),
@@ -206,7 +212,7 @@ func (c *Compiler) compilePackageVarInit(ctx context.Context, pkg *Package) (*Fu
 
 	for _, externFunc := range pkg.ExternFunctions() {
 		fName := externFunc.Name()
-		hdr := scope.newGlobal(NewVariable("@"+fName, air.FuncTuple, scope.symbols))
+		hdr := scope.newGlobal(NewVariable("@"+fName, air.ExternFuncTuple, scope.symbols))
 		hdrBC, err := c.compileBCValuesLiteral(ctx, pkg.prog, []Expression{
 			NewLiteral(air.Int(1)),
 			NewLiteral(air.String(externFunc.Name())),

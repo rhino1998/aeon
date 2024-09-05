@@ -48,6 +48,8 @@ type xenonContext struct {
 	PageSize     int
 	NumCodePages int
 	Code         map[PageAddr]string
+	GlobalLayout []int
+	StackLayouts map[int][]int
 	VarInitFuncs []int
 	InitFuncs    []int
 	UpdateFuncs  []int
@@ -97,11 +99,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	xeCtx.NumStrPages = 1
 	xeCtx.NumRegisters = prog.Registers()
 	xeCtx.MaxLoadDepth = 5
-	globalSize, err := prog.GlobalSize()
-	if err != nil {
-		return err
-	}
-	xeCtx.GlobalSize = int(globalSize)
+	xeCtx.GlobalSize = int(prog.GlobalSize())
 	xeCtx.VTable = make(VTable)
 	xeCtx.Debug = logger.Handler().Enabled(ctx, slog.LevelDebug)
 	xeCtx.OPSep = "\x9B"
@@ -185,6 +183,13 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 			return fmt.Errorf("failed to get type size: %w", err)
 		}
 
+		hasPointer := types.HasPointer(typ)
+		if hasPointer {
+			entry.Data["#has-pointer"] = 1
+		} else {
+			entry.Data["#has-pointer"] = 0
+		}
+
 		if typSize > 1 {
 			entry.Data["#pointer"] = typeMap[types.NewPointer(typ).GlobalName()]
 		}
@@ -195,6 +200,37 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		case *types.Pointer:
 			entry.Data["#pointee"] = typeMap[typ.Pointee().GlobalName()]
 		}
+	}
+
+	xeCtx.GlobalLayout = make([]int, 0, xeCtx.GlobalSize)
+	for _, typ := range prog.GlobalLayout() {
+		typeID, ok := typeMap[typ.GlobalName()]
+		if !ok {
+			return fmt.Errorf("type %s not found", typ.GlobalName())
+		}
+
+		xeCtx.GlobalLayout = append(xeCtx.GlobalLayout, typeID)
+	}
+
+	xeCtx.StackLayouts = make(map[int][]int)
+
+	// TODO: maybe use normal tuple types as stack layouts?
+	for _, f := range prog.AllFunctions() {
+		layout, err := f.StackLayout()
+		if err != nil {
+			return err
+		}
+
+		flatLayout := make([]int, 0, len(layout))
+		for _, slot := range layout {
+			typeID, ok := typeMap[slot.Type.GlobalName()]
+			if !ok {
+				return fmt.Errorf("type %s not found", slot.Type.GlobalName())
+			}
+			flatLayout = append(flatLayout, typeID)
+		}
+
+		xeCtx.StackLayouts[int(f.Addr())] = flatLayout
 	}
 
 	xeCtx.Code = make(map[PageAddr]string)

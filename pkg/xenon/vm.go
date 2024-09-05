@@ -380,18 +380,14 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 	// r.printVTables()
 	//
-	globalLayout, err := prog.GlobalLayout()
-	if err != nil {
-		return nil, err
-	}
 
-	for _, slot := range globalLayout {
-		typSize, err := air.TypeSize(slot.Type)
+	for _, typ := range prog.GlobalLayout() {
+		typSize, err := air.TypeSize(typ)
 		if err != nil {
 			return nil, err
 		}
 		r.globalMap = append(r.globalMap,
-			RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Size: typSize})
+			RuntimeTypeSlot{Type: typeIDFromName[typ.GlobalName()], Size: typSize})
 	}
 
 	for _, fun := range prog.AllFunctions() {
@@ -1349,11 +1345,7 @@ func (r *Runtime) RunFunc(ctx context.Context, funcAddr Addr) (err error) {
 		r.registers[reg] = 0
 	}
 
-	globalSize, err := r.prog.GlobalSize()
-	if err != nil {
-		return err
-	}
-
+	globalSize := r.prog.GlobalSize()
 	r.setSP(Addr(globalSize))
 	for range len(r.registers) {
 		r.push(0)
