@@ -52,9 +52,8 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 			return sym.QualifiedName() == global.QualifiedName()
 		}) {
 			errs.Add(global.WrapError(fmt.Errorf("circular dependency in global %s", global.Name())))
+			global.expr = &UnknownExpression{ErrorWrapper: global.expr}
 		}
-
-		global.expr = &UnknownExpression{ErrorWrapper: global.expr}
 	}
 
 	globalSymbolsSorted, err := topological.SortFunc(
