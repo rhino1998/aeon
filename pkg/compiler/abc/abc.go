@@ -7,7 +7,21 @@ import (
 	"github.com/rhino1998/aeon/pkg/compiler/operators"
 )
 
+type Program struct {
+	Bytecode Snippet
+	Labels   map[air.Label]int
+}
+
 type Snippet []Instruction
+
+func (s *Snippet) Length() int {
+	var l int
+	for _, ins := range *s {
+		l += len(ins)
+	}
+
+	return l
+}
 
 func (s *Snippet) Add(f ...Instruction) {
 	*s = append(*s, f...)
@@ -31,19 +45,20 @@ const (
 	App   = 0x08
 )
 
-func Compile(instructions []air.Instruction) Snippet {
-	var bc Snippet
+func Compile(instructions []air.Instruction) Program {
+	p := Program{
+		Labels: make(map[air.Label]int),
+	}
 
 	var offset int
-	labels := make(map[air.Label]int)
 	for _, instruction := range instructions {
 		switch instruction := instruction.(type) {
 		case air.LabelledInstruction:
 			for _, label := range instruction.Labels {
-				if _, ok := labels[label]; ok {
+				if _, ok := p.Labels[label]; ok {
 					panic(fmt.Sprintf("bug: duplicate label %s", label))
 				}
-				labels[label] = offset
+				p.Labels[label] = offset
 			}
 		}
 
@@ -52,65 +67,65 @@ func Compile(instructions []air.Instruction) Snippet {
 
 	offset = 0
 	for _, instruction := range instructions {
-		i := compileInstruction(instruction, offset, labels)
-		bc = append(bc, i)
-		offset += len(i)
+		ins := p.compileInstruction(instruction, offset)
+		p.Bytecode.Add(ins)
+		offset += len(ins)
 	}
 
-	return bc
+	return p
 }
 
-func compileInstruction(instruction air.Instruction, current int, labels map[air.Label]int) Instruction {
+func (p *Program) compileInstruction(instruction air.Instruction, current int) Instruction {
 	var s Instruction
 	switch ins := instruction.(type) {
 	case air.LabelledInstruction:
-		return compileInstruction(ins.Instruction, current, labels)
+		return p.compileInstruction(ins.Instruction, current)
 	case air.Nop:
 		s.Add(Nop)
 	case air.Mov:
 		s.Add(Mov)
 		s.Add(float64(ins.Size))
-		dst := compileOperand(ins, ins.Dst, 0, labels)
+		dst := p.compileOperand(ins, ins.Dst, 0)
 		s.Add(float64(len(dst)))
 		s.Add(dst...)
-		src := compileOperand(ins, ins.Src, 0, labels)
+		src := p.compileOperand(ins, ins.Src, 0)
 		s.Add(float64(len(src)))
 		s.Add(src...)
 	case air.Jmp:
 		s.Add(Jmp)
-		target := compileOperand(ins, ins.Target, current, labels)
+		target := p.compileOperand(ins, ins.Target, current)
 		s.Add(float64(len(target)))
 		s.Add(target...)
-		cond := compileOperand(ins, ins.Cond, current, labels)
+		cond := p.compileOperand(ins, ins.Cond, current)
 		s.Add(float64(len(cond)))
 		s.Add(cond...)
 	case air.BinOp:
 		s.Add(Binop)
-		dst := compileOperand(ins, ins.Dst, 0, labels)
+		dst := p.compileOperand(ins, ins.Dst, 0)
 		s.Add(float64(len(dst)))
 		s.Add(dst...)
 		s.Add(float64(ins.Kind))
 		s.Add(float64(BinaryOperatorUOP(ins.Op)))
-		left := compileOperand(ins, ins.Left, 0, labels)
+		left := p.compileOperand(ins, ins.Left, 0)
 		s.Add(float64(len(left)))
 		s.Add(left...)
-		right := compileOperand(ins, ins.Right, 0, labels)
+		right := p.compileOperand(ins, ins.Right, 0)
 		s.Add(float64(len(right)))
 		s.Add(right...)
 	case air.UnOp:
 		s.Add(Unop)
-		dst := compileOperand(ins, ins.Dst, 0, labels)
+		dst := p.compileOperand(ins, ins.Dst, 0)
 		s.Add(float64(len(dst)))
 		s.Add(dst...)
 		s.Add(float64(ins.Kind))
 		s.Add(float64(UnaryOperatorUOP(ins.Op)))
-		src := compileOperand(ins, ins.Src, 0, labels)
+		src := p.compileOperand(ins, ins.Src, 0)
 		s.Add(float64(len(src)))
 		s.Add(src...)
 	case air.Cal:
 		s.Add(Call)
 		s.Add(float64(ins.Line))
-		fun := compileOperand(ins, ins.Func, 0, labels)
+		fun := p.compileOperand(ins, ins.Func, 0)
 		s.Add(float64(len(fun)))
 		s.Add(fun...)
 	case air.Ret:
@@ -118,21 +133,21 @@ func compileInstruction(instruction air.Instruction, current int, labels map[air
 		s.Add(float64(ins.Args))
 	case air.Alc:
 		s.Add(Alc)
-		dst := compileOperand(ins, ins.Dst, 0, labels)
+		dst := p.compileOperand(ins, ins.Dst, 0)
 		s.Add(float64(len(dst)))
 		s.Add(dst...)
-		size := compileOperand(ins, ins.Size, 0, labels)
+		size := p.compileOperand(ins, ins.Size, 0)
 		s.Add(float64(len(size)))
 		s.Add(size...)
 	case air.App:
 		s.Add(App)
-		dst := compileOperand(ins, ins.Dst, 0, labels)
+		dst := p.compileOperand(ins, ins.Dst, 0)
 		s.Add(float64(len(dst)))
 		s.Add(dst...)
-		src := compileOperand(ins, ins.Src, 0, labels)
+		src := p.compileOperand(ins, ins.Src, 0)
 		s.Add(float64(len(src)))
 		s.Add(src...)
-		elem := compileOperand(ins, ins.Elem, 0, labels)
+		elem := p.compileOperand(ins, ins.Elem, 0)
 		s.Add(float64(len(elem)))
 		s.Add(elem...)
 		s.Add(float64(ins.Size))
@@ -143,7 +158,7 @@ func compileInstruction(instruction air.Instruction, current int, labels map[air
 	return s
 }
 
-func compileOperand(ins air.Instruction, operand *air.Operand, current int, labels map[air.Label]int) Instruction {
+func (p *Program) compileOperand(ins air.Instruction, operand *air.Operand, current int) Instruction {
 	var s Instruction
 	switch operand.Kind {
 	case air.OperandKindImmediate:
@@ -167,21 +182,21 @@ func compileOperand(ins air.Instruction, operand *air.Operand, current int, labe
 	case air.OperandKindRegister:
 		s.Add(UOPImmediate, float64(operand.Value.(air.Register)), UOPRegister)
 	case air.OperandKindIndirect:
-		s.Add(compileOperand(ins, operand.Value.(air.Indirect).Ptr, current, labels)...)
+		s.Add(p.compileOperand(ins, operand.Value.(air.Indirect).Ptr, current)...)
 		s.Add(UOPIndirect)
 	case air.OperandKindBinary:
-		s.Add(compileOperand(ins, operand.Value.(air.BinaryOperand).Left, current, labels)...)
-		s.Add(compileOperand(ins, operand.Value.(air.BinaryOperand).Right, current, labels)...)
+		s.Add(p.compileOperand(ins, operand.Value.(air.BinaryOperand).Left, current)...)
+		s.Add(p.compileOperand(ins, operand.Value.(air.BinaryOperand).Right, current)...)
 		s.Add(BinaryOperatorUOP(operand.Value.(air.BinaryOperand).Op))
 	case air.OperandKindUnary:
-		s.Add(compileOperand(ins, operand.Value.(air.UnaryOperand).A, current, labels)...)
+		s.Add(p.compileOperand(ins, operand.Value.(air.UnaryOperand).A, current)...)
 		s.Add(UnaryOperatorUOP(operand.Value.(air.UnaryOperand).Op))
 	case air.OperandKindVTableLookup:
-		s.Add(compileOperand(ins, operand.Value.(air.VTableLookup).Type, current, labels)...)
-		s.Add(compileOperand(ins, operand.Value.(air.VTableLookup).Method, current, labels)...)
+		s.Add(p.compileOperand(ins, operand.Value.(air.VTableLookup).Type, current)...)
+		s.Add(p.compileOperand(ins, operand.Value.(air.VTableLookup).Method, current)...)
 		s.Add(UOPVTableLookup)
 	case air.OperandKindLabel:
-		label, ok := labels[operand.Value.(air.Label)]
+		label, ok := p.Labels[operand.Value.(air.Label)]
 		if !ok {
 			panic(fmt.Errorf("unresolved label %s", operand.Value.(air.Label)))
 		}

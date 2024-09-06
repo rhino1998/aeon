@@ -2,15 +2,58 @@ package main
 
 extern func __builtin_panic(string)
 
-type vec4 (float, float, float, float)
+extern func delta() float
 
-var w = z*x*y
+type list struct {
+  head *node
+  count int
+}
 
-var x = y
-var y = 5
-var z = 5 * y
+func (l *list) length() int {
+  return l.count
+}
 
-#init
+func (l *list) pushBack(value int) {
+  n := new(node)
+  n.value = value
+  l.count++
+  if l.head == nil {
+    l.head = n
+  } else {
+    current := l.head
+    for 0;current.next != nil;0 {
+      current = current.next
+    }
+    current.next = n
+  }
+}
+
+func (l *list) popFront() int {
+  if l.head == nil {
+    __builtin_panic("popFront on empty list")
+  }
+  l.count--
+  n := l.head
+  l.head = n.next
+  return n.value
+}
+
+type node struct {
+  next *node
+  value int
+}
+
+var tick = 0
+
+var l list
+
+#update
 func main() {
-  x := "a" + "a"
+  tick++
+  if l.length() > 10 {
+    print(l.popFront())
+  }
+
+  l.pushBack(tick)
+  printf("tick %d: %f", tick, delta())
 }

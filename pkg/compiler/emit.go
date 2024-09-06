@@ -33,8 +33,6 @@ func (c *Compiler) compileBC(ctx context.Context, prog *Program) error {
 
 	prog.values = BuiltinValues(prog.Registers(), prog.root)
 	prog.registerType(types.Void)
-	prog.registerType(types.NewPointer(types.Void))
-	prog.registerType(types.Kind(kinds.Int))
 	prog.registerType(TypeInt)
 	prog.registerType(TypeFloat)
 	prog.registerType(TypeBool)

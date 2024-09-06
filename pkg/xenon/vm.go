@@ -32,6 +32,13 @@ var ErrRuntimePanic = fmt.Errorf("panic")
 
 func DefaultExternFuncs() RuntimeExternFuncs {
 	return RuntimeExternFuncs{
+		"delta": {
+			ArgSize:    0,
+			ReturnSize: 1,
+			Func: func(r *Runtime, s ...float64) error {
+				return r.storeMem(air.Addr(s[0]), 0)
+			},
+		},
 		"__builtin_assert": {
 			ArgSize:    2,
 			ReturnSize: 0,
@@ -153,7 +160,7 @@ func DefaultExternFuncs() RuntimeExternFuncs {
 	}
 }
 
-const PageSize = 65535 // annoyingly not a power of 2
+const PageSize = 1000 //65535 // annoyingly not a power of 2
 
 type RuntimeExternFuncs map[String]RuntimeExternFuncEntry
 
@@ -193,7 +200,9 @@ type gcState struct {
 func (g *gcState) addStrVar(v, ptr Addr) {
 	if ptr >= g.strHeapStart && ptr < g.strHeapEnd {
 		g.strVars = append(g.strVars, v)
-		g.strPtrs = append(g.strPtrs, ptr)
+		if !slices.Contains(g.strPtrs, ptr) {
+			g.strPtrs = append(g.strPtrs, ptr)
+		}
 	}
 
 }
@@ -202,6 +211,8 @@ func (g *gcState) addHeapVar(v, ptr Addr) {
 	if ptr >= g.heapStart && ptr < g.heapEnd {
 		g.heapVars = append(g.heapVars, v)
 		g.heapPtrs = append(g.heapPtrs, ptr)
+
+		log.Println(v, ptr)
 
 		prevAlloc := g.heapStart
 		for _, alloc := range g.heapAllocs {
@@ -238,16 +249,15 @@ type Runtime struct {
 	strHeapIndex Addr
 	strPages     [][PageSize]String
 
-	vtables   map[int]map[string]float64
-	globalMap []RuntimeTypeSlot
-	funcMap   map[int][]RuntimeTypeSlot
+	vtables map[int]map[string]float64
+	globals []int
+	funcMap map[int][]RuntimeTypeSlot
 }
 
 func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, strPages int, stdout io.Writer, debug bool) (*Runtime, error) {
 	heapStart := Addr(memPages * PageSize / 2)
 
-	// TODO: do this elsewhere
-	bytecode := abc.Compile(prog.Instructions())
+	abcProg := abc.Compile(prog.Instructions())
 
 	r := &Runtime{
 		prog:        prog,
@@ -256,7 +266,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 
 		debug: debug,
 
-		codePages: make([][PageSize]float64, (len(bytecode)+PageSize-1)/PageSize),
+		codePages: make([][PageSize]float64, (abcProg.Bytecode.Length()+PageSize)/PageSize),
 		memPages:  make([][PageSize]float64, memPages),
 		strPages:  make([][PageSize]String, strPages),
 		registers: make([]float64, prog.Registers()),
@@ -287,7 +297,7 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	r.strHeapEnd = Addr(strPages * PageSize)
 
 	var codeAddr Addr
-	for _, instruction := range bytecode {
+	for _, instruction := range abcProg.Bytecode {
 		for _, uop := range instruction {
 			page, pageAddr := r.splitAddr(codeAddr)
 			r.codePages[page][pageAddr] = uop
@@ -352,27 +362,34 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 		}
 	}
 
+	getTypeID := func(typ types.Type) int {
+		typeID, ok := typeIDFromName[typ.GlobalName()]
+		if !ok {
+			panic(fmt.Sprintf("runtime: could not resolve type %s", typ.GlobalName()))
+		}
+		return typeID
+	}
+
 	for typeID, typ := range prog.Types() {
 		switch typ := types.Resolve(typ).(type) {
 		case *types.Pointer:
-			r.vtables[typeID]["#pointee"] = float64(typeIDFromName[typ.Pointee().GlobalName()])
-			// TODO: product types somehow
+			r.vtables[typeID]["#pointee"] = float64(getTypeID(typ.Pointee()))
 		case *types.Array:
 			r.vtables[typeID]["#length"] = float64(typ.Length())
-			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
+			r.vtables[typeID]["#elem"] = float64(getTypeID(typ.Elem()))
 		case *types.Tuple:
 			r.vtables[typeID]["#elems"] = float64(len(typ.Elems()))
 			for i, elem := range typ.Elems() {
-				r.vtables[typeID][fmt.Sprintf("#elem.%d", i)] = float64(typeIDFromName[elem.GlobalName()])
+				r.vtables[typeID][fmt.Sprintf("#elem.%d", i)] = float64(getTypeID(elem))
 			}
 		case *types.Slice:
-			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
+			r.vtables[typeID]["#elem"] = float64(getTypeID(typ.Elem()))
 		case *types.Variadic:
-			r.vtables[typeID]["#elem"] = float64(typeIDFromName[typ.Elem().GlobalName()])
+			r.vtables[typeID]["#elem"] = float64(getTypeID(typ.Elem()))
 		case *types.Struct:
 			r.vtables[typeID]["#fields"] = float64(len(typ.Fields()))
 			for i, field := range typ.Fields() {
-				r.vtables[typeID][fmt.Sprintf("#field.%d", i)] = float64(typeIDFromName[field.Type.GlobalName()])
+				r.vtables[typeID][fmt.Sprintf("#field.%d", i)] = float64(getTypeID(field.Type))
 				r.vtables[typeID][fmt.Sprintf("#field.%d.name", i)] = float64(strMap[String(field.Name)])
 			}
 		}
@@ -381,13 +398,12 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 	// r.printVTables()
 	//
 
-	for _, typ := range prog.GlobalLayout() {
-		typSize, err := air.TypeSize(typ)
-		if err != nil {
-			return nil, err
-		}
-		r.globalMap = append(r.globalMap,
-			RuntimeTypeSlot{Type: typeIDFromName[typ.GlobalName()], Size: typSize})
+	ss := Size(1)
+	for i, typ := range prog.GlobalLayout() {
+		s, _ := air.TypeSize(typ)
+		log.Println(i, typ, int(s), int(ss))
+		ss += s
+		r.globals = append(r.globals, typeIDFromName[typ.GlobalName()])
 	}
 
 	for _, fun := range prog.AllFunctions() {
@@ -402,8 +418,12 @@ func NewRuntime(prog *compiler.Program, externs RuntimeExternFuncs, memPages, st
 			if err != nil {
 				return nil, err
 			}
+			typeID, ok := typeIDFromName[slot.Type.GlobalName()]
+			if !ok {
+				return nil, fmt.Errorf("could not resolve type %s", slot.Type.GlobalName())
+			}
 			funLayout = append(funLayout,
-				RuntimeTypeSlot{Type: typeIDFromName[slot.Type.GlobalName()], Size: typSize})
+				RuntimeTypeSlot{Type: typeID, Size: typSize})
 		}
 
 		r.funcMap[int(fun.Addr())] = funLayout
@@ -539,13 +559,16 @@ func (r *Runtime) gc(size Size) error {
 
 func (gc *gcState) scanPointers(r *Runtime) error {
 	var base Addr = 1
-	for _, slot := range r.globalMap {
+	for _, typ := range r.globals {
+		s, _ := r.LoadString(Addr(r.vtableLookup(typ, "#name")))
+		log.Println(s, r.vtableLookup(typ, "#size"), int(base))
 		var err error
-		err = gc.scanTypePointers(r, slot.Type, base)
+		err = gc.scanTypePointers(r, typ, base)
 		if err != nil {
 			return err
 		}
-		base += Addr(slot.Size)
+
+		base += Addr(r.vtableLookup(typ, "#size"))
 	}
 
 	for i := 1; i < len(r.funcTrace); i += 2 {
@@ -597,24 +620,24 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 	for len(slots) > 0 {
 		slot := slots[len(slots)-1]
 		slots = slots[:len(slots)-1]
-		kind := kinds.Kind(r.vtables[slot.Type]["#kind"])
+		kind := kinds.Kind(r.vtableLookup(slot.Type, "#kind"))
 
-		hasPointer := r.vtables[slot.Type]["#has-pointer"] == 1
+		hasPointer := r.vtableLookup(slot.Type, "#has-pointer") == 1
 		if !hasPointer {
 			continue
 		}
 
-		// val, err := r.loadMem(slot.Addr)
-		// if err != nil {
-		// 	return err
-		// }
-		//
-		// name, err := r.LoadString(Addr(r.vtables[slot.Type]["#name"]))
-		// if err != nil {
-		// 	return err
-		// }
-		//
-		// log.Printf("%v %s = %v", slot.Addr, string(name), val)
+		val, err := r.loadMem(slot.Addr)
+		if err != nil {
+			return err
+		}
+
+		name, err := r.LoadString(Addr(r.vtables[slot.Type]["#name"]))
+		if err != nil {
+			return err
+		}
+
+		log.Printf("%v %s = %v", slot.Addr, string(name), val)
 
 		switch kind {
 		case kinds.Nil, kinds.Void, kinds.Int, kinds.Bool, kinds.Float:
@@ -637,26 +660,31 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 				return err
 			}
 
+			if val == 0 {
+				continue
+			}
+
 			gc.addHeapVar(slot.Addr, Addr(val))
 
-			slots = append(slots, RuntimeTypeAddr{Type: int(r.vtables[slot.Type]["#pointee"]), Addr: Addr(val)})
+			elem := int(r.vtableLookup(slot.Type, "#pointee"))
+			elemSize := Size(r.vtableLookup(elem, "#size"))
+			if elemSize > 0 {
+				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: Addr(val)})
+			}
 		case kinds.Array:
-			length := int(r.vtables[slot.Type]["#length"])
-			elem := int(r.vtables[slot.Type]["#elem"])
-			elemSize := Size(r.vtables[elem]["#size"])
-			elemHasPointer := r.vtables[elem]["#has-pointer"] == 1
+			length := int(r.vtableLookup(slot.Type, "#length"))
+			elem := int(r.vtableLookup(slot.Type, "#elem"))
+			elemSize := Size(r.vtableLookup(elem, "#size"))
 
-			if elemHasPointer {
-				for i := 0; i < length; i++ {
-					slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(elemSize * Size(i))})
-				}
+			for i := 0; i < length; i++ {
+				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(elemSize * Size(i))})
 			}
 		case kinds.Tuple:
 			var totalOffset Size
-			elems := int(r.vtables[slot.Type]["#elems"])
+			elems := int(r.vtableLookup(slot.Type, "#elems"))
 			for i := 0; i < elems; i++ {
-				elem := int(r.vtables[slot.Type][fmt.Sprintf("#elem.%d", i)])
-				elemSize := Size(r.vtables[elem]["#size"])
+				elem := int(r.vtableLookup(slot.Type, fmt.Sprintf("#elem.%d", i)))
+				elemSize := Size(r.vtableLookup(elem, "#size"))
 
 				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(totalOffset)})
 
@@ -668,14 +696,13 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 				return err
 			}
 
-			size := kinds.Kind(r.vtables[int(typ)]["#size"])
+			size := kinds.Kind(r.vtableLookup(int(typ), "#size"))
 			if size == 0 {
 				// skip
 			} else if size == 1 {
 				slots = append(slots, RuntimeTypeAddr{Type: int(typ), Addr: slot.Addr.Offset(1)})
 			} else {
-				ptrTyp := kinds.Kind(r.vtables[int(typ)]["#pointer"])
-
+				ptrTyp := kinds.Kind(r.vtableLookup(int(typ), "#pointer"))
 				slots = append(slots, RuntimeTypeAddr{Type: int(ptrTyp), Addr: slot.Addr.Offset(1)})
 			}
 
@@ -692,28 +719,19 @@ func (gc *gcState) scanTypePointers(r *Runtime, typeID int, addr Addr) error {
 
 			gc.addHeapVar(slot.Addr, Addr(sliceData))
 
-			elem := int(r.vtables[slot.Type]["#elem"])
-			elemSize := Size(r.vtables[elem]["#size"])
-			elemKind := kinds.Kind(r.vtables[elem]["#kind"])
-			elemHasPointer := r.vtables[elem]["#has-pointer"] == 1
-			log.Println("slice", slot.Addr, sliceData, sliceCap, elem, elemKind, elemSize, elemHasPointer)
+			elem := int(r.vtableLookup(slot.Type, "#elem"))
+			elemSize := Size(r.vtableLookup(elem, "#size"))
 
-			if elemHasPointer {
-				for i := 0; i < int(sliceCap); i++ {
-					slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: Addr(sliceData).Offset(elemSize * Size(i))})
-				}
+			for i := 0; i < int(sliceCap); i++ {
+				log.Println("slice", i, sliceData, elemSize)
+				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: Addr(sliceData).Offset(elemSize * Size(i))})
 			}
 		case kinds.Struct:
-			hasPointer := r.vtables[slot.Type]["#has-pointer"] == 1
-			if !hasPointer {
-				continue
-			}
-
 			var totalOffset Size
-			elems := int(r.vtables[slot.Type]["#fields"])
+			elems := int(r.vtableLookup(slot.Type, "#fields"))
 			for i := 0; i < elems; i++ {
-				elem := int(r.vtables[slot.Type][fmt.Sprintf("#field.%d", i)])
-				elemSize := Size(r.vtables[elem]["#size"])
+				elem := int(r.vtableLookup(slot.Type, fmt.Sprintf("#field.%d", i)))
+				elemSize := Size(r.vtableLookup(elem, "#size"))
 
 				slots = append(slots, RuntimeTypeAddr{Type: elem, Addr: slot.Addr.Offset(totalOffset)})
 
@@ -742,50 +760,6 @@ func (gc *gcState) mark(r *Runtime) error {
 }
 
 func (gc *gcState) compact(r *Runtime) error {
-	gc.heapIndex = gc.heapStart
-	newAllocs := make([]Addr, 0)
-	for i := range gc.heapUsedAlloc {
-		alloc := gc.heapUsedAlloc[i]
-		size := gc.heapUsedSize[i]
-
-		for index := range gc.heapVarAllocs {
-			if gc.heapVarAllocs[index] != alloc {
-				continue
-			}
-
-			varAddr := gc.heapVars[index]
-			varVal, err := r.loadMem(varAddr)
-			if err != nil {
-				return err
-			}
-
-			log.Println("moving", alloc, varAddr, varVal, gc.heapIndex, varVal-float64(alloc))
-
-			err = r.storeMem(varAddr, float64(gc.heapIndex)+(varVal-float64(alloc)))
-			if err != nil {
-				return err
-			}
-		}
-
-		gc.heapIndex += Addr(size)
-		newAllocs = append(newAllocs, gc.heapIndex)
-	}
-
-	gc.heapIndex = gc.heapStart
-	for i := range gc.heapUsedAlloc {
-		alloc := gc.heapUsedAlloc[i]
-		size := gc.heapUsedSize[i]
-
-		err := r.memmove(gc.heapIndex, alloc, size)
-		if err != nil {
-			return err
-		}
-
-		gc.heapIndex += Addr(size)
-	}
-
-	gc.heapAllocs = newAllocs
-
 	gc.strHeapIndex = gc.strHeapStart
 	for _, ptr := range gc.strPtrs {
 		str, err := r.LoadString(ptr)
@@ -813,6 +787,51 @@ func (gc *gcState) compact(r *Runtime) error {
 
 		gc.strHeapIndex++
 	}
+
+	gc.heapIndex = gc.heapStart
+	newAllocs := make([]Addr, 0)
+	for i := range gc.heapUsedAlloc {
+		alloc := gc.heapUsedAlloc[i]
+		size := gc.heapUsedSize[i]
+
+		for index := range gc.heapVarAllocs {
+			if gc.heapVarAllocs[index] != alloc {
+				continue
+			}
+
+			varAddr := gc.heapVars[index]
+			varAlloc := gc.heapVarAllocs[index]
+			varVal, err := r.loadMem(varAddr)
+			if err != nil {
+				return err
+			}
+
+			log.Println("moving", alloc, varAddr, varVal, int(gc.heapIndex), varVal-float64(varAlloc))
+
+			err = r.storeMem(varAddr, float64(gc.heapIndex)+(varVal-float64(varAlloc)))
+			if err != nil {
+				return err
+			}
+		}
+
+		gc.heapIndex += Addr(size)
+		newAllocs = append(newAllocs, gc.heapIndex)
+	}
+
+	gc.heapIndex = gc.heapStart
+	for i := range gc.heapUsedAlloc {
+		alloc := gc.heapUsedAlloc[i]
+		size := gc.heapUsedSize[i]
+
+		err := r.memmove(gc.heapIndex, alloc, size)
+		if err != nil {
+			return err
+		}
+
+		gc.heapIndex += Addr(size)
+	}
+
+	gc.heapAllocs = newAllocs
 
 	return nil
 }
@@ -864,8 +883,8 @@ func (r *Runtime) printVTable(typeID int) {
 
 	switch kind := kinds.Kind(kind); kind {
 	case kinds.Pointer:
-		underlying := int(r.vtables[typeID]["#pointee"])
-		fmt.Fprintf(r.stdout, "  Pointer to %d %q\n", underlying, string(r.prog.Strings()[int(r.vtables[underlying]["#name"])]))
+		pointee := int(r.vtables[typeID]["#pointee"])
+		fmt.Fprintf(r.stdout, "  Pointer to %d %q\n", pointee, string(r.prog.Strings()[int(r.vtables[pointee]["#name"])]))
 	case kinds.Array:
 		elem := int(r.vtables[typeID]["#elem"])
 		length := int(r.vtables[typeID]["#length"])
@@ -1210,6 +1229,14 @@ func (r *Runtime) loadInternal(op Addr, length Addr) (float64, error) {
 	return stack[0], nil
 }
 
+func (r *Runtime) vtableLookup(typeID int, field string) float64 {
+	val, ok := r.vtables[typeID][field]
+	if !ok {
+		panic(fmt.Sprintf("runtime: could not resolve vtable %q for type %d", field, typeID))
+	}
+	return val
+}
+
 func (r *Runtime) load(op Addr) (float64, error) {
 	length, err := r.fetch(op)
 	if err != nil {
@@ -1321,10 +1348,12 @@ func (r *Runtime) Run(ctx context.Context) error {
 		}
 	}
 
-	for _, update := range r.prog.UpdateFunctions() {
-		err := r.RunFunc(ctx, update.InfoAddr())
-		if err != nil {
-			return r.panic(err)
+	for {
+		for _, update := range r.prog.UpdateFunctions() {
+			err := r.RunFunc(ctx, update.InfoAddr())
+			if err != nil {
+				return r.panic(err)
+			}
 		}
 	}
 

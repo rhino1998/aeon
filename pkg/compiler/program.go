@@ -107,6 +107,10 @@ func (p *Program) GlobalSize() air.Size {
 }
 
 func (p *Program) registerType(t types.Type) {
+	if _, ok := p.types[t.GlobalName()]; ok {
+		return
+	}
+
 	p.types[t.GlobalName()] = t
 	p.strings[air.String(t.GlobalName())] = struct{}{}
 
@@ -118,6 +122,27 @@ func (p *Program) registerType(t types.Type) {
 	if size > 1 {
 		ptrType := types.NewPointer(t)
 		p.registerType(ptrType)
+	}
+
+	switch t := types.Dereference(t).(type) {
+	case *types.Derived:
+		p.registerType(t.Underlying())
+	case *types.Pointer:
+		p.registerType(t.Pointee())
+	case *types.Array:
+		p.registerType(t.Elem())
+	case *types.Slice:
+		p.registerType(t.Elem())
+	case *types.Variadic:
+		p.registerType(t.Elem())
+	case *types.Tuple:
+		for _, elem := range t.Elems() {
+			p.registerType(elem)
+		}
+	case *types.Struct:
+		for _, field := range t.Fields() {
+			p.registerType(field.Type)
+		}
 	}
 }
 

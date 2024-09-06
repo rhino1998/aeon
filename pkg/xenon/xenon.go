@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"text/template"
 
@@ -68,14 +69,20 @@ type xenonContext struct {
 	OPSep  string
 	UOPSep string
 
-	KindNil     int
-	KindInt     int
-	KindFloat   int
-	KindBool    int
-	KindString  int
-	KindPointer int
-	KindType    int
-	KindTuple   int
+	KindNil       int
+	KindInt       int
+	KindFloat     int
+	KindBool      int
+	KindString    int
+	KindPointer   int
+	KindType      int
+	KindTuple     int
+	KindArray     int
+	KindStruct    int
+	KindSlice     int
+	KindVariadic  int
+	KindMap       int
+	KindInterface int
 }
 
 func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Function, error) {
@@ -92,9 +99,11 @@ func getFunc(prog *compiler.Program, pkgName, funcName string) (*compiler.Functi
 }
 
 func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *compiler.Program) error {
+	abcProg := abc.Compile(prog.Instructions())
+
 	var xeCtx xenonContext
-	xeCtx.PageSize = 65535
-	xeCtx.NumCodePages = (len(prog.Instructions()) + xeCtx.PageSize) / xeCtx.PageSize
+	xeCtx.PageSize = 1000
+	xeCtx.NumCodePages = (abcProg.Bytecode.Length() + xeCtx.PageSize) / xeCtx.PageSize
 	xeCtx.NumMemPages = 1
 	xeCtx.NumStrPages = 1
 	xeCtx.NumRegisters = prog.Registers()
@@ -112,6 +121,12 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	xeCtx.KindPointer = int(kinds.Pointer)
 	xeCtx.KindType = int(kinds.Type)
 	xeCtx.KindTuple = int(kinds.Tuple)
+	xeCtx.KindArray = int(kinds.Array)
+	xeCtx.KindStruct = int(kinds.Struct)
+	xeCtx.KindSlice = int(kinds.Slice)
+	xeCtx.KindVariadic = int(kinds.Variadic)
+	xeCtx.KindMap = int(kinds.Map)
+	xeCtx.KindInterface = int(kinds.Interface)
 
 	strMap := make(map[air.String]int)
 	for i, str := range prog.Strings() {
@@ -137,9 +152,9 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		allFuncs[fun.QualifiedName()] = int(fun.InfoAddr())
 	}
 
-	typeMap := make(map[types.Name]int)
+	typeIDFromName := make(map[types.Name]int)
 	for i, typ := range prog.Types() {
-		typeMap[typ.GlobalName()] = i
+		typeIDFromName[typ.GlobalName()] = i
 		xeCtx.VTable[i] = VTableTypeEntry{
 			Name: string(typ.GlobalName()),
 			Data: make(map[string]int),
@@ -176,8 +191,8 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		}
 	}
 
-	for i, typ := range prog.Types() {
-		entry := xeCtx.VTable[i]
+	for typeID, typ := range prog.Types() {
+		entry := xeCtx.VTable[typeID]
 		typSize, err := air.TypeSize(typ)
 		if err != nil {
 			return fmt.Errorf("failed to get type size: %w", err)
@@ -191,20 +206,36 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		}
 
 		if typSize > 1 {
-			entry.Data["#pointer"] = typeMap[types.NewPointer(typ).GlobalName()]
+			entry.Data["#pointer"] = typeIDFromName[types.NewPointer(typ).GlobalName()]
 		}
 
-		switch typ := typ.(type) {
-		case *types.Derived:
-			entry.Data["#underlying"] = typeMap[typ.Underlying().GlobalName()]
+		switch typ := types.Resolve(typ).(type) {
 		case *types.Pointer:
-			entry.Data["#pointee"] = typeMap[typ.Pointee().GlobalName()]
+			xeCtx.VTable[typeID].Data["#pointee"] = int(typeIDFromName[typ.Pointee().GlobalName()])
+		case *types.Array:
+			xeCtx.VTable[typeID].Data["#length"] = int(typ.Length())
+			xeCtx.VTable[typeID].Data["#elem"] = int(typeIDFromName[typ.Elem().GlobalName()])
+		case *types.Tuple:
+			xeCtx.VTable[typeID].Data["#elems"] = int(len(typ.Elems()))
+			for i, elem := range typ.Elems() {
+				xeCtx.VTable[typeID].Data[fmt.Sprintf("#elem.%d", i)] = int(typeIDFromName[elem.GlobalName()])
+			}
+		case *types.Slice:
+			xeCtx.VTable[typeID].Data["#elem"] = int(typeIDFromName[typ.Elem().GlobalName()])
+		case *types.Variadic:
+			xeCtx.VTable[typeID].Data["#elem"] = int(typeIDFromName[typ.Elem().GlobalName()])
+		case *types.Struct:
+			xeCtx.VTable[typeID].Data["#fields"] = int(len(typ.Fields()))
+			for i, field := range typ.Fields() {
+				xeCtx.VTable[typeID].Data[fmt.Sprintf("#field.%d", i)] = int(typeIDFromName[field.Type.GlobalName()])
+				xeCtx.VTable[typeID].Data[fmt.Sprintf("#field.%d.name", i)] = int(strMap[String(field.Name)])
+			}
 		}
 	}
 
 	xeCtx.GlobalLayout = make([]int, 0, xeCtx.GlobalSize)
 	for _, typ := range prog.GlobalLayout() {
-		typeID, ok := typeMap[typ.GlobalName()]
+		typeID, ok := typeIDFromName[typ.GlobalName()]
 		if !ok {
 			return fmt.Errorf("type %s not found", typ.GlobalName())
 		}
@@ -223,14 +254,19 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 
 		flatLayout := make([]int, 0, len(layout))
 		for _, slot := range layout {
-			typeID, ok := typeMap[slot.Type.GlobalName()]
+			typeID, ok := typeIDFromName[slot.Type.GlobalName()]
 			if !ok {
 				return fmt.Errorf("type %s not found", slot.Type.GlobalName())
 			}
 			flatLayout = append(flatLayout, typeID)
 		}
 
-		xeCtx.StackLayouts[int(f.Addr())] = flatLayout
+		addr, ok := abcProg.Labels[air.Label(f.QualifiedName())]
+		if !ok {
+			return fmt.Errorf("function label %s not found", f.QualifiedName())
+		}
+
+		xeCtx.StackLayouts[int(addr)] = flatLayout
 	}
 
 	xeCtx.Code = make(map[PageAddr]string)
@@ -277,13 +313,14 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 		})
 	}
 
-	bytecode := abc.Compile(prog.Instructions())
+	log.Println(abcProg.Labels)
 
 	var codeAddr int
-	for _, ins := range bytecode {
+	for i, ins := range abcProg.Bytecode {
 		page := codeAddr / xeCtx.PageSize
 		pageAddr := codeAddr % xeCtx.PageSize
 		logger.Debug("debug: %d:%d:%s", slog.Int("page", page), slog.Int("pageAddr", pageAddr), slog.Any("instruction", ins))
+		log.Printf("%d: %s", codeAddr, prog.Instructions()[i])
 		for _, uop := range ins {
 			page := codeAddr / xeCtx.PageSize
 			pageAddr := codeAddr % xeCtx.PageSize
