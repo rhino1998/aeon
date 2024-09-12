@@ -11,13 +11,38 @@ There are two formats for placing comments
 
 ### Functions
 
-
 #### Function Signatures
 Functions are declared with the following syntax
 - `func name() { /* body */ }` -- Declares a function called "name" with no arguments and no return value
 - `func name(a int, b int) { /* body */ }` -- Declares a function that takes two arguments `a` and `b` of type `int`
 - `func name(a, b int) { /* body */ }` -- It is possible to omit types of some parameters in function signatures. The parameter takes the type of the following parameter
 - `func name() int {/* body */}` -- Declares a function that returns an int
+
+#### Extern Functions
+Extern functions allow calling externally defined functions.
+Primitives and strings are well-supported but complex types are also allowed.
+Complex types will be flattened into function arguments.
+Currently return values of `size > 1` are not allowed.
+They are declared with the following syntax
+- `extern func name()` -- Declares the nullary extern function `name` which corresponds to a XenonCode
+function `@name`.
+- `extern func name() int` -- Declares the extern function `name` which corresponds to a XenonCode
+function with signature `function @name():number`.
+- `extern func name() string` -- Declares the extern function `name` which corresponds to a XenonCode
+function with signature `function @name():text`.
+- `extern func name(int, string) string` -- Declares the extern function `name` which corresponds to a XenonCode
+function with signature `function @name($a0:number, $a1:text):text`.
+- `extern func name(int, string) string` -- Declares the extern function `name` which corresponds to a XenonCode
+function with signature `function @name($a0:number, $a1:text):text`.
+- `extern func name([2]int)` -- Declares the extern function `name` which corresponds to a XenonCode
+function with signature `function @name($a0:number, $a1:number)`.
+- `extern func name([]int)` -- Declares the extern function `name` which corresponds to a XenonCode
+function with signature `function @name($a0:number, $a1:number, $a2:number)`.
+- `extern func name(*string)` -- Declares the extern function `name` which corresponds to a XenonCode
+function with signature `function @name($a0:number)`.
+- `extern func name((int, int, string))` -- Declares the extern function `name` which corresponds to a XenonCode
+function with signature `function @name($a0:number, $a1:number, $a2:text)`.
+
 
 #### Directives
 Function directives control how functions are handled by the runtime
@@ -61,6 +86,22 @@ Aeon is a statically typed language with the following types:
 * `bool` - A true or false value
     * `true` - true
     * `false` - false
+
+#### Zero Values
+When a variable is unset it contains a default value. Some basic zero values are described below
+* `int` -- `0`
+* `float` -- `0`
+* `bool` -- `false`
+* `string` -- `""`
+* Tuples -- each element is zero-valued
+* Structs -- each field is zero-valued
+* Function values -- a non-callable specific zero-value
+* Pointers -- a pointer that is numerically `0`
+* Arrays -- each element is zero-valued
+* Slice -- a slice with capacity 0 and length 0
+
+`nil` may be used as an alias for the zero value of any type. 
+This is particularly useful for types without easily writable zero-values.
 
 #### Pointers
 Pointer values are an address of a memory location which containes the "pointee" type.
@@ -123,4 +164,109 @@ func example() {
     g := f
     g()
 }
+```
+
+#### Interfaces
+Interfaces are defined as sets of methods.
+Any type that implements the set of methods implicitly implements the interface.
+
+In the following example `X` implements `I` but `Y` does not implement `I`.
+```
+type I interface {
+    F() int
+}
+
+type X int
+
+func (x X) F() int {
+    return 0
+}
+
+type Y int
+```
+
+The empty interface `interface{}` is implemented by every type.
+For convenience the empty interface may also be referred to as `any`
+
+When values are boxed into interfaces, only the set of methods in the interface is usable.
+Interfaces may be compared against other interface values and will only return true if both the type of the
+underlying value of each interface value is equal and if the values themselves are equal under the `==`
+operator.
+
+#### Errors
+Errors are values in Aeon. They are handled by the `error` type which is defined as follows:
+```
+type error interface {
+    Error() string
+}
+```
+
+The convention for error returns is for a function to return an error as the last element of a tuple return
+value. For example
+```
+func F() (int, error) {
+    return 0, nil
+}
+
+func H() (int, bool, error) {
+    return 0, false, nil
+}
+```
+
+A common pattern is to check for an error value and return early after each function that can fail.
+```
+x, err := F()
+if err != nil {
+    return err
+}
+```
+
+#### Error Check Expressions
+For convenience there is a special operator `?` which performs an error check and early return. 
+The following two snippets are equivalent.
+```
+func H() error {
+    x, err := F()
+    if err != nil {
+        return err
+    }
+
+    return nil
+}
+```
+
+```
+func H() error {
+    x := F()?
+    return nil
+}
+```
+
+In general if a function returns `(a,b,c,error)` an `?` expression has a value of `(a,b,c)` and can
+potentially return the return value of the containing function. `?` is only valid inside of functions that
+have `error` as a return type.
+
+The `?` operator is especially useful for more chaining methods.
+```
+    x := v.Do()?.The()?.Thing()?
+```
+
+#### Error Handler Expressions
+Sometimes it is useful to alter an error value before the function returns or even abort returning.
+
+The `->` operator allows defining a function that is run before returning that can modify or cancel an error
+return from a `?` expression.
+```
+    x := v.Do()?.The()?.Thing()? -> handler
+```
+
+In the above, `handler` must have type `func(error) error`. If `handler` returns `nil` then the return will be
+aborted. This is useful for just logging a non-critical error or recovering from an `error`.
+
+In the case of multiple error handler expressions in the same statement, all handlers will be chained together
+starting with the most deeply nested. In the following statement, `v.Do()?` is wrapped by both `handler1` and
+`handler2` while the rest of the `?` expressions are only wrapped with `handler2`.
+
+```
+    x := (v.Do()? -> handler1).The()?.Thing()? -> handler2
 ```
