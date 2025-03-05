@@ -80,14 +80,16 @@ function @aeon_mem_load($addr:number):number
 function @aeon_mem_store($addr:number, $v:number):text
 	if $addr < {{$PageSize}}
 		$aeon_mem_page_0.$addr = $v
+		return
 
 	var $pageAddr = $addr % $PAGE_SIZE
 	{{range $page := loop 1 .NumMemPages}}
 	if ($addr < {{mul (add $page 1) $PageSize}})
 		$aeon_mem_page_{{$page}}.$pageAddr = $v
+		return
 	{{end}}
 
-array $aeon_memmove_tmp:number
+array $aeon_memmove_tmp:number ; TODO: fix large memmoves
 function @aeon_memmove($dst:number, $src:number, $size:number)
 	$aeon_memmove_tmp.fill($size, 0)
 	repeat $size ($i)
@@ -134,7 +136,7 @@ function @aeon_str_store($addr:number, $v:text):text
 	{{end}}
 
 function @aeon_str_init()
-	{{range $page := loop 0 .NumMemPages}}$aeon_str_page_{{$page}}.fill($PAGE_SIZE, ""){{"\n\t"}}{{end}}
+	{{range $page := loop 0 .NumStrPages}}$aeon_str_page_{{$page}}.fill($PAGE_SIZE, ""){{"\n\t"}}{{end}}
 	{{range $i, $str := .Strings }}@aeon_str_store({{$i}}, "{{$str}}"){{"\n\t"}}{{end}}
 	$aeon_str_heap_start = {{len .Strings}}
 	$aeon_str_heap_index = {{len .Strings}}
@@ -208,15 +210,15 @@ function @aeon_heap_init()
 
 function @aeon_heap_alloc($size:number):number
 	var $addr = $aeon_heap_index
+
+	{{if .Debug}}@debug(text("heap alloc {} -> {}", $size, $addr)){{end}}
+	if $aeon_heap_index + $size > $aeon_heap_end
+		@__builtin_panic("out of memory")
+
+
 	@aeon_memzero($addr, $size)
 	$aeon_heap_index += $size
 	$aeon_heap_allocs.append($aeon_heap_index)
-
-
-	if $aeon_heap_index > $aeon_heap_end
-		@__builtin_panic("out of memory")
-
-	{{if .Debug}}@debug(text("heap alloc {} -> {}", $size, $addr)){{end}}
 
 	; TODO: bounds checking
 	return $addr
@@ -230,7 +232,6 @@ array $aeon_op_arg_stack:number
 var $aeon_numbers = "0123456789"
 
 function @aeon_load($addr:number, $length:number):number
-	print(text("{} {}", $addr, $length)
 	var $arg1 = 0
 	var $arg2 = 0
 
@@ -834,12 +835,12 @@ function @aeon_gc_compact()
 	$aeon_gc_heap_alloc_addrs.clear()
 	$aeon_gc_heap_alloc_sizes.clear()
 
-function @aeon_gc($size:number)
-	if $aeon_str_heap_index + 1 < $aeon_str_heap_end && $aeon_heap_index + $size < $aeon_heap_end
+function @aeon_gc($size:number, $str:number)
+	if $aeon_str_heap_index + $str < $aeon_str_heap_end && $aeon_heap_index + $size < $aeon_heap_end
 		; skip GC if we're not using much memory
 		return
 
-	print("GC")
+	@debug("GC")
 	$aeon_gc_str_heap_index = $aeon_str_heap_index
 	$aeon_gc_heap_index = $aeon_heap_index
 
@@ -924,7 +925,7 @@ function @aeon_run($funcInfo:number):number
 			$op = @aeon_code($aeon_reg.0+3+$dstLen)
 
 			if $op == 4 && $kind == {{.KindString}}; string add
-				@aeon_gc(0)
+				@aeon_gc(0, 1)
 
 			$leftLen = @aeon_code($aeon_reg.0+4+$dstLen)
 			$left = @aeon_load($aeon_reg.0+5+$dstLen, $leftLen)
@@ -1015,17 +1016,50 @@ function @aeon_run($funcInfo:number):number
 					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_ne_string($left, $right))
 				else
 					@__builtin_panic("bad != operand")
-			elseif $op == 20; >=
+			elseif $op == 17; >
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left > $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left > $right)
+				elseif $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left && !$right)
+				elseif $kind == {{.KindString}}
+					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_ge_string($left, $right))
+				else
+					@__builtin_panic("bad > operand")
+			elseif $op == 18; >=
 				if $kind == {{.KindInt}}
 					@aeon_store($aeon_reg.0+2, $dstLen, $left >= $right)
 				elseif $kind == {{.KindFloat}}
 					@aeon_store($aeon_reg.0+2, $dstLen, $left >= $right)
 				elseif $kind == {{.KindBool}}
-					@aeon_store($aeon_reg.0+2, $dstLen, $left != $right)
+					@aeon_store($aeon_reg.0+2, $dstLen, $left)
 				elseif $kind == {{.KindString}}
 					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_ge_string($left, $right))
 				else
-					@__builtin_panic("bad != operand")
+					@__builtin_panic("bad >= operand")
+			elseif $op == 19; <
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left < $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left < $right)
+				elseif $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $right && !$left)
+				elseif $kind == {{.KindString}}
+					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_lt_string($left, $right))
+				else
+					@__builtin_panic("bad < operand")
+			elseif $op == 20; <=
+				if $kind == {{.KindInt}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left <= $right)
+				elseif $kind == {{.KindFloat}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $left <= $right)
+				elseif $kind == {{.KindBool}}
+					@aeon_store($aeon_reg.0+2, $dstLen, $right)
+				elseif $kind == {{.KindString}}
+					@aeon_store($aeon_reg.0+2, $dstLen, @aeon_le_string($left, $right))
+				else
+					@__builtin_panic("bad <= operand")
 			elseif $op == 21; <<
 				if $kind == {{.KindInt}}
 					@aeon_store($aeon_reg.0+2, $dstLen, $left * 2)
@@ -1124,8 +1158,6 @@ function @aeon_run($funcInfo:number):number
 			$aeon_stack_trace.pop()
 			$aeon_stack_trace.pop()
 
-			; TODO: stack tracing
-			;
 			if $aeon_reg.2 == 0
 				return
 		elseif $code == 7; alc <dst> <size>
@@ -1134,7 +1166,7 @@ function @aeon_run($funcInfo:number):number
 			$sizeLen = @aeon_code($aeon_reg.0+2+$dstLen)
 			$size = @aeon_load($aeon_reg.0+3+$dstLen, $sizeLen)
 
-			@aeon_gc($size)
+			@aeon_gc($size, 0)
 
 			@aeon_store($aeon_reg.0+2, $dstLen, @aeon_heap_alloc($size))
 
@@ -1160,7 +1192,7 @@ function @aeon_run($funcInfo:number):number
 					$sliceCap = 1
 				else
 					$sliceCap *= 2
-				@aeon_gc($sliceCap)
+				@aeon_gc($sliceCap * $size, 0)
 
 			var $sliceData = @aeon_mem_load($src)
 

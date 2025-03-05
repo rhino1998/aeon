@@ -14,9 +14,10 @@ import (
 	"testing"
 
 	"github.com/neilotoole/slogt"
+	"github.com/stretchr/testify/require"
+
 	"github.com/rhino1998/aeon/pkg/compiler"
 	"github.com/rhino1998/aeon/pkg/xenon"
-	"github.com/stretchr/testify/require"
 )
 
 func runXenoncode(ctx context.Context, t *testing.T, dir string, w io.Writer) error {
@@ -49,7 +50,7 @@ func runXenoncode(ctx context.Context, t *testing.T, dir string, w io.Writer) er
 }
 
 func TestXenonCode(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Parallel()
 
 	dir := os.DirFS("./testdata/")

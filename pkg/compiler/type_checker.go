@@ -37,7 +37,7 @@ func (c *Compiler) resolvePackageTypes(pkg *Package) (err error) {
 	for _, typ := range pkg.DerivedTypes() {
 		newTyp, err := c.resolveTypes(typ.Position, typ.Underlying())
 		if err != nil {
-			errs.Add(typ.WrapError(fmt.Errorf("type %s is invalid: %w", err)))
+			errs.Add(typ.WrapError(fmt.Errorf("type %s is invalid: %w", typ, err)))
 		}
 
 		typ.SetUnderlying(newTyp)

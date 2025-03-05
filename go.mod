@@ -1,6 +1,6 @@
 module github.com/rhino1998/aeon
 
-go 1.23.0
+go 1.24.1
 
 require (
 	github.com/neilotoole/slogt v1.1.0

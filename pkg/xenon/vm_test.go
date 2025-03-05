@@ -2,7 +2,6 @@ package xenon_test
 
 import (
 	"bytes"
-	"context"
 	"io/fs"
 	"os"
 	"strings"
@@ -18,7 +17,7 @@ const MemPages = 10
 const Registers = 16
 
 func TestRuntime(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	t.Parallel()
 
 	dir := os.DirFS("./testdata/")

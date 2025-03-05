@@ -1187,7 +1187,7 @@ func (c *Compiler) compileBCExpression(ctx context.Context, prog *Program, expr 
 					argLocs = append(argLocs, varLoc)
 
 					for _, arg := range expr.Args[len(ftype.Parameters)-1:] {
-						argTmp := scope.allocTemp(arg.Type())
+						argTmp := scope.allocTemp(variadicParam.Elem())
 						argBC, argLoc, err := c.compileBCExpression(ctx, prog, arg, callScope, argTmp)
 						if err != nil {
 							return nil, nil, err

@@ -104,7 +104,7 @@ func EmitXenonCode(ctx context.Context, logger *slog.Logger, w io.Writer, prog *
 	var xeCtx xenonContext
 	xeCtx.PageSize = 1000
 	xeCtx.NumCodePages = (abcProg.Bytecode.Length() + xeCtx.PageSize) / xeCtx.PageSize
-	xeCtx.NumMemPages = 1
+	xeCtx.NumMemPages = 30
 	xeCtx.NumStrPages = 1
 	xeCtx.NumRegisters = prog.Registers()
 	xeCtx.MaxLoadDepth = 5

@@ -432,7 +432,7 @@ func (vs *ValueScope) newConstant(name string, typ types.Type, op *air.Operand) 
 }
 
 func (vs *ValueScope) newGlobal(v *Variable) *air.Value {
-	if vs.parent != nil && vs.parent.pkg != nil {
+	if vs.parent != nil {
 		return vs.parent.newGlobal(v)
 	}
 

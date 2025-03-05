@@ -135,6 +135,7 @@ func (p *Program) registerType(t types.Type) {
 		p.registerType(t.Elem())
 	case *types.Variadic:
 		p.registerType(t.Elem())
+		p.registerType(t.AsSlice())
 	case *types.Tuple:
 		for _, elem := range t.Elems() {
 			p.registerType(elem)
